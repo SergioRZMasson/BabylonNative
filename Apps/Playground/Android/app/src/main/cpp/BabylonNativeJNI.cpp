@@ -133,13 +133,7 @@ extern "C"
             });
 
             g_scriptLoader = std::make_unique<Babylon::ScriptLoader>(*g_runtime);
-            g_scriptLoader->Eval("document = {}", "");
-            g_scriptLoader->LoadScript("app:///Scripts/ammo.js");
-            g_scriptLoader->LoadScript("app:///Scripts/recast.js");
-            g_scriptLoader->LoadScript("app:///Scripts/babylon.max.js");
-            g_scriptLoader->LoadScript("app:///Scripts/babylonjs.loaders.js");
-            g_scriptLoader->LoadScript("app:///Scripts/babylonjs.materials.js");
-            g_scriptLoader->LoadScript("app:///Scripts/babylon.gui.js");
+            g_scriptLoader->LoadScript("app:///bundle.js");
         }
     }
 

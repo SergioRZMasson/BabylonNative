@@ -154,30 +154,7 @@ namespace
         });
 
         Babylon::ScriptLoader loader{*runtime};
-        loader.Eval("document = {}", "");
-        loader.LoadScript("app:///Scripts/ammo.js");
-        // Commenting out recast.js for now because v8jsi is incompatible with asm.js.
-        // loader.LoadScript("app:///Scripts/recast.js");
-        loader.LoadScript("app:///Scripts/babylon.max.js");
-        loader.LoadScript("app:///Scripts/babylonjs.loaders.js");
-        loader.LoadScript("app:///Scripts/babylonjs.materials.js");
-        loader.LoadScript("app:///Scripts/babylon.gui.js");
-        loader.LoadScript("app:///Scripts/meshwriter.min.js");
-
-        std::vector<std::string> scripts = GetCommandLineArguments();
-        if (scripts.empty())
-        {
-            loader.LoadScript("app:///Scripts/experience.js");
-        }
-        else
-        {
-            for (const auto& script : scripts)
-            {
-                loader.LoadScript(GetUrlFromPath(script));
-            }
-
-            loader.LoadScript("app:///Scripts/playground_runner.js");
-        }
+        loader.LoadScript("app:///bundle.js");
     }
 
     void UpdateWindowSize(size_t width, size_t height)
