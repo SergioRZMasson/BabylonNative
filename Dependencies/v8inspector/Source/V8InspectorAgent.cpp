@@ -569,9 +569,8 @@ namespace Babylon
                     tag = utils::StringViewToUtf8(message);
                 }
 
-                if (tag == TAG_CONNECT)
+                if (tag == TAG_CONNECT && state_ == State::kAccepting)
                 {
-                    CHECK_EQ(State::kAccepting, state_);
                     session_id_ = pair.first;
                     state_ = State::kConnected;
                     inspector_->connectFrontend();

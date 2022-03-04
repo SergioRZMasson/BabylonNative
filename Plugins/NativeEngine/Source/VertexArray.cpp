@@ -27,8 +27,6 @@ namespace Babylon
         m_disposed = true;
     }
 
- 
-
     bool VertexArray::RecordIndexBuffer(IndexBuffer* indexBuffer)
     {
         if (!indexBuffer->CreateHandle())
@@ -47,10 +45,22 @@ namespace Babylon
         auto attrib{static_cast<bgfx::Attrib::Enum>(location)};
         if (divisor == 1)
         {
+            const bgfx::Caps* caps = bgfx::getCaps();
+
+            // Check if instancing is supported.
+            const bool instancingSupported = 0 != (BGFX_CAPS_INSTANCING & caps->supported);
+            if (!instancingSupported)
+            {
+                return false;
+            }
             // bgfx allows instancing on 5 vec4 attributes
             if (m_vertexBufferInstanceRecords.size() < 5)
             {
                 m_vertexBufferInstanceRecords[attrib] = {vertexBuffer, byteOffset, byteStride, static_cast<uint16_t>(sizeof(float) * numElements)};
+            }
+            else
+            {
+                return false;
             }
         }
         else
@@ -114,39 +124,7 @@ namespace Babylon
         if (!m_vertexBufferInstanceRecords.empty() && instancingSupported)
         {
             bgfx::InstanceDataBuffer instanceDataBuffer{};
-
-            // instance stride
-            uint16_t instanceStride{};
-            uint32_t instanceCount{};
-            for (auto& pair : m_vertexBufferInstanceRecords)
-            {
-                const auto vertexBuffer{pair.second.Buffer};
-                instanceCount = static_cast<uint32_t>(vertexBuffer->GetBytes().size()) / pair.second.Stride;
-                instanceStride += static_cast<uint16_t>(pair.second.ElementSize);
-            }
-
-            // create instance datas. Instance Data Buffer is transient.
-            bgfx::allocInstanceDataBuffer(&instanceDataBuffer, instanceCount, instanceStride);
-
-            // copy instance datas
-            uint8_t* data{instanceDataBuffer.data};
-            uint32_t offset{};
-
-            // reverse because of bgfx also reverting : https://github.com/bkaradzic/bgfx/blob/4581f14cd481bad1e0d6292f0dd0a6e298c2ee18/src/renderer_d3d11.cpp#L2701
-#if D3D11 || D3D12 
-            for (auto iter = m_vertexBufferInstanceRecords.rbegin(); iter != m_vertexBufferInstanceRecords.rend(); ++iter)
-#else
-            for (auto iter = m_vertexBufferInstanceRecords.cbegin(); iter != m_vertexBufferInstanceRecords.cend(); ++iter)
-#endif
-            {
-                const auto& element{iter->second};
-                const auto* source{element.Buffer->GetBytes().data()};
-                for (uint32_t instance = 0; instance < instanceCount; instance++)
-                {
-                    memcpy(data + instance * instanceStride + offset, source + instance * element.Stride + element.Offset, element.ElementSize);
-                }
-                offset += iter->second.ElementSize;
-            }
+            VertexBuffer::BuildInstanceDataBuffer(instanceDataBuffer, m_vertexBufferInstanceRecords);
             encoder->setInstanceDataBuffer(&instanceDataBuffer);
         }
 

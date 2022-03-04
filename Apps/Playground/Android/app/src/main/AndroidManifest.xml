@@ -19,6 +19,7 @@
   <application
       android:allowBackup="false"
       android:fullBackupContent="false"
+      android:usesCleartextTraffic="true"
       android:icon="@mipmap/ic_launcher"
       android:label="@string/playground_activity">
     <activity android:name="PlaygroundActivity"

@@ -42,7 +42,7 @@ namespace Babylon
         };
 
         std::map<bgfx::Attrib::Enum, VertexBufferRecord> m_vertexBufferRecords{};
-        std::map<bgfx::Attrib::Enum, InstanceVertexBufferRecord> m_vertexBufferInstanceRecords{};
+        std::map<bgfx::Attrib::Enum, VertexBuffer::InstanceVertexBufferRecord> m_vertexBufferInstanceRecords{};
 
         bool m_disposed{};
     };
