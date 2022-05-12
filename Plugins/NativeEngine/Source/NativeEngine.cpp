@@ -450,6 +450,7 @@ namespace Babylon
                 StaticValue("COMMAND_DRAW", Napi::FunctionPointer::Create(env, &NativeEngine::Draw)),
                 StaticValue("COMMAND_CLEAR", Napi::FunctionPointer::Create(env, &NativeEngine::Clear)),
                 StaticValue("COMMAND_SETSTENCIL", Napi::FunctionPointer::Create(env, &NativeEngine::SetStencil)),
+                StaticValue("COMMAND_FLUSH", Napi::FunctionPointer::Create(env, &NativeEngine::FlushCommand)),
 
                 InstanceMethod("dispose", &NativeEngine::Dispose),
 
@@ -1416,6 +1417,8 @@ namespace Babylon
         m_boundFrameBufferNeedsRebinding.Set(*encoder, false);
     }
 
+
+
     void NativeEngine::DrawIndexed(NativeDataStream::Reader& data)
     {
         bgfx::Encoder* encoder{GetUpdateToken().GetEncoder()};
@@ -1643,6 +1646,12 @@ namespace Babylon
                 callbackPtr->Value().Call({typedArray});
             });
         });
+    }
+
+    void NativeEngine::FlushCommand(NativeDataStream::Reader& data)
+    {
+        bgfx::Encoder* encoder = GetUpdateToken().GetEncoder();
+        bgfx::frame();
     }
 
     void NativeEngine::SetStencil(NativeDataStream::Reader& data)

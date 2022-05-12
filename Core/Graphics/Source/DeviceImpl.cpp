@@ -353,6 +353,7 @@ namespace Babylon::Graphics
 
         // Process read texture requests.
         assert(m_readTextureRequests.empty() || m_readTextureRequests.front().first >= frameNumber);
+        
         while (!m_readTextureRequests.empty() && m_readTextureRequests.front().first == frameNumber)
         {
             m_readTextureRequests.front().second.complete();
