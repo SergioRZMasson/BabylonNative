@@ -16,10 +16,143 @@ var meshDetection = false;
 var text = false;
 var hololens = false;
 var cameraTexture = false;
-var imageTracking = false;
 
 function CreateBoxAsync(scene) {
     BABYLON.Mesh.CreateBox("box1", 0.2, scene);
+
+    scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+
+    return Promise.resolve();
+}
+
+function CreateCUBEMapTest(scene) {
+    scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+
+    // This creates and positions a free camera (non-mesh)
+    var camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 5, -15), scene);
+
+    // This targets the camera to scene origin
+    camera.setTarget(new BABYLON.Vector3(0, 2, 0));
+    camera.attachControl();
+
+    // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
+    var light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
+
+    // Default intensity is 1. Let's dim the light a small amount
+    light.intensity = 0.7;
+
+    // Set up sky
+    ///////////////
+    var skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, scene);
+    const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", scene);
+    skyboxMaterial.backFaceCulling = false;
+
+    var files = [
+        "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/textures/environments/space_red/cube_tile_0001.png",
+        "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/textures/environments/space_red/cube_tile_0002.png",
+        "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/textures/environments/space_red/cube_tile_0003.png",
+        "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/textures/environments/space_red/cube_tile_0004.png",
+        "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/textures/environments/space_red/cube_tile_0005.png",
+        "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/textures/environments/space_red/cube_tile_0006.png",
+    ];
+
+    const skyboxTexture = BABYLON.CubeTexture.CreateFromImages(files, scene);
+
+    skyboxMaterial.reflectionTexture = skyboxTexture;
+    skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+    skyboxMaterial.disableLighting = true;
+    skybox.material = skyboxMaterial;
+
+    // Set up water
+    ////////////////////////////////
+    //var waterGrd = BABYLON.MeshBuilder.CreateGround("water", { width: 100, height: 100 }, scene);
+
+    //var water = new BABYLON.WaterMaterial("waterMat", scene, new BABYLON.Vector2(1024, 1024));
+    //water.bumpTexture = new BABYLON.Texture("textures/waterbump.png", scene);
+
+    //// Water properties
+    //water.windForce = -2; // any more than this and it looks real weird because of the battlemap's scale
+    //water.waveHeight = 0; // prevent water from poking through the rest of the battlemap
+    //water.windDirection = new BABYLON.Vector2(1, 1);
+    //water.waterColor = new BABYLON.Color3(0.51, 0.04, 0.04);
+    //water.waterColor2 = new BABYLON.Color3(0.47, 0.46, 0.02);
+    //water.colorBlendFactor = 0.4;
+    //water.bumpHeight = 1; // I played around with these last two until I found a combination I liked
+    //water.waveLength = 0.6;
+
+    //// Add skybox and ground to the water's reflection and refraction rendering
+    //water.addToRenderList(skybox);
+
+    //waterGrd.material = water;
+
+
+    // Set up low lying fog
+    //var particleSystem;
+    //var fogTexture = new BABYLON.Texture("https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png", scene);
+    //var fountain = BABYLON.MeshBuilder.CreateBox("fountain");
+    //fountain.visibility = 0.0;
+    ////fountain.position.z = -8;
+    //if (BABYLON.GPUParticleSystem.IsSupported) {
+    //    particleSystem = new BABYLON.GPUParticleSystem("particles", { capacity: 50000 }, scene);
+    //    particleSystem.activeParticleCount = 8000;
+    //    //particleSystem.manualEmitCount = particleSystem.activeParticleCount;
+    //    particleSystem.minEmitBox = new BABYLON.Vector3(-50, 2, -50); // Starting all from
+    //    particleSystem.maxEmitBox = new BABYLON.Vector3(50, 2, 50); // To..
+
+    //} else {
+    //    particleSystem = new BABYLON.ParticleSystem("particles", 2500, scene);
+    //    //particleSystem.manualEmitCount = particleSystem.getCapacity();
+    //    particleSystem.minEmitBox = new BABYLON.Vector3(-50, 2, -50); // Starting all from
+    //    particleSystem.maxEmitBox = new BABYLON.Vector3(50, 2, 50); // To...
+    //}
+
+    //particleSystem.particleTexture = fogTexture.clone();
+    //particleSystem.emitter = fountain;
+
+    //particleSystem.color1 = new BABYLON.Color4(0.67, 0.15, 0.15, 0.12);
+    //particleSystem.color2 = new BABYLON.Color4(0.81, 0.8, 0.09, 0.16);
+    //particleSystem.colorDead = new BABYLON.Color4(0.9, 0.9, 0.9, 0.1);
+    ////particleSystem.minSize = 3.5;
+    ////particleSystem.maxSize = 5.0;
+    //particleSystem.addSizeGradient(0, 1.5, 2.0);
+    //particleSystem.addSizeGradient(0, 5.5, 7.0);
+    ////particleSystem.minLifeTime = Number.MAX_SAFE_INTEGER;
+    //particleSystem.minLifeTime = 30;
+    //particleSystem.maxLifeTime = 60;
+    //particleSystem.emitRate = 500;
+    //particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+    //particleSystem.gravity = new BABYLON.Vector3(0, 0, 0);
+    //particleSystem.direction1 = new BABYLON.Vector3(10, 0, 15);
+    //particleSystem.limitVelocityDamping = 0.1;
+    //particleSystem.minAngularSpeed = -2;
+    //particleSystem.maxAngularSpeed = 2;
+    //particleSystem.minEmitPower = .5;
+    //particleSystem.maxEmitPower = 1;
+    //particleSystem.updateSpeed = 0.005;
+
+    //particleSystem.start();
+
+    BABYLON.SceneLoader.ImportMesh("", "https://raw.githubusercontent.com/carolhmj/quick-demos/main/assets/", "spaceship2.glb", scene, (meshes) => {
+        for (let mesh of meshes) {
+            if (mesh.material) {
+                const pbr = mesh.material;
+                pbr.reflectionTexture = skyboxTexture;
+            }
+        }
+
+        const root = meshes[0];
+        root.rotation = new BABYLON.Vector3(0, 0, 0);
+
+        BABYLON.Animation.CreateFromSnippetAsync("TZCQEI#2").then(anims => {
+            if (anims instanceof BABYLON.Animation) {
+                root.animations = [anims];
+            } else {
+                root.animations = anims;
+            }
+            scene.beginAnimation(root, 0, 100, true);
+        });
+    });
+
     return Promise.resolve();
 }
 
@@ -42,34 +175,34 @@ function CreateSpheresAsync(scene) {
 var engine = new BABYLON.NativeEngine();
 var scene = new BABYLON.Scene(engine);
 
-CreateBoxAsync(scene).then(function () {
-//CreateSpheresAsync(scene).then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF/Box.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxTextured/glTF/BoxTextured.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Suzanne/glTF/Suzanne.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Avocado/glTF/Avocado.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoomBox/glTF/BoomBox.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Sponza/glTF/Sponza.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BrainStem/glTF/BrainStem.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/FlightHelmet/glTF/FlightHelmet.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/EnvironmentTest/glTF/EnvironmentTest.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxAnimated/glTF/BoxAnimated.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/AnimatedMorphCube/glTF/AnimatedMorphCube.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/RiggedSimple/glTF/RiggedSimple.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/stevk/glTF-Asset-Generator/skins/Output/Animation_Skin/Animation_Skin_01.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/RiggedFigure/glTF/RiggedFigure.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/CesiumMan/glTF/CesiumMan.gltf").then(function () {
-//BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/ClearCoatTest/glTF/ClearCoatTest.gltf").then(function () {
+CreateCUBEMapTest(scene).then(function () {
+    //CreateSpheresAsync(scene).then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF/Box.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxTextured/glTF/BoxTextured.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Suzanne/glTF/Suzanne.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Avocado/glTF/Avocado.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoomBox/glTF/BoomBox.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Sponza/glTF/Sponza.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BrainStem/glTF/BrainStem.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/FlightHelmet/glTF/FlightHelmet.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/EnvironmentTest/glTF/EnvironmentTest.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxAnimated/glTF/BoxAnimated.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/AnimatedMorphCube/glTF/AnimatedMorphCube.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/RiggedSimple/glTF/RiggedSimple.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/stevk/glTF-Asset-Generator/skins/Output/Animation_Skin/Animation_Skin_01.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/RiggedFigure/glTF/RiggedFigure.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/CesiumMan/glTF/CesiumMan.gltf").then(function () {
+    //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/ClearCoatTest/glTF/ClearCoatTest.gltf").then(function () {
     BABYLON.Tools.Log("Loaded");
 
-    scene.createDefaultCamera(true, true, true);
-    scene.activeCamera.alpha += Math.PI;
+    //scene.createDefaultCamera(true, true, true);
+    //scene.activeCamera.alpha += Math.PI;
 
     if (ibl) {
         scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
     }
     else {
-        scene.createDefaultLight(true);
+        //scene.createDefaultLight(true);
     }
 
     if (cameraTexture) {
@@ -166,12 +299,12 @@ CreateBoxAsync(scene).then(function () {
                     const xrMeshes = xr.baseExperience.featuresManager.enableFeature(
                         BABYLON.WebXRFeatureName.MESH_DETECTION,
                         "latest",
-                        {convertCoordinateSystems: true});
+                        { convertCoordinateSystems: true });
                     console.log("Enabled mesh detection.");
                     const meshMap = new Map();
 
                     // adding meshes
-                    xrMeshes.onMeshAddedObservable.add(mesh=> {
+                    xrMeshes.onMeshAddedObservable.add(mesh => {
                         try {
                             console.log("Mesh added.");
                             // create new mesh object
@@ -190,7 +323,7 @@ CreateBoxAsync(scene).then(function () {
                     });
 
                     // updating meshes
-                    xrMeshes.onMeshUpdatedObservable.add(mesh=> {
+                    xrMeshes.onMeshUpdatedObservable.add(mesh => {
                         try {
                             console.log("Mesh updated.");
                             if (meshMap.has(mesh.id)) {
@@ -289,32 +422,6 @@ CreateBoxAsync(scene).then(function () {
                         BABYLON.WebXRFeatureName.HAND_TRACKING,
                         "latest",
                         { xrInput: xr.input });
-                }
-
-                // Test image tracking and detection.
-                // To test image tracking locally either bring up the images below on your machine by loading the URL or by printing them out.
-                // Then gain tracking on them during the AR Session by orienting your camera towards the image, tracking will be represented by a colored cube at the center of the image.
-                if (imageTracking) {
-                    const webXRTrackingMeshes = [];
-                    const webXRImageTrackingModule = xr.baseExperience.featuresManager.enableFeature(
-                        BABYLON.WebXRFeatureName.IMAGE_TRACKING,
-                        "latest",
-                        {
-                            images: [
-                                { src: "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/IridescentDishWithOlives/screenshot/screenshot_Large.jpg", estimatedRealWorldWidth: .2 },
-                                { src: "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DragonAttenuation/screenshot/screenshot_large.png", estimatedRealWorldWidth: .2 },   
-                        ]});
-
-                    webXRImageTrackingModule.onTrackedImageUpdatedObservable.add((imageObject) => {
-                        if (webXRTrackingMeshes[imageObject.id] === undefined) {
-                            webXRTrackingMeshes[imageObject.id] = BABYLON.Mesh.CreateBox("box1", 0.05, scene);
-                            const mat = new BABYLON.StandardMaterial("mat", scene);
-                            mat.diffuseColor = BABYLON.Color3.Random();
-                            webXRTrackingMeshes[imageObject.id].material = mat;
-                        }
-                        webXRTrackingMeshes[imageObject.id].setEnabled(!imageObject.emulated);
-                        imageObject.transformationMatrix.decomposeToTransformNode(webXRTrackingMeshes[imageObject.id]);
-                    });
                 }
 
                 xr.baseExperience.enterXRAsync(sessionMode, "unbounded", xr.renderTarget).then((xrSessionManager) => {

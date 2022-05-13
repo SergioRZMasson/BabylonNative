@@ -450,9 +450,9 @@ namespace Babylon
                 StaticValue("COMMAND_DRAW", Napi::FunctionPointer::Create(env, &NativeEngine::Draw)),
                 StaticValue("COMMAND_CLEAR", Napi::FunctionPointer::Create(env, &NativeEngine::Clear)),
                 StaticValue("COMMAND_SETSTENCIL", Napi::FunctionPointer::Create(env, &NativeEngine::SetStencil)),
-                StaticValue("COMMAND_FLUSH", Napi::FunctionPointer::Create(env, &NativeEngine::FlushCommand)),
 
                 InstanceMethod("dispose", &NativeEngine::Dispose),
+                InstanceMethod("flush", &NativeEngine::Flush),
 
                 InstanceMethod("requestAnimationFrame", &NativeEngine::RequestAnimationFrame),
 
@@ -498,6 +498,7 @@ namespace Babylon
 
                 // REVIEW: Should this be here if only used by ValidationTest?
                 InstanceMethod("getFrameBufferData", &NativeEngine::GetFrameBufferData),
+                InstanceMethod("readTexturePixels", &NativeEngine::ReadTexturePixels),
             });
         // clang-format on
 
@@ -1634,6 +1635,65 @@ namespace Babylon
         return Napi::Value::From(env, outputData);
     }
 
+    Napi::Value NativeEngine::ReadTexturePixels(const Napi::CallbackInfo& info)
+    {
+        auto env = info.Env();
+        const auto texture{info[0].As<Napi::Pointer<Graphics::TextureData>>().Get()};
+        const auto bufferWidth = info[1].As<Napi::Number>().Uint32Value();
+        const auto bufferHeight = info[2].As<Napi::Number>().Uint32Value();
+        const auto format = static_cast<bimg::TextureFormat::Enum>(info[3].As<Napi::Number>().Uint32Value());
+        uint32_t bytesPerPixel = 4;
+
+        switch (format)
+        {
+            case bgfx::TextureFormat::RGB8:
+                bytesPerPixel = 3;
+                break;
+
+            case bgfx::TextureFormat::RGBA8:
+                bytesPerPixel =  4;
+                break;
+
+            case bgfx::TextureFormat::RGBA32F:
+                bytesPerPixel = 16;
+                break;
+
+            case bgfx::TextureFormat::BGRA8:
+                bytesPerPixel = 4;
+                break;
+
+        }
+
+        size_t size = static_cast<size_t>(bufferWidth* bufferHeight* bytesPerPixel);
+
+        const auto faceIndex = info[4].IsNull() ? 0 : info[4].As<Napi::Number>().Uint32Value();
+        const auto level = info[5].IsNull() ? 0 : info[5].As<Napi::Number>().Uint32Value();
+
+        const auto noDataConversion = info[7].IsNull() ? 0 : info[7].As<Napi::Number>().Uint32Value();
+        const auto x = info[8].IsNull() ? 0 : info[8].As<Napi::Number>().Uint32Value();
+        const auto y = info[9].IsNull() ? 0 : info[9].As<Napi::Number>().Uint32Value();
+        
+        std::vector<uint8_t> data;
+        data.resize(size);
+        
+        auto deferred{Napi::Promise::Deferred::New(env)};
+        auto promise{deferred.Promise()};
+
+        m_graphicsContext.ReadTextureAsync(texture->Handle, data).then(arcana::inline_scheduler, arcana::cancellation::none(), [deferred, data, this](const auto&) 
+        {
+            m_runtime.Dispatch([deferred, data](Napi::Env env)
+            {
+                auto arrayBuffer = Napi::ArrayBuffer::New(env, const_cast<uint8_t*>(data.data()), data.size());
+                auto unit8Array = Napi::Uint8Array::New(env, data.size(), arrayBuffer, 0);
+                deferred.Resolve(unit8Array);
+            });
+        });
+
+        return promise;
+    }
+
+    
+
     void NativeEngine::GetFrameBufferData(const Napi::CallbackInfo& info)
     {
         const auto callback{info[0].As<Napi::Function>()};
@@ -1648,10 +1708,9 @@ namespace Babylon
         });
     }
 
-    void NativeEngine::FlushCommand(NativeDataStream::Reader& data)
+    void NativeEngine::Flush(const Napi::CallbackInfo& /*info*/)
     {
-        bgfx::Encoder* encoder = GetUpdateToken().GetEncoder();
-        bgfx::frame();
+        // Doing nothing right now since there is no easy way to flush bgfx command buffer.
     }
 
     void NativeEngine::SetStencil(NativeDataStream::Reader& data)

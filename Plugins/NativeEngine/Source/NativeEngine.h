@@ -177,9 +177,11 @@ namespace Babylon
         void SetHardwareScalingLevel(const Napi::CallbackInfo& info);
         Napi::Value CreateImageBitmap(const Napi::CallbackInfo& info);
         Napi::Value ResizeImageBitmap(const Napi::CallbackInfo& info);
+        Napi::Value ReadTexturePixels(const Napi::CallbackInfo& info);
+        
         void GetFrameBufferData(const Napi::CallbackInfo& info);
         void SetStencil(NativeDataStream::Reader& data);
-        void FlushCommand(NativeDataStream::Reader& data);
+        void Flush(const Napi::CallbackInfo& info);
         void SetCommandDataStream(const Napi::CallbackInfo& info);
         void SubmitCommands(const Napi::CallbackInfo& info);
         void DrawInternal(bgfx::Encoder* encoder, uint32_t fillMode);
