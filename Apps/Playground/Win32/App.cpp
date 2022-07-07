@@ -19,6 +19,7 @@
 #include <Babylon/Plugins/NativeXr.h>
 #include <Babylon/Plugins/NativeCamera.h>
 #include <Babylon/Plugins/NativeInput.h>
+#include <Babylon/Plugins/USDImporter.h>
 #include <Babylon/Polyfills/Console.h>
 #include <Babylon/Polyfills/Window.h>
 #include <Babylon/Polyfills/XMLHttpRequest.h>
@@ -145,6 +146,9 @@ namespace
 
             // Initialize NativeXr plugin.
             Babylon::Plugins::NativeXr::Initialize(env);
+
+            // Initialize USD Importer
+            Babylon::Plugins::USDImporter::Initialize(env);
 
             nativeInput = &Babylon::Plugins::NativeInput::CreateForJavaScript(env);
 

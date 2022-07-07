@@ -23,6 +23,41 @@ function CreateBoxAsync(scene) {
     return Promise.resolve();
 }
 
+function buildUI(scene)
+{
+    return BABYLON.Tools.LoadFileAsync("https://raw.githubusercontent.com/CedricGuillemet/dump/master/droidsans.ttf", true).then(
+        (data) =>
+        {
+            _native.Canvas.loadTTFAsync("droidsans", data);
+            //var groundWidth = 20;
+            //var groundHeight = 10;
+
+            //var ground = BABYLON.MeshBuilder.CreateGround("ground1", { width: groundWidth, height: groundHeight, subdivisions: 25 }, scene);
+            ////Create dynamic texture
+            //var textureResolution = 512;
+            //var textureGround = new BABYLON.DynamicTexture("dynamic texture", { width: 512, height: 256 }, scene);
+            //var textureContext = textureGround.getContext();
+
+            //var materialGround = new BABYLON.StandardMaterial("Mat", scene);
+            //materialGround.diffuseTexture = textureGround;
+            //ground.material = materialGround;
+
+            ////Add text to dynamic texture
+            //var font = ;
+            //textureGround.drawText("Grass", 75, 135, font, "green", "black", true, true);
+
+            // GUI
+            var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI", scene);
+            var textblock = new BABYLON.GUI.TextBlock();
+            textblock.text = "Click me!";
+            textblock.fontSize = 120;
+            textblock.top = -100;
+            textblock.color = "white";
+            textblock.fontFamily = "220px droidsans";
+            advancedTexture.addControl(textblock);
+        });
+}
+
 function CreateSpheresAsync(scene) {
     var size = 12;
     for (var i = 0; i < size; i++) {
@@ -42,7 +77,7 @@ function CreateSpheresAsync(scene) {
 var engine = new BABYLON.NativeEngine();
 var scene = new BABYLON.Scene(engine);
 
-CreateBoxAsync(scene).then(function () {
+buildUI(scene).then(function () {
 //CreateSpheresAsync(scene).then(function () {
 //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF/Box.gltf").then(function () {
 //BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxTextured/glTF/BoxTextured.gltf").then(function () {
