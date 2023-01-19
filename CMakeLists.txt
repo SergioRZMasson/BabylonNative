@@ -33,6 +33,10 @@ option(BABYLON_NATIVE_POLYFILL_CONSOLE "Include Babylon Native Polyfill Console.
 option(BABYLON_NATIVE_POLYFILL_WINDOW "Include Babylon Native Polyfill Window." ON)
 option(BABYLON_NATIVE_POLYFILL_XMLHTTPREQUEST "Include Babylon Native Polyfill XMLHttpRequest." ON)
 option(BABYLON_NATIVE_POLYFILL_CANVAS "Include Babylon Native Polyfill Canvas." ON)
+
+## Features
+option(BABYLON_NATIVE_STATIC_SHADER_COMPILER "Force shaders to be statically compiled at build time." ON)
+
 # --------------------------------------------------
 
 if(APPLE)
@@ -103,6 +107,7 @@ add_subdirectory(Dependencies)
 add_subdirectory(Core)
 add_subdirectory(Plugins)
 add_subdirectory(Polyfills)
+add_subdirectory(Tools)
 
 if(DEFINED EXTENSIONS_DIRS)
     foreach(extensionDir IN LISTS EXTENSIONS_DIRS)
@@ -114,6 +119,6 @@ if(BABYLON_NATIVE_BUILD_APPS)
     add_subdirectory(Apps)
 endif()
 
-if(BABYLON_NATIVE_INSTALL)
+if(BA)
     include(Install/Install.cmake)
 endif()
