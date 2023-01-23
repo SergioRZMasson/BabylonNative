@@ -6,6 +6,7 @@ set(SOURCES
             "Source/ShaderCodeNode.cpp"
             "Source/ShaderProcessor.cpp"
             "Source/WebGL2ShaderProcessor.cpp"
+
             "Include/Babylon/ShaderProcessor/IShaderProcessor.h"
             "Include/Babylon/ShaderProcessor/ProcessingOptions.h"
             "Include/Babylon/ShaderProcessor/ShaderCodeConditionNode.h"
@@ -13,7 +14,14 @@ set(SOURCES
             "Include/Babylon/ShaderProcessor/ShaderCodeInliner.h"
             "Include/Babylon/ShaderProcessor/ShaderCodeNode.h"
             "Include/Babylon/ShaderProcessor/ShaderProcessor.h"
-            "Include/Babylon/ShaderProcessor/WebGL2ShaderProcessor.h")
+            "Include/Babylon/ShaderProcessor/WebGL2ShaderProcessor.h"
+            "Include/Babylon/ShaderProcessor/Expressions/ShaderDefineExpression.h"
+            "Include/Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineAndOperator.h"
+            "Include/Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineArithmeticOperator.h"
+            "Include/Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineIsDefinedOperator.h"
+            "Include/Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineOrOperator.h"
+)
+            
 
 add_library(ShaderProcessor STATIC ${SOURCES})
 target_include_directories(ShaderProcessor PUBLIC Include)

@@ -43,14 +43,14 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
                 options.IsFragment && processor->VaryingFragmentKeywordName.has_value()
                 ? options.Processor->VaryingFragmentKeywordName.value()
                 : !options.IsFragment && processor->VaryingVertexKeywordName.has_value()
-                ? processor->VaryingVertexKeywordName
+                ? processor->VaryingVertexKeywordName.value()
                 : defaultVaryingKeywordName;
 
             if (!options.IsFragment && processor->AttributeProcessor && Line.starts_with(attributeKeyword))
             {
                 value = processor->AttributeProcessor(Line, preprocessors, options.ProcessingContext);
             }
-            else if (processor->VaryingProcessor && Line.starts_with(varyingKeyword.value()))
+            else if (processor->VaryingProcessor && Line.starts_with(varyingKeyword))
             {
                 value = processor->VaryingProcessor(Line, options.IsFragment, preprocessors, options.ProcessingContext);
             }
