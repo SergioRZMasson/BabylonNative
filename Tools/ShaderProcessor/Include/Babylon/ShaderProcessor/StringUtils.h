@@ -40,5 +40,48 @@ namespace Babylon
 
             return result;
         }
+
+        inline std::string EscapeRegExp(std::string s) 
+        { 
+            return std::regex_replace(s, std::regex{"[.*+?^${}()|[\\]\\]"}, std::string("\\\$&"));
+        }
+
+        inline int FindBackward(std::string s, int index, char c)
+        {
+            while (index >= 0 && s[index] != c)
+            {
+                index--;
+            }
+
+            return index;
+        }
+
+        bool IsIdentifierChar(std::string c)
+        {
+            char v = c[0];
+            return (
+                (v >= 48 && v <= 57) ||  // 0-9
+                (v >= 65 && v <= 90) ||  // A-Z
+                (v >= 97 && v <= 122) || // a-z
+                v == 95);                // _
+        }
+
+        int SkipWhitespaces(std::string s, int index)
+        {
+            while (index < s.size())
+            {
+                char c = s[index];
+                if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\u000a' && c != '\u00a0')
+                {
+                    break;
+                }
+                index++;
+            }
+
+            return index;
+        }
+
+        int ExtractBetweenMarkers(std::string markerOpen, std::string markerClose, std::string block, int startIndex);
+        std::string RemoveComments(std::string s);
     }
 }

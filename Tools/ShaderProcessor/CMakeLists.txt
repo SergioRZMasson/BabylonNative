@@ -1,12 +1,10 @@
 set(SOURCES 
-            "Source/ProcessingOptions.cpp"
-            "Source/ShaderCodeConditionNode.cpp"
-            "Source/ShaderCodeCursor.cpp"
             "Source/ShaderCodeInliner.cpp"
             "Source/ShaderCodeNode.cpp"
             "Source/ShaderProcessor.cpp"
             "Source/WebGL2ShaderProcessor.cpp"
             "Source/ShaderDefineExpression.cpp"
+            "Source/StringUtils.cpp"
 
             "Include/Babylon/ShaderProcessor/StringUtils.h"
             "Include/Babylon/ShaderProcessor/IShaderProcessor.h"
