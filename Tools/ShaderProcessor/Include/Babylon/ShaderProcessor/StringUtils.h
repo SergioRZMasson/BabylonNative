@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdarg.h>
 #include <regex>
+#include <format>
 
 namespace Babylon
 {
@@ -18,6 +19,15 @@ namespace Babylon
             vsprintf_s(buffer, 512, format, ap);
             va_end(ap);
             return buffer;
+        }
+
+        bool Replace(std::string& str, const std::string& from, const std::string& to)
+        {
+            size_t start_pos = str.find(from);
+            if (start_pos == std::string::npos)
+                return false;
+            str.replace(start_pos, from.length(), to);
+            return true;
         }
 
         inline std::string Trim(std::string value)

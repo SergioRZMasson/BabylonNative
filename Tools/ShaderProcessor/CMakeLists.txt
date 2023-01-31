@@ -15,6 +15,7 @@ set(SOURCES
             "Include/Babylon/ShaderProcessor/ShaderCodeNode.h"
             "Include/Babylon/ShaderProcessor/ShaderProcessor.h"
             "Include/Babylon/ShaderProcessor/WebGL2ShaderProcessor.h"
+            "Include/Babylon/ShaderProcessor/ShaderCodeTestNode.h"
             "Include/Babylon/ShaderProcessor/Expressions/ShaderDefineExpression.h"
             "Include/Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineAndOperator.h"
             "Include/Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineArithmeticOperator.h"

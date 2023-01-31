@@ -32,9 +32,9 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
         if (processor)
         {
             // This must be done before other replacements to avoid mistakenly changing something that was already changed.
-            if (processor->LineProcessor)
+            if (processor->LineProcessor.has_value())
             {
-                value = processor->LineProcessor(value, options.IsFragment, options.ProcessingContext);
+                value = processor->LineProcessor.value()(value, options.IsFragment, options.ProcessingContext);
             }
 
             auto attributeKeyword = processor->AttributeKeywordName.has_value() ? processor->AttributeKeywordName.value() : defaultAttributeKeywordName;
@@ -46,15 +46,15 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
                 ? processor->VaryingVertexKeywordName.value()
                 : defaultVaryingKeywordName;
 
-            if (!options.IsFragment && processor->AttributeProcessor && Line.starts_with(attributeKeyword))
+            if (!options.IsFragment && processor->AttributeProcessor.has_value() && Line.starts_with(attributeKeyword))
             {
-                value = processor->AttributeProcessor(Line, preprocessors, options.ProcessingContext);
+                value = processor->AttributeProcessor.value()(Line, preprocessors, options.ProcessingContext);
             }
-            else if (processor->VaryingProcessor && Line.starts_with(varyingKeyword))
+            else if (processor->VaryingProcessor.has_value() && Line.starts_with(varyingKeyword))
             {
-                value = processor->VaryingProcessor(Line, options.IsFragment, preprocessors, options.ProcessingContext);
+                value = processor->VaryingProcessor.value()(Line, options.IsFragment, preprocessors, options.ProcessingContext);
             }
-            else if (processor->UniformProcessor && processor->UniformRegexp.has_value())
+            else if (processor->UniformProcessor.has_value() && processor->UniformRegexp.has_value())
             {
                 auto regex = processor->UniformRegexp.value();
 
@@ -62,11 +62,11 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
                 {
                     if (!options.LookForClosingBracketForUniformBuffer)
                     {
-                        value = processor->UniformProcessor(Line, options.IsFragment, preprocessors, options.ProcessingContext);
+                        value = processor->UniformProcessor.value()(Line, options.IsFragment, preprocessors, options.ProcessingContext);
                     }
                 }
             }
-            else if (processor->UniformBufferProcessor && processor->UniformBufferRegexp.has_value())
+            else if (processor->UniformBufferProcessor.has_value() && processor->UniformBufferRegexp.has_value())
             {
                 auto regex = processor->UniformBufferRegexp.value();
 
@@ -74,21 +74,21 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
                 {
                     if (!options.LookForClosingBracketForUniformBuffer)
                     {
-                        value = processor->UniformBufferProcessor(Line, options.IsFragment, options.ProcessingContext);
+                        value = processor->UniformBufferProcessor.value()(Line, options.IsFragment, options.ProcessingContext);
                         options.LookForClosingBracketForUniformBuffer = true;
                     }
                 }
             }
-            else if (processor->TextureProcessor && processor->TextureRegexp)
+            else if (processor->TextureProcessor.has_value() && processor->TextureRegexp)
             {
                 auto regex = processor->TextureRegexp.value();
 
                 if (std::regex_match(Line, regex))
                 {
-                    value = processor->TextureProcessor(Line, options.IsFragment, preprocessors, options.ProcessingContext);
+                    value = processor->TextureProcessor.value()(Line, options.IsFragment, preprocessors, options.ProcessingContext);
                 }
             }
-            else if ((processor->UniformProcessor || processor->UniformBufferProcessor) && Line.starts_with("uniform") && !options.LookForClosingBracketForUniformBuffer)
+            else if ((processor->UniformProcessor.has_value() || processor->UniformBufferProcessor) && Line.starts_with("uniform") && !options.LookForClosingBracketForUniformBuffer)
             {
                 auto regex = std::regex("uniform\\s+(?:(?:highp)?|(?:lowp)?)\\s*(\\S+)\\s+(\\S+)\\s*");
 
@@ -97,15 +97,15 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
                     // uniform
                     if (processor->UniformProcessor)
                     {
-                        value = processor->UniformProcessor(Line, options.IsFragment, preprocessors, options.ProcessingContext);
+                        value = processor->UniformProcessor.value()(Line, options.IsFragment, preprocessors, options.ProcessingContext);
                     }
                 }
                 else
                 {
                     // Uniform buffer
-                    if (processor->UniformBufferProcessor)
+                    if (processor->UniformBufferProcessor.has_value())
                     {
-                        value = processor->UniformBufferProcessor(Line, options.IsFragment, options.ProcessingContext);
+                        value = processor->UniformBufferProcessor.value()(Line, options.IsFragment, options.ProcessingContext);
                         options.LookForClosingBracketForUniformBuffer = true;
                     }
                 }
@@ -114,9 +114,9 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
             if (options.LookForClosingBracketForUniformBuffer && IndexOf(Line, "}") != -1)
             {
                 options.LookForClosingBracketForUniformBuffer = false;
-                if (processor->EndOfUniformBufferProcessor)
+                if (processor->EndOfUniformBufferProcessor.has_value())
                 {
-                    value = processor->EndOfUniformBufferProcessor(Line, options.IsFragment, options.ProcessingContext);
+                    value = processor->EndOfUniformBufferProcessor.value()(Line, options.IsFragment, options.ProcessingContext);
                 }
             }
         }
