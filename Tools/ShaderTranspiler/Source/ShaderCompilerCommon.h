@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <string>
 
-namespace Babylon::ShaderCompilerCommon
+namespace ShaderTranspiler::ShaderCompilerCommon
 {
     template<typename AppendageT>
     inline void AppendBytes(std::vector<uint8_t>& bytes, const AppendageT appendage)

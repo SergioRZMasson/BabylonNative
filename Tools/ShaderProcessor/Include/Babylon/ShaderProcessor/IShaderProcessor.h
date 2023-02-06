@@ -9,8 +9,6 @@
 
 namespace Babylon
 {
-    typedef void ShaderProcessingContext;
-
     template<typename var1, typename var2>
     struct ShaderPair
     {

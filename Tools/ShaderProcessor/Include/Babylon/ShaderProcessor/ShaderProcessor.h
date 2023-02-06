@@ -10,6 +10,7 @@
 #include "Babylon/ShaderProcessor/Expressions/ShaderDefineExpression.h";
 #include "Babylon/ShaderProcessor/Expressions/Operators/ShaderDefineArithmeticOperator.h";
 #include "Babylon/ShaderProcessor/ProcessingOptions.h";
+#include "Babylon/ShaderProcessor/IShaderProcessor.h"
 
 #include <memory>
 #include <functional>
@@ -33,9 +34,9 @@ namespace Babylon
         static std::string _ProcessPrecision(std::string source, ProcessingOptions options);
         static std::unique_ptr<ShaderDefineExpression> _ExtractOperation(std::string expression);
         static std::unique_ptr<ShaderDefineExpression> _BuildSubExpression(std::string expression);
-        static std::unique_ptr<ShaderCodeTestNode> _BuildExpression(std::string line, int start);
-        static void _MoveCursorWithinIf(ShaderCodeCursor& cursor, ShaderCodeConditionNode& rootNode, ShaderCodeNode& ifNode);
-        static bool _MoveCursor(ShaderCodeCursor& cursor, ShaderCodeNode& rootNode);
+        static ShaderCodeTestNode* _BuildExpression(std::string line, int start);
+        static void _MoveCursorWithinIf(ShaderCodeCursor* cursor, ShaderCodeConditionNode* rootNode, ShaderCodeNode* ifNode);
+        static bool _MoveCursor(ShaderCodeCursor* cursor, ShaderCodeNode* rootNode);
         static std::string _EvaluatePreProcessors(std::string sourceCode, std::map<std::string, std::string> preprocessors, ProcessingOptions& options);
         static std::map<std::string, std::string> _PreparePreProcessors(ProcessingOptions& options, ThinEngineWrapper& engine);
         static std::string _ProcessShaderConversion(std::string sourceCode, ProcessingOptions options, ThinEngineWrapper& engine);

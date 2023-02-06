@@ -8,8 +8,8 @@ namespace Babylon
     {
     public:
         ShaderDefineAndOperator() = default;
-        ShaderDefineExpression* leftOperand;
-        ShaderDefineExpression* rightOperand;
+        std::unique_ptr<ShaderDefineExpression> leftOperand;
+        std::unique_ptr<ShaderDefineExpression> rightOperand;
 
         bool isTrue(std::map<std::string, std::string> preprocessors) override
         {

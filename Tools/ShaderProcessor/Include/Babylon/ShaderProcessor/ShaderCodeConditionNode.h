@@ -15,9 +15,9 @@ namespace Babylon
             {
                 auto node = Children[index];
 
-                if (node.IsValid(preprocessors))
+                if (node->IsValid(preprocessors))
                 {
-                    return node.Process(preprocessors, options);
+                    return node->Process(preprocessors, options);
                 }
             }
 

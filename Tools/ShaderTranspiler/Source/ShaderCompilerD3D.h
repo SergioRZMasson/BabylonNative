@@ -15,6 +15,7 @@
 
 #include <iostream>
 #include <filesystem>
+#include <format>
 
 static std::string headerContent = "void HEADER_NAME() { return; }";
 
@@ -57,21 +58,42 @@ private:
 };
 
 
-namespace Babylon
+namespace ShaderTranspiler
 {
     namespace
     {
-        void AddShader(glslang::TProgram& program, glslang::TShader& shader, BabylonIncluder& includer, std::string_view source)
+        void AddShader(glslang::TProgram& program, glslang::TShader& shader, std::string_view source)
         {
             const std::array<const char*, 1> sources{source.data()};
             shader.setStrings(sources.data(), gsl::narrow_cast<int>(sources.size()));
 
-            if (!shader.parse(&DefaultTBuiltInResource, 310, EProfile::EEsProfile, true, true, EShMsgDefault, includer))
+            if (!shader.parse(&DefaultTBuiltInResource, 310, EProfile::EEsProfile, true, true, EShMsgDefault))
             {
-                throw std::runtime_error{shader.getInfoLog()};
+                auto errorMsg = shader.getInfoLog();
+                throw std::runtime_error{errorMsg};
             }
 
             program.addShader(&shader);
+        }
+
+        std::string TranspileToNative(glslang::TProgram& program, EShLanguage stage, gsl::span<const spirv_cross::HLSLVertexAttributeRemap> attributes)
+        {
+            std::vector<uint32_t> spirv;
+            glslang::GlslangToSpv(*program.getIntermediate(stage), spirv);
+
+            auto parser = std::make_unique<spirv_cross::Parser>(std::move(spirv));
+            parser->parse();
+
+            auto compiler = std::make_unique<spirv_cross::CompilerHLSL>(parser->get_parsed_ir());
+
+            compiler->set_hlsl_options({40, true});
+
+            for (const auto& attribute : attributes)
+            {
+                compiler->add_vertex_attribute_remap(attribute);
+            }
+
+            return compiler->compile();
         }
 
         std::pair<std::unique_ptr<spirv_cross::Parser>, std::unique_ptr<spirv_cross::Compiler>> CompileShader(glslang::TProgram& program, EShLanguage stage, gsl::span<const spirv_cross::HLSLVertexAttributeRemap> attributes, ID3DBlob** blob)
@@ -121,10 +143,65 @@ namespace Babylon
         glslang::FinalizeProcess();
     }
 
-    ShaderTranspiler::BgfxShaderInfo ShaderTranspiler::Compile(std::string_view vertexSource, std::string_view fragmentSource, std::string_view rootIncludePath)
+    std::pair<std::string, std::string> ShaderTranspiler::Transpile(std::string_view vertexSource, std::string_view fragmentSource)
     {
         glslang::TProgram program;
-        BabylonIncluder includer{rootIncludePath};
+
+        std::string vertexString{vertexSource.cbegin(), vertexSource.cend()};
+        std::string fragmentString{fragmentSource.cbegin(), fragmentSource.cend()};
+
+        glslang::TShader vertexShader{EShLangVertex};
+        AddShader(program, vertexShader, vertexString);
+
+        glslang::TShader fragmentShader{EShLangFragment};
+        AddShader(program, fragmentShader, fragmentString);
+
+        glslang::SpvVersion spv{};
+        spv.spv = 0x10000;
+        vertexShader.getIntermediate()->setSpv(spv);
+        fragmentShader.getIntermediate()->setSpv(spv);
+
+        if (!program.link(EShMsgDefault))
+        {
+            throw std::runtime_error{program.getInfoLog()};
+        }
+
+        ShaderCompilerTraversers::IdGenerator ids{};
+        auto cutScope = ShaderCompilerTraversers::ChangeUniformTypes(program, ids);
+        auto utstScope = ShaderCompilerTraversers::MoveNonSamplerUniformsIntoStruct(program, ids);
+        std::unordered_map<std::string, std::string> vertexAttributeRenaming = {};
+        ShaderCompilerTraversers::AssignLocationsAndNamesToVertexVaryingsD3D(program, ids, vertexAttributeRenaming);
+        ShaderCompilerTraversers::SplitSamplersIntoSamplersAndTextures(program, ids);
+        ShaderCompilerTraversers::InvertYDerivativeOperands(program);
+
+        // clang-format off
+        static const spirv_cross::HLSLVertexAttributeRemap attributes[] = {
+            {bgfx::Attrib::Position,  "POSITION"    },
+            {bgfx::Attrib::Normal,    "NORMAL"      },
+            {bgfx::Attrib::Tangent,   "TANGENT"     },
+            {bgfx::Attrib::Color0,    "COLOR"       },
+            {bgfx::Attrib::Indices,   "BLENDINDICES"},
+            {bgfx::Attrib::Weight,    "BLENDWEIGHT" },
+            {bgfx::Attrib::TexCoord0, "TEXCOORD0"   },
+            {bgfx::Attrib::TexCoord1, "TEXCOORD1"   },
+            {bgfx::Attrib::TexCoord2, "TEXCOORD2"   },
+            {bgfx::Attrib::TexCoord3, "TEXCOORD3"   },
+            {bgfx::Attrib::TexCoord4, "TEXCOORD4"   },
+            {bgfx::Attrib::TexCoord5, "TEXCOORD5"   },
+            {bgfx::Attrib::TexCoord6, "TEXCOORD6"   },
+            {bgfx::Attrib::TexCoord7, "TEXCOORD7"   },
+        };
+        
+        // clang-format on
+        auto vertexNativeShader = TranspileToNative(program, EShLangVertex, attributes);
+        auto fragmentNativeShader = TranspileToNative(program, EShLangVertex, attributes);
+
+        return {vertexNativeShader, fragmentNativeShader};
+    }
+
+    ShaderTranspiler::BgfxShaderInfo ShaderTranspiler::Compile(std::string_view vertexSource, std::string_view fragmentSource)
+    {
+        glslang::TProgram program;
         ShaderProcessor preprocessor{};
 
         std::string vertexString{vertexSource.cbegin(), vertexSource.cend()};
@@ -136,10 +213,10 @@ namespace Babylon
         preprocessor.varyingProcessor(fragmentString, false);
 
         glslang::TShader vertexShader{EShLangVertex};
-        AddShader(program, vertexShader, includer, vertexString);
+        AddShader(program, vertexShader, vertexString);
 
         glslang::TShader fragmentShader{EShLangFragment};
-        AddShader(program, fragmentShader, includer, fragmentString);
+        AddShader(program, fragmentShader, fragmentString);
 
         glslang::SpvVersion spv{};
         spv.spv = 0x10000;

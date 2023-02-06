@@ -12,7 +12,7 @@ namespace bgfx
     uint16_t attribToId(Attrib::Enum _attr);
 }
 
-namespace Babylon::ShaderCompilerCommon
+namespace ShaderTranspiler::ShaderCompilerCommon
 {
     void AppendUniformBuffer(std::vector<uint8_t>& bytes, const NonSamplerUniformsInfo& uniformBuffer, bool isFragment)
     {

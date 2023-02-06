@@ -21,13 +21,31 @@ namespace Babylon
             return buffer;
         }
 
-        bool Replace(std::string& str, const std::string& from, const std::string& to)
+        inline bool ReplaceInplace(std::string& str, const std::string& from, const std::string& to)
         {
             size_t start_pos = str.find(from);
             if (start_pos == std::string::npos)
                 return false;
             str.replace(start_pos, from.length(), to);
             return true;
+        }
+
+        inline std::string Replace(std::string str, const std::string& from, const std::string& to)
+        {
+            size_t start_pos = str.find(from);
+            if (start_pos == std::string::npos)
+                return str;
+
+            str.replace(start_pos, from.length(), to);
+            return str;
+        }
+
+        bool IsNumber(const std::string& s)
+        {
+            std::string::const_iterator it = s.begin();
+            while (it != s.end() && std::isdigit(*it))
+                ++it;
+            return !s.empty() && it == s.end();
         }
 
         inline std::string Trim(std::string value)
@@ -66,7 +84,7 @@ namespace Babylon
             return index;
         }
 
-        bool IsIdentifierChar(std::string c)
+        inline bool IsIdentifierChar(std::string c)
         {
             char v = c[0];
             return (
@@ -76,7 +94,7 @@ namespace Babylon
                 v == 95);                // _
         }
 
-        int SkipWhitespaces(std::string s, int index)
+        inline int SkipWhitespaces(std::string s, int index)
         {
             while (index < s.size())
             {
@@ -89,6 +107,15 @@ namespace Babylon
             }
 
             return index;
+        }
+
+        inline std::string ToLower(std::string value)
+        {
+            std::transform(value.begin(), value.end(), value.begin(),
+                [](unsigned char c)
+                { return std::tolower(c); });
+
+            return value;
         }
 
         int ExtractBetweenMarkers(std::string markerOpen, std::string markerClose, std::string block, int startIndex);

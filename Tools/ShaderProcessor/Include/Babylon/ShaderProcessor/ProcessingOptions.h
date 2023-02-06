@@ -14,7 +14,7 @@ namespace Babylon
     struct ProcessingOptions
     {
         std::vector<std::string> Defines;
-        void* IndexParameters;
+        std::map<std::string, std::string> IndexParameters;
         bool IsFragment;
         bool ShouldUseHighPrecisionShader;
         bool SupportsUniformBuffers;

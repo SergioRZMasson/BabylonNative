@@ -124,7 +124,7 @@ std::string Babylon::ShaderCodeNode::Process(std::map<std::string, std::string> 
 
     for (auto child : Children)
     {
-        result += child.Process(preprocessors, options);
+        result += child->Process(preprocessors, options);
     }
 
     if (AdditionalDefineKey.has_value())

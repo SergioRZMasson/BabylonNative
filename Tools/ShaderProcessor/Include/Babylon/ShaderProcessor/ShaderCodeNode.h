@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <optional>
+#include <memory>
 
 namespace Babylon
 {
@@ -16,7 +17,7 @@ namespace Babylon
         virtual bool IsValid(std::map<std::string, std::string> preprocessors);
         virtual std::string Process(std::map<std::string, std::string> preprocessors, ProcessingOptions& options);
         std::string Line;
-        std::vector<ShaderCodeNode> Children;
+        std::vector<std::shared_ptr<ShaderCodeNode>> Children;
         std::optional<std::string>  AdditionalDefineKey;
         std::optional<std::string>  AdditionalDefineValue;
     };

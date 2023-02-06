@@ -1,6 +1,6 @@
 #include "ResourceLimits.h"
 
-namespace Babylon
+namespace ShaderTranspiler
 {
     const TBuiltInResource DefaultTBuiltInResource = {
         32,    // MaxLights

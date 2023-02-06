@@ -1,6 +1,6 @@
 #include <glslang/Public/ShaderLang.h>
 
-namespace Babylon
+namespace ShaderTranspiler
 {
     extern const TBuiltInResource DefaultTBuiltInResource;
 }

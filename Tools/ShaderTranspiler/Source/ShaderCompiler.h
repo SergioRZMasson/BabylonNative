@@ -19,7 +19,7 @@ inline bool replaceInline(std::string& str, const std::string& from, const std::
     return true;
 }
 
-namespace Babylon
+namespace ShaderTranspiler
 {
     class ShaderProcessor final
     {
@@ -60,6 +60,7 @@ namespace Babylon
             std::vector<std::string> IncludesData;
         };
 
-        BgfxShaderInfo Compile(std::string_view vertexSource, std::string_view fragmentSource, std::string_view rootIncludePath);
+        BgfxShaderInfo Compile(std::string_view vertexSource, std::string_view fragmentSource);
+        std::pair<std::string, std::string> Transpile(std::string_view vertexSource, std::string_view fragmentSource);
     };
 }

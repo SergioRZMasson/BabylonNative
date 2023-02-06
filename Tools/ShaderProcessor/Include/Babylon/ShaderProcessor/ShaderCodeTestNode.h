@@ -12,11 +12,12 @@ namespace Babylon
 {
     class ShaderCodeTestNode : public ShaderCodeNode 
     {
-        ShaderDefineExpression testExpression;
+    public:
+        std::unique_ptr<ShaderDefineExpression> testExpression;
 
         bool IsValid(std::map<std::string, std::string> preprocessors) override
         {
-            return testExpression.isTrue(preprocessors);
+            return testExpression->isTrue(preprocessors);
         }
     };
 }

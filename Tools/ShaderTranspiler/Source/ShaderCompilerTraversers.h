@@ -5,7 +5,7 @@
 #include <memory>
 #include <unordered_map>
 
-namespace Babylon::ShaderCompilerTraversers
+namespace ShaderTranspiler::ShaderCompilerTraversers
 {
     /// Helper class to manage the lifecycle of objects allocated by shader program
     /// modification. Some allocations must persist long enough for the shader
