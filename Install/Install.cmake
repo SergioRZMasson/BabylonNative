@@ -30,7 +30,6 @@ install_targets(astc-encoder edtaa3 etc1 etc2 iqa nvtt pvrtc squish tinyexr bgfx
 install_targets(GenericCodeGen glslang MachineIndependent OGLCompiler OSDependent SPIRV)
 
 ## SPIRV-Cross
-install_targets(spirv-cross-core spirv-cross-glsl)
 if(TARGET spirv-cross-msl)
     install_targets(spirv-cross-msl)
 endif()

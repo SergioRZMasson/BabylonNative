@@ -40,7 +40,7 @@ namespace Babylon
 
             auto compiler = std::make_unique<spirv_cross::CompilerHLSL>(parser->get_parsed_ir());
 
-            compiler->set_hlsl_options({40, true});
+            compiler->set_hlsl_options({false, 450, 40, true});
 
             for (const auto& attribute : attributes)
             {

@@ -51,7 +51,7 @@ if(TARGET spirv-cross-hlsl)
 elseif(TARGET spirv-cross-msl)
     target_link_to_dependencies(NativeEngine
         PRIVATE spirv-cross-msl)
-else()
+elseif(TARGET spirv-cross-glsl)
     target_link_to_dependencies(NativeEngine
         PRIVATE spirv-cross-glsl)
 endif()
