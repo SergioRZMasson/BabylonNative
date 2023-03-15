@@ -1,3 +1,6 @@
+#define GLSLANG_WEB
+#pragma warning(disable : 4100)
+
 #include "ShaderCompilerTraversers.h"
 
 #include <glslang/Include/intermediate.h>
