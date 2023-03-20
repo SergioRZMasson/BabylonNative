@@ -85,7 +85,7 @@ elseif(WIN32)
         "Win32/Resource.h"
         "Win32/small.ico"
         "Win32/targetver.h")
-    set(ADDITIONAL_LIBRARIES PRIVATE NativeXr NativeCamera)
+    set(ADDITIONAL_LIBRARIES PRIVATE)
 endif()
 
 if(WIN32)
@@ -108,16 +108,11 @@ target_include_directories(Playground PRIVATE "Source" ".")
 
 target_link_to_dependencies(Playground
     PRIVATE AppRuntime
-    PRIVATE NativeCapture
-    PRIVATE ChromeDevTools
     PRIVATE NativeEngine
-    PRIVATE NativeInput
-    PRIVATE NativeOptimizations
     PRIVATE Console
     PRIVATE Window
     PRIVATE ScriptLoader
     PRIVATE XMLHttpRequest
-    PRIVATE Canvas
     ${ADDITIONAL_LIBRARIES}
     ${BABYLON_NATIVE_PLAYGROUND_EXTENSION_LIBRARIES})
 

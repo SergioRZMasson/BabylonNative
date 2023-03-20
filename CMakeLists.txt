@@ -4,6 +4,9 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 project(BabylonNative)
 
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
+
 # --------------------------------------------------
 # Options
 # --------------------------------------------------

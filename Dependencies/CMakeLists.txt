@@ -119,20 +119,33 @@ set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "")
 set(SPIRV_CROSS_ENABLE_C_API OFF CACHE BOOL "")
 set(SPIRV_CROSS_ENABLE_UTIL OFF CACHE BOOL "")
 set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "")
+
+if(NOT GRAPHICS_API STREQUAL "OpenGL")
+    set(SPIRV_CROSS_ENABLE_GLSL OFF CACHE BOOL "")
+endif()
+
 if(NOT GRAPHICS_API STREQUAL "Metal")
     set(SPIRV_CROSS_ENABLE_MSL OFF CACHE BOOL "")
 endif()
+
 if(NOT GRAPHICS_API STREQUAL "D3D11" AND NOT GRAPHICS_API STREQUAL "D3D12")
     set(SPIRV_CROSS_ENABLE_HLSL OFF CACHE BOOL "")
 endif()
+
 add_subdirectory(SPIRV-Cross)
 set_property(TARGET spirv-cross-core PROPERTY FOLDER Dependencies/SPIRV-Cross)
-set_property(TARGET spirv-cross-glsl PROPERTY FOLDER Dependencies/SPIRV-Cross)
 disable_warnings(spirv-cross-core)
-disable_warnings(spirv-cross-glsl)
+
+if(TARGET spirv-cross-glsl)
+    set_property(TARGET spirv-cross-glsl PROPERTY FOLDER Dependencies/SPIRV-Cross)
+    disable_warnings(spirv-cross-glsl)
+endif()
+
 if(TARGET spirv-cross-msl)
     set_property(TARGET spirv-cross-msl PROPERTY FOLDER Dependencies/SPIRV-Cross)
+    disable_warnings(spirv-cross-msl )
 endif()
+
 if(TARGET spirv-cross-hlsl)
     set_property(TARGET spirv-cross-hlsl PROPERTY FOLDER Dependencies/SPIRV-Cross)
     disable_warnings(spirv-cross-hlsl)
