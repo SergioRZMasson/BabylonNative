@@ -131,7 +131,7 @@ extern "C"
             scriptLoader->LoadScript("app:///Scripts/babylon.max.js");
             scriptLoader->LoadScript("app:///Scripts/babylonjs.loaders.js");
             scriptLoader->LoadScript("app:///Scripts/babylonjs.materials.js");
-            scriptLoader->LoadScript("app:///Scripts/babylon.gui.js");
+            scriptLoader->LoadScript("app:///bundle.js");
         }
     }
 

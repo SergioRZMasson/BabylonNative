@@ -37,6 +37,14 @@ namespace Babylon
             bgfx::VertexLayoutHandle LayoutHandle{};
         };
 
+        struct InstanceVertexBufferRecord
+        {
+            VertexBuffer* Buffer{};
+            uint32_t Offset{};
+            uint32_t Stride{};
+            uint32_t ElementSize{};
+        };
+
         std::map<bgfx::Attrib::Enum, VertexBufferRecord> m_vertexBufferRecords{};
         std::map<bgfx::Attrib::Enum, VertexBuffer::InstanceVertexBufferRecord> m_vertexBufferInstanceRecords{};
 
