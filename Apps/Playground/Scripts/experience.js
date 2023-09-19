@@ -19,8 +19,108 @@ var cameraTexture = false;
 var imageTracking = false;
 const readPixels = false;
 
-function CreateBoxAsync(scene) {
-    BABYLON.Mesh.CreateBox("box1", 0.2, scene);
+//function CreateBoxAsync(scene)
+//{
+//    scene.createDefaultCamera(true, true, true);
+
+//    var groundWidth = 20;
+//    var groundHeight = 10;
+
+//    var ground = BABYLON.MeshBuilder.CreateGround("ground1", { width: groundWidth, height: groundHeight, subdivisions: 25 }, scene);
+
+//    //Create dynamic texture
+//    var textureResolution = 512;
+//    var textureGround = new BABYLON.DynamicTexture("dynamic texture", textureResolution, scene);
+//    var textureContext = textureGround.getContext();
+
+//    var materialGround = new BABYLON.StandardMaterial("Mat", scene);
+//    materialGround.diffuseTexture = textureGround;
+//    ground.material = materialGround;
+
+//    //Draw on canvas
+//    textureContext.beginPath();
+//    textureContext.moveTo(75 * 2, 25 * 2);
+//    textureContext.quadraticCurveTo(25 * 2, 25 * 2, 25 * 2, 62.5 * 2);
+//    textureContext.quadraticCurveTo(25 * 2, 100 * 2, 50 * 2, 100 * 2);
+//    textureContext.quadraticCurveTo(50 * 2, 120 * 2, 30 * 2, 125 * 2);
+//    textureContext.quadraticCurveTo(60 * 2, 120 * 2, 65 * 2, 100 * 2);
+//    textureContext.quadraticCurveTo(125 * 2, 100 * 2, 125 * 2, 62.5 * 2);
+//    textureContext.quadraticCurveTo(125 * 2, 25 * 2, 75 * 2, 25 * 2);
+//    textureContext.fillStyle = "white";
+//    textureContext.fill();
+//    textureGround.update();
+
+//    BABYLON.Effect.ShadersStore["customFragmentShader"] = `
+//    #ifdef GL_ES
+//        precision highp float;
+//    #endif
+
+//    // Samplers
+//    varying vec2 vUV;
+//    uniform sampler2D textureSampler;
+
+//    void main(void)
+//    {
+//        gl_FragColor = texture2D(textureSampler, vUV);
+//    }`;
+
+//    return BABYLON.ApplyPostProcess("custom", textureGround.getInternalTexture(), scene);
+
+//    //return Promise.resolve();
+//}
+
+function CreateBoxAsync(scene)
+{
+    // This creates and positions a free camera (non-mesh)
+    var camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 5, -10), scene);
+
+    // This targets the camera to scene origin
+    camera.setTarget(BABYLON.Vector3.Zero());
+
+    // This attaches the camera to the canvas
+    //camera.attachControl(canvas, true);
+
+    // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
+    var light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
+
+    // Default intensity is 1. Let's dim the light a small amount
+    light.intensity = 0.7;
+
+    // Our built-in 'sphere' shape. Params: name, subdivs, size, scene
+    //var sphere = BABYLON.Mesh.CreateSphere("sphere1", 16, 2, scene);
+
+    // Move the sphere upward 1/2 its height
+    //sphere.position.y = 1;
+
+    // Our built-in 'ground' shape. Params: name, width, depth, subdivs, scene
+    //var ground = BABYLON.Mesh.CreateGround("ground1", 6, 6, 2, scene);
+
+    BABYLON.Effect.ShadersStore["customFragmentShader"] = `
+    #ifdef GL_ES
+        precision highp float;
+    #endif
+
+    // Samplers
+    varying vec2 vUV;
+    uniform sampler2D textureSampler;
+
+    // Parameters
+    uniform vec2 screenSize;
+    uniform float threshold;
+
+    void main(void) 
+    {
+        gl_FragColor = texture2D(textureSampler, vec2(vUV.x, 1.0 - vUV.y));
+    }
+    `;
+
+    var postProcess = new BABYLON.PostProcess("My custom post process", "custom", ["screenSize", "threshold"], null, 1, camera);
+
+    postProcess.onApply = function (effect) {
+        effect.setFloat2("screenSize", postProcess.width, postProcess.height);
+        effect.setFloat("threshold", 0.30);
+    };
+
     return Promise.resolve();
 }
 
@@ -64,8 +164,8 @@ CreateBoxAsync(scene).then(function () {
     BABYLON.Tools.Log("Loaded");
 
     // This creates and positions a free camera (non-mesh)
-    scene.createDefaultCamera(true, true, true);
-    scene.activeCamera.alpha += Math.PI;
+    //scene.createDefaultCamera(true, true, true);
+    //scene.activeCamera.alpha += Math.PI;
 
     if (ibl) {
         scene.createDefaultEnvironment({ createGround: false, createSkybox: false });

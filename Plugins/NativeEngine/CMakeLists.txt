@@ -20,7 +20,9 @@ set(SOURCES
     "Source/VertexBuffer.cpp"
     "Source/VertexBuffer.h"
     "Source/JsConsoleLogger.h"
-    "Source/JsConsoleLogger.cpp")
+    "Source/JsConsoleLogger.cpp"
+    "Source/TextureCopyHelper.h"
+    "Source/TextureCopyHelper.cpp")
 
 if(WIN32)
     set(SOURCES ${SOURCES} "Source/ShaderCompilerD3D.h")
@@ -41,6 +43,7 @@ target_link_libraries(NativeEngine
     PRIVATE bimg
     PRIVATE bx
     PRIVATE glslang
+    PRIVATE glslang-default-resource-limits
     PRIVATE SPIRV
     PRIVATE GraphicsDeviceContext
     PRIVATE napi_extensions)

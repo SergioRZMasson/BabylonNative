@@ -139,6 +139,8 @@ namespace Babylon
         void RecordVertexBuffer(const Napi::CallbackInfo& info);
         void UpdateDynamicVertexBuffer(const Napi::CallbackInfo& info);
         std::unique_ptr<ProgramData> CreateProgramInternal(const std::string vertexSource, const std::string fragmentSource);
+        void EnsureTextureFlipShader();
+        void EnsureTextureFlipBuffers();
         Napi::Value CreateProgram(const Napi::CallbackInfo& info);
         Napi::Value CreateProgramAsync(const Napi::CallbackInfo& info);
         Napi::Value GetUniforms(const Napi::CallbackInfo& info);

@@ -22,6 +22,9 @@
 #include <bx/math.h>
 
 #include <cmath>
+#include <windows.h>
+
+#include "TextureCopyHelper.h"
 
 namespace Babylon
 {
@@ -706,8 +709,91 @@ namespace Babylon
         return vertexSource;
     }
 
+    std::unique_ptr<ProgramData> g_flipProgramData = nullptr;
+    VertexBuffer* g_flipVertexBuffer = nullptr;
+    VertexArray* g_flipVertexArray = nullptr;
+
+    void NativeEngine::EnsureTextureFlipShader() 
+    {
+        static const auto vertexShader = R"(
+            #define SHADER_NAME vertex:postprocess
+            precision highp float;
+            in vec2 position;
+            uniform vec2 scale;
+            out vec2 vUV;
+            const vec2 madd=vec2(0.5,0.5);
+            #define CUSTOM_VERTEX_DEFINITIONS
+            void main(void) {
+#define CUSTOM_VERTEX_MAIN_BEGIN
+                vUV=(position*madd+madd)*scale;
+                gl_Position=vec4(position,0.0,1.0);
+#define CUSTOM_VERTEX_MAIN_END
+            }
+            )";
+
+        static const auto fragment = R"(
+            precision highp float;
+            // Samplers
+            in vec2 vUV;
+            uniform sampler2D textureSampler;
+            // Parameters
+            uniform vec2 screenSize;
+            uniform float threshold;
+            layout(location = 0) out vec4 glFragColor;
+            void main(void)
+            {
+                glFragColor = texture(textureSampler, vec2(vUV.x, 1.0 - vUV.y));
+            }
+            )";
+
+        if (g_flipProgramData != nullptr)
+        {
+            return;
+        }
+
+        std::unique_ptr<ProgramData> flipProgramData = CreateProgramInternal(vertexShader, fragment);
+    }
+
+    void NativeEngine::EnsureTextureFlipBuffers() 
+    {
+        static const std::array<float, 8> floats
+        {
+            1.00000000, 1.00000000, 
+            - 1.00000000, 1.00000000, 
+            - 1.00000000, -1.00000000, 
+            1.00000000, -1.00000000
+        };
+
+        if (g_flipVertexBuffer == nullptr)
+        {
+            auto span = gsl::make_span((uint8_t*)floats.data(), 32);
+            VertexBuffer* vertexBuffer = new VertexBuffer(span, false);
+        }
+
+        if (g_flipVertexArray == nullptr)
+        {
+            g_flipVertexArray = new VertexArray();
+
+            auto location = 0;
+            auto byteOffset = 0;
+            auto byteStride = 8;
+            auto numElements = 2;
+            auto type = 6;
+            auto normalized = false;
+            auto divisor = 0;
+
+            g_flipVertexArray->RecordVertexBuffer(g_flipVertexBuffer, location, byteOffset, byteStride, numElements, type, normalized, divisor);
+        }
+    }
+
     std::unique_ptr<ProgramData> NativeEngine::CreateProgramInternal(const std::string vertexSource, const std::string fragmentSource)
     {
+        OutputDebugString("Vertex Shader: \n");
+        OutputDebugString(vertexSource.c_str());
+
+        OutputDebugString("\nFragment Shader: \n");
+        OutputDebugString(fragmentSource.c_str());
+
         ShaderCompiler::BgfxShaderInfo shaderInfo = m_shaderCompiler.Compile(ProcessShaderCoordinates(vertexSource), ProcessSamplerFlip(fragmentSource));
 
         std::unique_ptr<ProgramData> program = std::make_unique<ProgramData>();
@@ -1151,18 +1237,26 @@ namespace Babylon
     {
         const auto textureDestination = info[0].As<Napi::Pointer<Graphics::Texture>>().Get();
         const auto textureSource = info[1].As<Napi::Pointer<Graphics::Texture>>().Get();
+        const auto flipY = info.Length() <= 2 ? false : info[2].As<Napi::Boolean>().Value();
 
-        arcana::make_task(m_update.Scheduler(), *m_cancellationSource, [this, textureDestination, textureSource, cancellationSource = m_cancellationSource]() {
-            return arcana::make_task(m_runtimeScheduler, *m_cancellationSource, [this, textureDestination, textureSource, updateToken = m_update.GetUpdateToken(), cancellationSource = m_cancellationSource]() {
-                bgfx::Encoder* encoder = m_update.GetUpdateToken().GetEncoder();
-                GetBoundFrameBuffer(*encoder).Blit(*encoder, textureDestination->Handle(), 0, 0, textureSource->Handle());
-            }).then(arcana::inline_scheduler, *m_cancellationSource, [this, cancellationSource{m_cancellationSource}](const arcana::expected<void, std::exception_ptr>& result) {
-                if (!cancellationSource->cancelled() && result.has_error())
-                {
-                    Napi::Error::New(Env(), result.error()).ThrowAsJavaScriptException();
-                }
+        if (!flipY)
+        {
+            arcana::make_task(m_update.Scheduler(), *m_cancellationSource, [this, textureDestination, textureSource, cancellationSource = m_cancellationSource]() {
+                return arcana::make_task(m_runtimeScheduler, *m_cancellationSource, [this, textureDestination, textureSource, updateToken = m_update.GetUpdateToken(), cancellationSource = m_cancellationSource]() {
+                    bgfx::Encoder* encoder = m_update.GetUpdateToken().GetEncoder();
+                    GetBoundFrameBuffer(*encoder).Blit(*encoder, textureDestination->Handle(), 0, 0, textureSource->Handle());
+                }).then(arcana::inline_scheduler, *m_cancellationSource, [this, cancellationSource{m_cancellationSource}](const arcana::expected<void, std::exception_ptr>& result) {
+                    if (!cancellationSource->cancelled() && result.has_error())
+                    {
+                        Napi::Error::New(Env(), result.error()).ThrowAsJavaScriptException();
+                    }
+                });
             });
-        });
+        }
+        else
+        {
+            EnsureTextureFlipShader();
+        }
     }
 
     void NativeEngine::LoadRawTexture(const Napi::CallbackInfo& info)

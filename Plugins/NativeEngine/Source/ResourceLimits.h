@@ -2,5 +2,4 @@
 
 namespace Babylon
 {
-    extern const TBuiltInResource DefaultTBuiltInResource;
 }
