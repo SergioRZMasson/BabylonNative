@@ -13,8 +13,13 @@ elseif(UNIX)
         PRIVATE curl)
 elseif(WIN32)
     set(ADDITIONAL_SOURCES
-        "Source/UrlRequest_Windows.cpp")
-    if(NOT WINDOWS_STORE)
+        "Source/UrlRequest_Windows_Shared.h")
+    if(WINDOWS_STORE)
+        set(ADDITIONAL_SOURCES ${ADDITIONAL_SOURCES}
+            "Source/UrlRequest_UWP.cpp")
+    else()
+        set(ADDITIONAL_SOURCES ${ADDITIONAL_SOURCES}
+            "Source/UrlRequest_Win32.cpp")
         set(ADDITIONAL_LIBRARIES
             PUBLIC onecoreuap.lib)
     endif()
@@ -37,7 +42,7 @@ target_include_directories(UrlLib PRIVATE "Source")
 target_link_libraries(UrlLib
     PUBLIC arcana
     ${ADDITIONAL_LIBRARIES})
-    
+
 if(APPLE)
     set_target_properties(UrlLib PROPERTIES
         XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES)
