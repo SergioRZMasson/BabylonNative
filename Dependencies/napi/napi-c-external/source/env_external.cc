@@ -1,6 +1,6 @@
-#include "js_native_api_external.h"
 #include <napi/js_native_api.h>
-#include <napi/js_native_ext_api.h>
+#include "js_native_api_external.h"
+
 #include <array>
 #include <cassert>
 #include <cmath>
