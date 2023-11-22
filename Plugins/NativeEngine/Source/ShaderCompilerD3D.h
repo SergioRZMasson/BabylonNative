@@ -10,6 +10,7 @@
 #include <SPIRV/GlslangToSpv.h>
 #include <spirv_parser.hpp>
 #include <spirv_hlsl.hpp>
+#include <spirv_msl.hpp>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
@@ -40,16 +41,48 @@ namespace Babylon
             auto parser = std::make_unique<spirv_cross::Parser>(std::move(spirv));
             parser->parse();
 
+            std::string hlsl;
             auto compiler = std::make_unique<spirv_cross::CompilerHLSL>(parser->get_parsed_ir());
 
             compiler->set_hlsl_options({40, true});
 
             for (const auto& attribute : attributes)
             {
-                compiler->add_vertex_attribute_remap(attribute);
+                  compiler->add_vertex_attribute_remap(attribute);
             }
 
-            std::string hlsl = compiler->compile();
+            hlsl = compiler->compile();
+
+            {
+               auto compilerMetal = std::make_unique<spirv_cross::CompilerMSL>(parser->get_parsed_ir());
+
+               // Enable decoration for texture binding
+               spirv_cross::CompilerMSL::Options opts{};
+               opts.enable_decoration_binding = true;
+               compilerMetal->set_msl_options(opts);
+
+               auto resources = compilerMetal->get_shader_resources();
+               for (auto& resource : resources.uniform_buffers)
+               {
+                   compilerMetal->set_name(resource.id, "_mtl_u");
+               }
+
+               // rename textures without the 'texture' suffix so it's bindable from .js
+               for (auto& resource : resources.separate_images)
+               {
+                   std::string imageName = resource.name;
+                   if (imageName.find("Texture") != std::string::npos)
+                   {
+                       imageName.replace(imageName.find("Texture"), std::string::npos, "");
+                       compilerMetal->set_name(resource.id, imageName);
+                   }
+               }
+
+               compilerMetal->rename_entry_point("main", "xlatMtlMain", (stage == EShLangVertex) ? spv::ExecutionModelVertex : spv::ExecutionModelFragment);
+
+               std::string shaderResult = compilerMetal->compile();
+               std::printf(shaderResult.c_str());
+            }
 
             Microsoft::WRL::ComPtr<ID3DBlob> errorMsgs;
             const char* target = stage == EShLangVertex ? "vs_4_0" : "ps_4_0";

@@ -48,10 +48,12 @@ warnings_as_errors(NativeEngine)
 if(TARGET spirv-cross-hlsl)
     target_link_libraries(NativeEngine
         PRIVATE spirv-cross-hlsl)
-elseif(TARGET spirv-cross-msl)
+endif()
+if(TARGET spirv-cross-msl)
     target_link_libraries(NativeEngine
         PRIVATE spirv-cross-msl)
-else()
+endif()
+if(TARGET spirv-cross-glsl)
     target_link_libraries(NativeEngine
         PRIVATE spirv-cross-glsl)
 endif()
