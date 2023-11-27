@@ -63,9 +63,7 @@ namespace Babylon
         result = jsr_close_napi_env_scope(_env, scope);
         assert(result == napi_status::napi_ok);
 
-        // TODO: jsr_delete_runtime needs to be called somewhere, but not here.
-        // See https://github.com/microsoft/v8-jsi/blob/559e188e3d13a97b75372119fde2b4a53a1addbc/src/testmain.cpp#L41
-        //result = jsr_delete_runtime(runtime);
-        //assert(result == napi_status::napi_ok);
+        result = jsr_delete_runtime(runtime);
+        assert(result == napi_status::napi_ok);
     }
 }
