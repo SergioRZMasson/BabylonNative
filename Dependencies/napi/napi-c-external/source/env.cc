@@ -1,5 +1,5 @@
 #include <napi/env.h>
-#include <napi/js_native_ext_api.h>
+#include <napi/js_runtime_api.h>
 
 namespace Napi
 {
@@ -28,7 +28,7 @@ namespace Napi
         NAPI_THROW_IF_FAILED(env, napi_create_string_utf8(env, source, NAPI_AUTO_LENGTH, &script));
 
         napi_value result{};
-        NAPI_THROW_IF_FAILED(env, napi_ext_run_script(env, script, sourceUrl, &result));
+        NAPI_THROW_IF_FAILED(env, jsr_run_script(env, script, sourceUrl, &result));
 
         return{ env, result };
     }

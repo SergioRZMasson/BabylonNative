@@ -4,47 +4,66 @@
 #include <sstream>
 #include <functional>
 #include <napi/js_native_api.h>
-#include <napi/js_native_ext_api.h>
+#include <napi/js_runtime_api.h>
 
 namespace Babylon
 {
-    void ScheduleTaskCallback(void *task_runner_data, void *task_data, v8_task_run_cb task_run_cb, v8_task_release_cb task_release_cb)
+    void ScheduleTaskCallback(void *task_runner_data, void *task_data, jsr_task_run_cb task_run_cb, jsr_data_delete_cb task_release_cb, void *deleter_data)
     {
         WorkQueue* worker = reinterpret_cast<WorkQueue*>(task_runner_data);
 
-        worker->Append([task = std::move(task_run_cb), task_data, task_release_cb](Napi::Env)
+        worker->Append([task = std::move(task_run_cb), task_data, task_release_cb, deleter_data](Napi::Env)
         { 
             task(task_data);
-            task_release_cb(task_data);
+            task_release_cb(task_data, deleter_data);
         });
     }
 
-    void __cdecl v8TaskRunnerReleaseCb(void *)
+    void __cdecl v8TaskRunnerReleaseCb(void *, void *)
     {
 
     }
 
     void AppRuntime::RunEnvironmentTier(const char*)
     {
-        napi_env _env{};
-        napi_ext_env_settings settings{};
-        settings.this_size = sizeof(settings);
-        settings.flags.enable_inspector = true;
-        settings.flags.wait_for_debugger = false;
-        settings.foreground_task_runner = v8_create_task_runner(this->m_workQueue.get(), &ScheduleTaskCallback, &v8TaskRunnerReleaseCb);
+        napi_status result{napi_status::napi_ok};
 
-        napi_status result = napi_ext_create_env(&settings, &_env);
+        jsr_config config;
+        result = jsr_create_config(&config);
+        assert(result == napi_status::napi_ok);
+
+        result = jsr_config_enable_inspector(config, true);
+        assert(result == napi_status::napi_ok);
+
+        result = jsr_config_set_inspector_break_on_start(config, false);
+        assert(result == napi_status::napi_ok);
+
+        result = jsr_config_set_task_runner(config, this->m_workQueue.get(), &ScheduleTaskCallback, v8TaskRunnerReleaseCb, nullptr);
+        assert(result == napi_status::napi_ok);
+
+        jsr_runtime runtime;
+        result = jsr_create_runtime(config, &runtime);
+        assert(result == napi_status::napi_ok);
+
+        result = jsr_delete_config(config);
+        assert(result == napi_status::napi_ok);
+
+        napi_env _env{};
+        result = jsr_runtime_get_node_api_env(runtime, &_env);
         assert(result == napi_status::napi_ok);
 
         Napi::Env env = Napi::Env(_env);
 
-        napi_ext_env_scope scope;
-        result = napi_ext_open_env_scope(env, &scope);
+        jsr_napi_env_scope scope;
+        result = jsr_open_napi_env_scope(_env, &scope);
         assert(result == napi_status::napi_ok);
 
         Run(env);
 
-        result = napi_ext_close_env_scope(env, scope);
+        result = jsr_close_napi_env_scope(_env, scope);
+        assert(result == napi_status::napi_ok);
+
+        result = jsr_delete_runtime(runtime);
         assert(result == napi_status::napi_ok);
     }
 }
