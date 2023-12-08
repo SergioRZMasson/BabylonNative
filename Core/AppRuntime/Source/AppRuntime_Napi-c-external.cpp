@@ -35,6 +35,9 @@ namespace Babylon
         result = jsr_config_enable_inspector(config, true);
         assert(result == napi_status::napi_ok);
 
+        result = jsr_config_set_inspector_port(config, 9223);
+        assert(result == napi_status::napi_ok);
+
         result = jsr_config_set_inspector_break_on_start(config, false);
         assert(result == napi_status::napi_ok);
 
