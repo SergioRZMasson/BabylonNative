@@ -43,14 +43,17 @@ function CreateSpheresAsync(scene) {
 
 var engine = new BABYLON.NativeEngine();
 var scene = new BABYLON.Scene(engine);
-var externalTextureRef = undefined;
 
 engine.onContextLostObservable.add(() => {
-    scene.activeCamera.outputRenderTarget.dispose();
+    if (scene.activeCamera) {
+        if (scene.activeCamera.outputRenderTarget) {
+            scene.activeCamera.outputRenderTarget.dispose();
+        }
+    }
 });
 
 async function ENV_SetRenderTexture(externalTexturePromise, textureWidth, textureHeight) {
-    externalTextureRef = await externalTexturePromise;
+    const externalTextureRef = await externalTexturePromise;
     const outputTexture = engine.wrapNativeTexture(externalTextureRef);
     const renderTarget = new BABYLON.RenderTargetTexture(
         "outputTexture",
@@ -73,7 +76,6 @@ async function ENV_SetRenderTexture(externalTexturePromise, textureWidth, textur
     scene.activeCamera.alpha += Math.PI;
     scene.activeCamera.outputRenderTarget = renderTarget;
 }
-
 
 CreateBoxAsync(scene).then(function () {
 //CreateSpheresAsync(scene).then(function () {

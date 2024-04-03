@@ -42,6 +42,7 @@ namespace Babylon::Graphics
         /* ********** BEGIN DEVICE CONTRACT ********** */
         void UpdateWindow(WindowT window);
         void UpdateDevice(DeviceT device);
+        void SetRenderTarget(RenderTargetT renderTarget); 
         void UpdateSize(size_t width, size_t height);
         void UpdateMSAA(uint8_t value);
         void UpdateAlphaPremultiplied(bool enabled);

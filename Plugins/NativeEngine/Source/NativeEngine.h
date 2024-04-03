@@ -213,7 +213,7 @@ namespace Babylon
         Napi::Value CreateImageBitmap(const Napi::CallbackInfo& info);
         Napi::Value ResizeImageBitmap(const Napi::CallbackInfo& info);
         void GetFrameBufferData(const Napi::CallbackInfo& info);
-        void SetDeviceLostCallback(const Napi::CallbackInfo& info);
+        void SetRenderResetCallback(const Napi::CallbackInfo& info);
         void SetStencil(NativeDataStream::Reader& data);
         void SetViewPort(NativeDataStream::Reader& data);
         void SetScissor(NativeDataStream::Reader& data);
@@ -233,7 +233,7 @@ namespace Babylon
         ProgramData* m_currentProgram{nullptr};
 
         JsRuntime& m_runtime;
-        Graphics::DeviceContext& m_graphicsContext;
+        Graphics::DeviceContext& m_deviceContext;
         Graphics::Update m_update;
 
         JsRuntimeScheduler m_runtimeScheduler;

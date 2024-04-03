@@ -70,6 +70,13 @@ namespace Babylon::Graphics
        m_state.Bgfx.InitState.platformData.context = device;
     }
 
+    void DeviceImpl::SetRenderTarget(RenderTargetT renderTarget) 
+    {
+        std::scoped_lock lock{m_state.Mutex};
+        m_state.Bgfx.Dirty = true;
+        m_state.Bgfx.InitState.platformData.backBuffer = renderTarget;
+    }
+
     void DeviceImpl::UpdateSize(size_t width, size_t height)
     {
         std::scoped_lock lock{m_state.Mutex};
@@ -172,7 +179,10 @@ namespace Babylon::Graphics
 
             if (m_bgfxId != 0)
             {
-                m_renderResetCallback();
+                if (m_renderResetCallback)
+                {
+                    m_renderResetCallback();
+                }
             }
         }
     }

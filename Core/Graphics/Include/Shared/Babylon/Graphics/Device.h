@@ -95,6 +95,7 @@ namespace Babylon::Graphics
 
         void EnableRendering();
         void DisableRendering();
+        void SetRenderTarget(RenderTargetT renderTarget);
 
         DeviceUpdate GetUpdate(const char* updateName);
 

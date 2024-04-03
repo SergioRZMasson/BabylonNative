@@ -7,12 +7,13 @@
 #include <Windowsx.h>
 #include <Shlwapi.h>
 #include <filesystem>
-#include <stdio.h>
+#include <iostream>
 #include <optional>
 #include <d3d11.h>
 #include <winrt/base.h>
 #include <dxgi1_2.h>
 #include <future>
+#include <sstream>
 
 #include <Babylon/AppRuntime.h>
 #include <Babylon/Graphics/Device.h>
@@ -49,6 +50,21 @@ INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 
 namespace
 {
+    const char* GetLogLevelString(Babylon::Polyfills::Console::LogLevel logLevel)
+    {
+        switch (logLevel)
+        {
+            case Babylon::Polyfills::Console::LogLevel::Log:
+                return "Log";
+            case Babylon::Polyfills::Console::LogLevel::Warn:
+                return "Warn";
+            case Babylon::Polyfills::Console::LogLevel::Error:
+                return "Error";
+            default:
+                return "";
+        }
+    }
+
     std::string GetUrlFromPath(const std::filesystem::path& path)
     {
         char url[1024];
@@ -128,11 +144,13 @@ namespace
         runtime->Dispatch([hWnd](Napi::Env env) {
             device->AddToJavaScript(env);
 
-            Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto) {
-                OutputDebugStringA(message);
+            Babylon::Polyfills::Console::Initialize(env, [](const char* message, Babylon::Polyfills::Console::LogLevel logLevel) {
+                std::ostringstream ss{};
+                ss << "[" << GetLogLevelString(logLevel) << "] " << message << std::endl;
+                OutputDebugStringA(ss.str().data());
 
-                printf("%s", message);
-                fflush(stdout);
+                std::cout << ss.str();
+                std::cout.flush();
             });
 
             Babylon::Polyfills::Window::Initialize(env);
@@ -270,9 +288,7 @@ namespace
         device->FinishRenderingCurrentFrame();
 
         device->DisableRendering();
-
         InitD3DInfrastructure(hWnd);
-
         device->UpdateDevice(g_d3dDevice.get());
         device->EnableRendering();
     
