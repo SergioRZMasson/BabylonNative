@@ -212,6 +212,18 @@ namespace
 
             loader.LoadScript("app:///Scripts/playground_runner.js");
         }
+
+        loader.Dispatch([](Napi::Env) {
+            //auto function = env.Global().Get("StartRenderer").As<Napi::Function>();
+
+            /*auto onDone = Napi::Function::New(
+                env,
+                [](const Napi::CallbackInfo&) {
+                    g_isSceneLoaded = true;
+                },
+                "onDone");*/
+            //function.Call({onDone});
+        });
     }
 
     void UpdateWindowSize(size_t width, size_t height)

@@ -1,6 +1,15 @@
+#include <Windows.h>
+#include <windowsx.h>
+#include <DXGItype.h>
+#include <dxgi1_2.h>
+#include <dxgi1_3.h>
+#include <DXProgrammableCapture.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdarg.h>
+
 #include "../TestUtilsImplData.h"
 #include <filesystem>
-#include <Windowsx.h>
 #include <arcana/threading/task.h>
 #include <arcana/threading/task_schedulers.h>
 

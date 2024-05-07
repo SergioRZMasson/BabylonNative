@@ -294,7 +294,7 @@ function runTest(index, done) {
     console.log(testInfo);
     TestUtils.setTitle(testInfo);
 
-    seed = 1;
+    seed = 1;  
 
     if (generateReferences) {
         loadPlayground(test, done, undefined, saveRenderedResult);
@@ -352,7 +352,12 @@ xhr.addEventListener("readystatechange", function () {
 
         // Run tests
         const recursiveRunTest = function (i) {
+
+            TestUtils.startGraphicsDebug();
+
             runTest(i, function (status) {
+                TestUtils.endGraphicsDebug();
+
                 if (!status) {
                     TestUtils.exit(-1);
                     return;

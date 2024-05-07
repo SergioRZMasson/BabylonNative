@@ -10,6 +10,8 @@
 
 namespace Babylon::Plugins::Internal
 {
+    void InitializeGraphics();
+
     class TestUtils final : public Napi::ObjectWrap<TestUtils>
     {
     public:
@@ -21,6 +23,7 @@ namespace Babylon::Plugins::Internal
 
         static void CreateInstance(Napi::Env env, std::shared_ptr<ImplData> implData)
         {
+            InitializeGraphics();
             m_implData = std::move(implData);
             Napi::HandleScope scope{env};
 
@@ -36,6 +39,8 @@ namespace Babylon::Plugins::Internal
                     ParentT::InstanceMethod("decodeImage", &TestUtils::DecodeImage),
                     ParentT::InstanceMethod("getImageData", &TestUtils::GetImageData),
                     ParentT::InstanceMethod("getOutputDirectory", &TestUtils::GetOutputDirectory),
+                    ParentT::InstanceMethod("startGraphicsDebug", &TestUtils::StartGraphicsDebug),
+                    ParentT::InstanceMethod("endGraphicsDebug", &TestUtils::EndGraphicsDebug),
                 });
             env.Global().Set(JS_INSTANCE_NAME, func.New({}));
         }
@@ -54,6 +59,8 @@ namespace Babylon::Plugins::Internal
         void UpdateSize(const Napi::CallbackInfo& info);
         void SetTitle(const Napi::CallbackInfo& info);
         Napi::Value GetOutputDirectory(const Napi::CallbackInfo& info);
+        void StartGraphicsDebug(const Napi::CallbackInfo& info);
+        void EndGraphicsDebug(const Napi::CallbackInfo& info);
 
         Napi::Value GetGraphicsApiName(const Napi::CallbackInfo& info);
         void WritePNG(const Napi::CallbackInfo& info);
