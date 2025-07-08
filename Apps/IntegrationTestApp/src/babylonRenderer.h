@@ -49,6 +49,8 @@ private:
         m_textureAspectRatio = static_cast<float>(width) / static_cast<float>(height);
     }
 
+    void WaitForSceneReady();
+
     void CopyRenderTextureToOutput();
 
     uint32_t TextureWidth() const noexcept { return m_textureWidth; }

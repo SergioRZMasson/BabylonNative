@@ -36,6 +36,8 @@ std::vector<char> LoadBinaryFile(const char* path)
 // SaveTextureToPNG: Reads back the texture and saves as PNG using stb_image_write
 bool SaveTextureToPNG(ID3D11Device* device, ID3D11Texture2D* texture, const char* filename)
 {
+    std::remove(filename);
+
     D3D11_TEXTURE2D_DESC desc = {};
     texture->GetDesc(&desc);
 
@@ -73,6 +75,9 @@ bool SaveTextureToPNG(ID3D11Device* device, ID3D11Texture2D* texture, const char
     return result != 0;
 }
 
+#define RENDER_WIDTH 1280
+#define RENDER_HEIGHT 853
+
 int main()
 {
     // Create D3D11 Device
@@ -88,8 +93,8 @@ int main()
 
     // Create a simple 256x256 RGBA texture and fill with a gradient
     D3D11_TEXTURE2D_DESC texDesc = {};
-    texDesc.Width = 256;
-    texDesc.Height = 256;
+    texDesc.Width = RENDER_WIDTH;
+    texDesc.Height = RENDER_HEIGHT;
     texDesc.MipLevels = 1;
     texDesc.ArraySize = 1;
     texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -116,33 +121,18 @@ int main()
     renderer.SetRenderTarget(texture.Get());
 
     Matrix4 transform = Matrix4::Identity();
-    //transform.m[0] = 1.0f;
-    //transform.m[1] = 1.0f;
-    //transform.m[2] = 1.0f;
-    //transform.m[3] = 1.0f;
-    //transform.m[4] = 0.0f;
-    //transform.m[5] = 0.0f;
-    //transform.m[6] = -5.0f;
-    //transform.m[7] = 0.0f;
-    //transform.m[8] = 0.0f;
-    //transform.m[9] = 0.0f;
-    //transform.m[10] = 1.0f;
-    //transform.m[11] = 0.0f;
-    //transform.m[12] = 0.0f;
-    //transform.m[13] = 0.0f;
-    //transform.m[14] = 1.0f;
-    //transform.m[15] = 1.0f;
     
     // Set up viewport and camera transform
-    Rect viewport(0, 0, 256, 256);
+    Rect viewport(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
     ICameraTransform cameraTransform;
     
-    cameraTransform.SetPosition(Vector3(0, 0, -5));
+    cameraTransform.SetPosition(Vector3(0, 0, 2.26));
     cameraTransform.SetTargetPoint(Vector3(0, 0, 0));
     cameraTransform.SetUpVector(Vector3(0, 1, 0));
-    cameraTransform.SetFovInDegree(60.0f);
-    cameraTransform.SetNearClip(0.1f);
-    cameraTransform.SetFarClip(100.0f);
+
+    cameraTransform.SetFovInDegree(45.0f);
+    cameraTransform.SetNearClip(1.38834774);
+    cameraTransform.SetFarClip(3.13771915f);
 
     renderer.Render(viewport, transform, cameraTransform, false);
 

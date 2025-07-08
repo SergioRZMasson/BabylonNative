@@ -15,6 +15,7 @@
 #include <assert.h>
 #include <math.h>
 
+
 const char* GetLogLevelString(Babylon::Polyfills::Console::LogLevel logLevel)
 {
     switch (logLevel)
@@ -38,7 +39,7 @@ BabylonRenderer::BabylonRenderer(ID3D11Device* device, ID3D11DeviceContext* cont
 
 void BabylonRenderer::BeginFrame()
 {
-    BABYLON_GRAPHICS_DEBUG_BEGIN_FRAME_CAPTURE();
+    BABYLON_GRAPHICS_DEBUG_BEGIN_FRAME_CAPTURE(m_pGraphicsDevice->GetPlatformInfo().Device);
     m_pGraphicsDevice->StartRenderingCurrentFrame();
     m_pGraphicsDeviceUpdate->Start();
 }
@@ -47,7 +48,7 @@ void BabylonRenderer::EndFrame()
 {
     m_pGraphicsDeviceUpdate->Finish();
     m_pGraphicsDevice->FinishRenderingCurrentFrame();
-    BABYLON_GRAPHICS_DEBUG_END_FRAME_CAPTURE();
+    BABYLON_GRAPHICS_DEBUG_END_FRAME_CAPTURE(m_pGraphicsDevice->GetPlatformInfo().Device);
 }
 
 void BabylonRenderer::RenderFrame()
@@ -150,6 +151,8 @@ void BabylonRenderer::DispatchToJsRuntime(std::function<void(Napi::Env, std::pro
 
 void BabylonRenderer::Render(const Rect& viewport, const Matrix4& sceneTransform, const ICameraTransform& cameraTransform, bool fClipped)
 {
+    WaitForSceneReady();
+
     DispatchToJsRuntime([this, &sceneTransform, &viewport, &cameraTransform, fClipped](Napi::Env env, std::promise<void>& done) {
         ApplyRootNodeTransform(env, sceneTransform);
         ApplyCameraTransform(env, cameraTransform, viewport.Left(), viewport.Top(), viewport.Right(), viewport.Bottom(), fClipped);
@@ -158,7 +161,9 @@ void BabylonRenderer::Render(const Rect& viewport, const Matrix4& sceneTransform
     });
 
     RenderFrame();
+
     CopyRenderTextureToOutput();
+    EndFrame();
 }
 
 void BabylonRenderer::LoadModel3D(std::vector<char> modelData, std::vector<char> environmentData)
@@ -207,7 +212,11 @@ void BabylonRenderer::Init()
     // Initialize with the frame started so that JS will not block when calling native engine APIs.
     BeginFrame();
 
-    m_pJsRuntime = std::make_unique<Babylon::AppRuntime>();
+    auto jsOptions = ::Babylon::AppRuntime::Options{};
+    jsOptions.EnableDebugger = false;
+    jsOptions.WaitForDebugger = false;
+
+    m_pJsRuntime = std::make_unique<Babylon::AppRuntime>(jsOptions);
 
     ::Babylon::ScriptLoader scriptLoader(*m_pJsRuntime);
     std::promise<void> done;
@@ -242,6 +251,40 @@ void BabylonRenderer::Init()
 
     // Wait for script loader to complete before continuing.
     done.get_future().get();
+}
+
+void BabylonRenderer::WaitForSceneReady()
+{
+    std::promise<void> done;
+    std::promise<void> renderFrame;
+
+    m_pJsRuntime->Dispatch([this, &done, &renderFrame](Napi::Env env) {
+        auto jsRender = m_pContext->Get("waitForSceneReadyAsync").As<Napi::Function>();
+        auto promise = jsRender.Call(m_pContext->Value(), {}).As<Napi::Promise>();
+
+        auto onFulfilled = Napi::Function::New(env, [this, &done](const Napi::CallbackInfo&) {done.set_value(); }, "onFulfilled");
+
+        auto onRejected = Napi::Function::New(env, [&done](const Napi::CallbackInfo& info) {
+                auto errorString = info[0].ToString().Utf8Value();
+                assert(false);
+                done.set_exception(std::make_exception_ptr(std::runtime_error { errorString })); }, "onRejected");
+
+        promise.Get("then").As<Napi::Function>().Call(promise, {onFulfilled});
+        promise.Get("catch").As<Napi::Function>().Call(promise, {onRejected});
+
+        renderFrame.set_value();
+    });
+
+    renderFrame.get_future().get();
+
+    std::future<void> doneFuture = done.get_future();
+
+    while (std::future_status::timeout == doneFuture.wait_for(std::chrono::milliseconds(16)))
+    {
+        RenderFrame();
+    }
+    
+    doneFuture.get();
 }
 
 void BabylonRenderer::CopyRenderTextureToOutput()
@@ -287,6 +330,8 @@ void BabylonRenderer::CopyRenderTextureToOutput()
         deviceContext->CopyResource(m_poutputRenderTexture, tempTexture.Get());
     }
 }
+
+
 
 void BabylonRenderer::SetRenderTarget(ID3D11Texture2D* texture)
 {

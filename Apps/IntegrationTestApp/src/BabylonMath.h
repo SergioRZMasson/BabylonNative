@@ -3,26 +3,21 @@
 class Rect
 {
 public:
-    float x;
-    float y;
-    float width;
-    float height;
+    float top;
+    float left;
+    float right;
+    float bottom;
 
     Rect()
-        : x(0), y(0), width(0), height(0) {}
+        : left(0), top(0), right(0), bottom(0) {}
 
-    Rect(float x, float y, float width, float height)
-        : x(x), y(y), width(width), height(height) {}
+    Rect(float left, float top, float right, float bottom)
+        : left(left), top(top), right(right), bottom(bottom) {}
 
-    float Left() const { return x; }
-    float Top() const { return y; }
-    float Right() const { return x + width; }
-    float Bottom() const { return y + height; }
-
-    bool Contains(float px, float py) const
-    {
-        return px >= x && px <= Right() && py >= y && py <= Bottom();
-    }
+    float Left() const { return left; }
+    float Top() const { return top; }
+    float Right() const { return right; } // Fixed: changed from `x + width` to `right`
+    float Bottom() const { return bottom; } // Fixed: changed from `y + height` to `bottom`
 };
 
 class Matrix4
@@ -33,8 +28,25 @@ public:
     Matrix4()
     {
         // Initialize as identity matrix
-        for (int i = 0; i < 16; ++i)
-            m[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+        m[0] = 1;
+        m[1] = 0;
+        m[2] = 0;
+        m[3] = 0;
+
+        m[4] = 0;
+        m[5] = 1;
+        m[6] = 0;
+        m[7] = 0;
+
+        m[8] = 0;
+        m[9] = 0;
+        m[10] = 1;
+        m[11] = 0;
+
+        m[12] = 0;
+        m[13] = 0;
+        m[14] = 0;
+        m[15] = 1;
     }
 
     Matrix4(const float* values)

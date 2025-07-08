@@ -11,78 +11,121 @@
 
 #ifdef BABYLON_GRAPHICS_DEBUG
 
+#define VISUAL_STUDIO_GRAPHICS_DEBUG
+
+#ifdef VISUAL_STUDIO_GRAPHICS_DEBUG
+
 namespace
 {
 
-typedef HRESULT (*DXGIGetDebugInterface1FPtr)(UINT Flags, REFIID riid, _COM_Outptr_ void** pDebug);
+    typedef HRESULT (*DXGIGetDebugInterface1FPtr)(UINT Flags, REFIID riid, _COM_Outptr_ void** pDebug);
 
-IDXGraphicsAnalysis* pGraphicsAnalysis = nullptr;
+    IDXGraphicsAnalysis* pGraphicsAnalysis = nullptr;
 
-static bool s_fSupported = true;
+    static bool s_fSupported = true;
 
-// Set the number of frames to capture.
-unsigned int g_captureCount = 0;
+    // Set the number of frames to capture.
+    unsigned int g_captureCount = 0;
 
 } // namespace
 
 void GraphicsDebug_Load()
 {
-   if (pGraphicsAnalysis != nullptr || !s_fSupported)
-   {
-      return;
-   }
+    if (pGraphicsAnalysis != nullptr || !s_fSupported)
+    {
+        return;
+    }
 
-   HMODULE mod = GetModuleHandle("Dxgi.dll");
+    HMODULE mod = GetModuleHandle("Dxgi.dll");
 
-   if (mod == nullptr)
-   {
-      s_fSupported = false;
-      return;
-   }
+    if (mod == nullptr)
+    {
+        s_fSupported = false;
+        return;
+    }
 
-   DXGIGetDebugInterface1FPtr DXGIGetDebugInterface1Ptr = (DXGIGetDebugInterface1FPtr)GetProcAddress(mod, "DXGIGetDebugInterface1");
+    DXGIGetDebugInterface1FPtr DXGIGetDebugInterface1Ptr = (DXGIGetDebugInterface1FPtr)GetProcAddress(mod, "DXGIGetDebugInterface1");
 
-   if (DXGIGetDebugInterface1Ptr == nullptr)
-   {
-      s_fSupported = false;
-      return;
-   }
+    if (DXGIGetDebugInterface1Ptr == nullptr)
+    {
+        s_fSupported = false;
+        return;
+    }
 
-   HRESULT getAnalysis = DXGIGetDebugInterface1Ptr(0, __uuidof(pGraphicsAnalysis), reinterpret_cast<void**>(&pGraphicsAnalysis));
+    HRESULT getAnalysis = DXGIGetDebugInterface1Ptr(0, __uuidof(pGraphicsAnalysis), reinterpret_cast<void**>(&pGraphicsAnalysis));
 
-   if (FAILED(getAnalysis))
-   {
-      OutputDebugStringA("Unable to start IDXGraphicsAnalysis\n");
-      s_fSupported = false;
-   }
+    if (FAILED(getAnalysis))
+    {
+        OutputDebugStringA("Unable to start IDXGraphicsAnalysis\n");
+        s_fSupported = false;
+    }
 }
 
-void GraphicsDebug_BeginFrameCapture() noexcept
+void GraphicsDebug_BeginFrameCapture(ID3D11Device*) noexcept
 {
-   if (g_captureCount == 0)
-   {
-      return;
-   }
+    if (g_captureCount == 0)
+    {
+        return;
+    }
 
-   if (pGraphicsAnalysis)
-   {
-      pGraphicsAnalysis->BeginCapture();
-   }
+    if (pGraphicsAnalysis)
+    {
+        pGraphicsAnalysis->BeginCapture();
+    }
 }
 
-void GraphicsDebug_EndFrameCapture() noexcept
+void GraphicsDebug_EndFrameCapture(ID3D11Device*) noexcept
 {
-   if (g_captureCount == 0)
-   {
-      return;
-   }
+    if (g_captureCount == 0)
+    {
+        return;
+    }
 
-   if (pGraphicsAnalysis)
-   {
-      pGraphicsAnalysis->EndCapture();
-   }
+    if (pGraphicsAnalysis)
+    {
+        pGraphicsAnalysis->EndCapture();
+    }
 
-   --g_captureCount;
+    --g_captureCount;
 }
+
+#else
+
+#include "C:\\Program Files\\RenderDoc\\renderdoc_app.h"
+#include <cassert>
+
+namespace
+{
+    RENDERDOC_API_1_1_2* rdoc_api = nullptr;
+}
+
+void GraphicsDebug_Load()
+{
+    if (HMODULE mod = GetModuleHandleA("renderdoc.dll"))
+    {
+        pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
+        int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_1_2, (void**)&rdoc_api);
+        assert(ret == 1);
+    }
+}
+
+void GraphicsDebug_BeginFrameCapture(ID3D11Device* device) noexcept
+{
+    if (rdoc_api)
+    {
+        rdoc_api->StartFrameCapture(device, nullptr);
+    }
+}
+
+void GraphicsDebug_EndFrameCapture(ID3D11Device* device) noexcept
+{
+    if (rdoc_api)
+    {
+        rdoc_api->EndFrameCapture(device, nullptr);
+    }
+}
+
+
+#endif
 
 #endif
