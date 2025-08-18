@@ -149,6 +149,29 @@ void BabylonRenderer::DispatchToJsRuntime(std::function<void(Napi::Env, std::pro
     done.get_future().get();
 }
 
+void BabylonRenderer::Release3DModel()
+{
+    try
+    {
+        BeginFrame();
+
+        DispatchToJsRuntime([this](Napi::Env env, std::promise<void>& done) {
+            if (m_pContext)
+            {
+                env.Global().Get("BI_destroyScene").As<Napi::Function>().Call({m_pContext->Value()});
+                m_pContext = nullptr;
+                done.set_value();
+            }
+        });
+
+        EndFrame();
+
+    }catch (...) // std::lock_guard might throw
+    {
+        assert(false);
+    }
+}
+
 void BabylonRenderer::Render(const Rect& viewport, const Matrix4& sceneTransform, const ICameraTransform& cameraTransform, bool fClipped)
 {
     WaitForSceneReady();
@@ -330,8 +353,6 @@ void BabylonRenderer::CopyRenderTextureToOutput()
         deviceContext->CopyResource(m_poutputRenderTexture, tempTexture.Get());
     }
 }
-
-
 
 void BabylonRenderer::SetRenderTarget(ID3D11Texture2D* texture)
 {

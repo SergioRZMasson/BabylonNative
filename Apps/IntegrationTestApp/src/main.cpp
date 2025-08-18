@@ -135,6 +135,7 @@ int main()
     cameraTransform.SetFarClip(3.13771915f);
 
     renderer.Render(viewport, transform, cameraTransform, false);
+    renderer.Release3DModel();
 
     // Save to PNG
     if (SaveTextureToPNG(device.Get(), texture.Get(), "output.png"))

@@ -32,6 +32,7 @@ public:
 
     void LoadModel3D(std::vector<char> glb, std::vector<char> env);
     void DispatchToJsRuntime(std::function<void(Napi::Env, std::promise<void>&)>&& function) const;
+    void Release3DModel();
 
 private:
     void BeginFrame();
