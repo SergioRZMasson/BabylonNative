@@ -27,4 +27,9 @@ namespace IntegrationTestApp
    {
        m_impl->Release3DModel();
    }
+
+   void BabylonRenderer::BindRenderTarget()
+   {
+       m_impl->BindRenderTarget();
+   }
 }

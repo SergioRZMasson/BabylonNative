@@ -31,8 +31,9 @@ namespace IntegrationTestApp
 
         void Release3DModel();
 
+        void BindRenderTarget();
+
     private:
-        void SetRenderTarget();
         void DispatchToJsRuntime(std::function<void(Napi::Env, std::promise<void>&)>&& function) const;
         void BeginFrame();
         void EndFrame();

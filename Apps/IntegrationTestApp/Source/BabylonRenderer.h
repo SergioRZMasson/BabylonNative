@@ -31,6 +31,8 @@ namespace IntegrationTestApp
 
         void Release3DModel();
 
+        void BindRenderTarget();
+
     private:
         std::unique_ptr<BabylonRendererImpl> m_impl;
     };

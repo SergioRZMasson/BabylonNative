@@ -30,6 +30,7 @@ int main(int argc, char* argv[])
     auto environmentData = IntegrationTestApp::LoadBinaryFile("./assets/environment.env");
 
     renderer.LoadModel3D(modelData, environmentData);
+    renderer.BindRenderTarget();
 
     Matrix4 transform = Matrix4::Identity();
 

@@ -203,19 +203,31 @@ namespace IntegrationTestApp
 
         m_pJsRuntime->Dispatch([this, &done, &renderFrame](Napi::Env env) {
             auto jsRender = m_pContext->Get("waitForSceneReadyAsync").As<Napi::Function>();
-            auto promise = jsRender.Call(m_pContext->Value(), {}).As<Napi::Promise>();
 
-            auto onFulfilled = Napi::Function::New(env, [this, &done](const Napi::CallbackInfo&) { done.set_value(); }, "onFulfilled");
+            if (jsRender)
+            {
+                auto promise = jsRender.Call(m_pContext->Value(), {}).As<Napi::Promise>();
 
-            auto onRejected = Napi::Function::New(env, [&done](const Napi::CallbackInfo& info) {
-                auto errorString = info[0].ToString().Utf8Value();
-                assert(false);
-                done.set_exception(std::make_exception_ptr(std::runtime_error { errorString })); }, "onRejected");
+                auto onFulfilled = Napi::Function::New(env, [this, &done](const Napi::CallbackInfo&) { 
+                   done.set_value(); 
+                }, "onFulfilled");
 
-            promise.Get("then").As<Napi::Function>().Call(promise, {onFulfilled});
-            promise.Get("catch").As<Napi::Function>().Call(promise, {onRejected});
+                auto onRejected = Napi::Function::New(env, [&done](const Napi::CallbackInfo& info) {
+                     auto errorString = info[0].ToString().Utf8Value();
+                     assert(false);
+                     done.set_exception(std::make_exception_ptr(std::runtime_error { errorString })); 
+                }, "onRejected");
 
-            renderFrame.set_value();
+                promise.Get("then").As<Napi::Function>().Call(promise, {onFulfilled});
+                promise.Get("catch").As<Napi::Function>().Call(promise, {onRejected});
+
+                renderFrame.set_value();
+            }
+            else
+            {
+                renderFrame.set_value();
+                done.set_value();
+            }
         });
 
         renderFrame.get_future().get();
@@ -286,7 +298,5 @@ namespace IntegrationTestApp
 
         // Wait for script loader to complete before continuing.
         done.get_future().get();
-
-        SetRenderTarget();
     }
 }

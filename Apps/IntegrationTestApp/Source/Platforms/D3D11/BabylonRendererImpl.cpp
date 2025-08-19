@@ -73,7 +73,7 @@ namespace IntegrationTestApp
         }
     }
 
-    void BabylonRendererImpl::SetRenderTarget()
+    void BabylonRendererImpl::BindRenderTarget()
     {
         auto factoryDevice = m_pGraphicsDevice->GetPlatformInfo().Device;
         auto factoryD3D11Device = static_cast<ID3D11Device*>(factoryDevice);
