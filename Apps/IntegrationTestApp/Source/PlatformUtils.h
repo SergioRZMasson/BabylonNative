@@ -11,4 +11,6 @@ namespace IntegrationTestApp
     std::vector<char> LoadBinaryFile(const char* path);
 
     bool SaveTextureToPNG(BabylonRendererTexture2DPtr texture, const char* filename);
+
+    bool CreateApplicationContext(ApplicationGraphicsContext& applicationContext, uint32_t width, uint32_t height);
 }

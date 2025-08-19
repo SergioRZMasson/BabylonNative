@@ -21,9 +21,8 @@
 
 namespace IntegrationTestApp
 {
-    BabylonRendererImpl::BabylonRendererImpl(ID3D11Device* device, ID3D11DeviceContext* context)
-        : m_device{device}
-        , m_deviceContext{context}
+    BabylonRendererImpl::BabylonRendererImpl(ApplicationGraphicsContext& context)
+        : m_context{context}
         , m_textureWidth{0}
         , m_textureHeight{0}
         , m_textureAspectRatio{1.0f}
@@ -33,7 +32,7 @@ namespace IntegrationTestApp
     void BabylonRendererImpl::CopyRenderTextureToOutput()
     {
         // Office will not use a GPU texture to get the rendering result from Babylon.
-        if (m_poutputRenderTexture == nullptr)
+        if (m_context.RenderText == nullptr)
         {
             return;
         }
@@ -42,7 +41,7 @@ namespace IntegrationTestApp
         m_pBabylonRenderTexture->GetDevice(factoryDevice.GetAddressOf());
 
         Microsoft::WRL::ComPtr<ID3D11Device> officeProvidedDevice;
-        m_poutputRenderTexture->GetDevice(officeProvidedDevice.GetAddressOf());
+        m_context.RenderText->GetDevice(officeProvidedDevice.GetAddressOf());
 
         Microsoft::WRL::ComPtr<ID3D11DeviceContext> factoryContext;
         factoryDevice->GetImmediateContext(factoryContext.GetAddressOf());
@@ -70,19 +69,18 @@ namespace IntegrationTestApp
             officeProvidedDevice->GetImmediateContext(deviceContext.GetAddressOf());
 
             // Copy Babylon texture content to Office's texture using GPU.
-            deviceContext->CopyResource(m_poutputRenderTexture, tempTexture.Get());
+            deviceContext->CopyResource(m_context.RenderText.Get(), tempTexture.Get());
         }
     }
 
-    void BabylonRendererImpl::SetRenderTarget(ID3D11Texture2D* texture)
+    void BabylonRendererImpl::SetRenderTarget()
     {
-        m_poutputRenderTexture = texture;
         auto factoryDevice = m_pGraphicsDevice->GetPlatformInfo().Device;
         auto factoryD3D11Device = static_cast<ID3D11Device*>(factoryDevice);
 
         // Create a Render Texture that can be shared by both Office's and Babylon's devices.
         D3D11_TEXTURE2D_DESC desc;
-        texture->GetDesc(&desc);
+        m_context.RenderText->GetDesc(&desc);
         desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
         FAILED(factoryD3D11Device->CreateTexture2D(&desc, nullptr, m_pBabylonRenderTexture.GetAddressOf()));
 

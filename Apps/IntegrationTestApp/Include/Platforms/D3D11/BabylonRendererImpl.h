@@ -19,12 +19,10 @@ namespace IntegrationTestApp
     {
     public:
         // Constructor receives a pointer to ID3D11Device
-        BabylonRendererImpl(BabylonRendererDevicePtr device, BabylonRendererDeviceContextPtr context);
+        BabylonRendererImpl(ApplicationGraphicsContext& context);
 
         // Initializes the renderer
         void Init();
-
-        void SetRenderTarget(BabylonRendererTexture2DPtr texture);
 
         // Renders using the provided ID3D11Texture2D
         void Render(const Rect& viewport, const Matrix4& sceneTransform, const ICameraTransform& cameraTransform, bool clipped);
@@ -34,6 +32,7 @@ namespace IntegrationTestApp
         void Release3DModel();
 
     private:
+        void SetRenderTarget();
         void DispatchToJsRuntime(std::function<void(Napi::Env, std::promise<void>&)>&& function) const;
         void BeginFrame();
         void EndFrame();
@@ -57,10 +56,9 @@ namespace IntegrationTestApp
         uint32_t TextureWidth() const noexcept { return m_textureWidth; }
         uint32_t TextureHeight() const noexcept { return m_textureHeight; }
 
-        ID3D11Device* m_device = nullptr;
-        ID3D11DeviceContext* m_deviceContext = nullptr;
+        ApplicationGraphicsContext& m_context;
+
         Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pBabylonRenderTexture = nullptr;
-        ID3D11Texture2D* m_poutputRenderTexture = nullptr;
         std::unique_ptr<::Babylon::Graphics::Device> m_pGraphicsDevice;
         std::unique_ptr<::Babylon::Graphics::DeviceUpdate> m_pGraphicsDeviceUpdate;
         std::unique_ptr<::Babylon::AppRuntime> m_pJsRuntime;

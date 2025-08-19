@@ -18,13 +18,11 @@ namespace IntegrationTestApp
     {
     public:
         // Constructor receives a pointer to ID3D11Device
-        BabylonRenderer(BabylonRendererDevicePtr device, BabylonRendererDeviceContextPtr context);
+        BabylonRenderer(ApplicationGraphicsContext& context);
         ~BabylonRenderer() = default;
 
         // Initializes the renderer
         void Init();
-
-        void SetRenderTarget(BabylonRendererTexture2DPtr texture);
 
         // Renders using the provided ID3D11Texture2D
         void Render(const Rect& viewport, const Matrix4& sceneTransform, const ICameraTransform& cameraTransform, bool clipped);

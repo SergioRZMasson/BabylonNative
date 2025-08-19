@@ -61,7 +61,7 @@ void GraphicsDebug_Load()
     }
 }
 
-void GraphicsDebug_BeginFrameCapture(ID3D11Device*) noexcept
+void GraphicsDebug_BeginFrameCapture(Microsoft::WRL::ComPtr<ID3D11Device>) noexcept
 {
     if (g_captureCount == 0)
     {
@@ -74,7 +74,7 @@ void GraphicsDebug_BeginFrameCapture(ID3D11Device*) noexcept
     }
 }
 
-void GraphicsDebug_EndFrameCapture(ID3D11Device*) noexcept
+void GraphicsDebug_EndFrameCapture(Microsoft::WRL::ComPtr<ID3D11Device>) noexcept
 {
     if (g_captureCount == 0)
     {
@@ -109,22 +109,21 @@ void GraphicsDebug_Load()
     }
 }
 
-void GraphicsDebug_BeginFrameCapture(ID3D11Device* device) noexcept
+void GraphicsDebug_BeginFrameCapture(Microsoft::WRL::ComPtr<ID3D11Device> device) noexcept
 {
     if (rdoc_api)
     {
-        rdoc_api->StartFrameCapture(device, nullptr);
+        rdoc_api->StartFrameCapture(device.Get(), nullptr);
     }
 }
 
-void GraphicsDebug_EndFrameCapture(ID3D11Device* device) noexcept
+void GraphicsDebug_EndFrameCapture(Microsoft::WRL::ComPtr<ID3D11Device> device) noexcept
 {
     if (rdoc_api)
     {
-        rdoc_api->EndFrameCapture(device, nullptr);
+        rdoc_api->EndFrameCapture(device.Get(), nullptr);
     }
 }
-
 
 #endif
 

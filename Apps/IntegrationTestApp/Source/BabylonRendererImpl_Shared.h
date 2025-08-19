@@ -273,7 +273,7 @@ namespace IntegrationTestApp
             ::Babylon::Plugins::NativeEngine::Initialize(env);
         });
 
-        scriptLoader.LoadScript("http://127.0.0.1:8080/BabylonInterop.bundle.js");
+        scriptLoader.LoadScript(m_context.BabylonFilePath);
 
         scriptLoader.Dispatch([this, &done](Napi::Env env) {
             auto getEngineInfo = env.Global().Get("BI_getEngineInfo").As<Napi::Function>();
@@ -286,5 +286,7 @@ namespace IntegrationTestApp
 
         // Wait for script loader to complete before continuing.
         done.get_future().get();
+
+        SetRenderTarget();
     }
 }

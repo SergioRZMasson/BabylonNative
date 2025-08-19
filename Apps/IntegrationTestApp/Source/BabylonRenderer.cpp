@@ -3,19 +3,14 @@
 
 namespace IntegrationTestApp
 {
-   BabylonRenderer::BabylonRenderer(BabylonRendererDevicePtr device, BabylonRendererDeviceContextPtr context)
-       : m_impl{std::make_unique<BabylonRendererImpl>(device, context)}
+    BabylonRenderer::BabylonRenderer(ApplicationGraphicsContext& context)
+        : m_impl{std::make_unique<BabylonRendererImpl>(context)}
    {
    }
 
    void BabylonRenderer::Init()
    {
        m_impl->Init();
-   }
-
-   void BabylonRenderer::SetRenderTarget(BabylonRendererTexture2DPtr texture)
-   {
-       m_impl->SetRenderTarget(texture);
    }
 
    void BabylonRenderer::Render(const Rect& viewport, const Matrix4& sceneTransform, const ICameraTransform& cameraTransform, bool clipped)
