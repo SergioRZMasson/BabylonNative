@@ -5,12 +5,16 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+
+#include <Metal/Metal.h>
+
+
 namespace IntegrationTestApp
 {
     void ConsolePrint(std::string message)
     {
-        // TODO: Implement
-        std::cout << message.c_str() << std::endl;
+        NSString *nsMessage = [NSString stringWithUTF8String:message.c_str()];
+        NSLog(@"%@", nsMessage);
     }
 
     std::vector<char> LoadBinaryFile(const char* path)
@@ -33,13 +37,40 @@ namespace IntegrationTestApp
 
     bool SaveTextureToPNG(BabylonRendererTexture2DPtr texture, const char* filename)
     {
-        // TODO: Implement
+        NSUInteger width = texture.width;
+        NSUInteger height = texture.height;
+
+        size_t bytesPerRow = 4 * width;
+        size_t imageSize = bytesPerRow * height;
+        uint8_t* imageData = (uint8_t*)malloc(imageSize);
+
+        MTLRegion region = MTLRegionMake2D(0, 0, width, height);
+        [texture getBytes:imageData
+               bytesPerRow:bytesPerRow
+                 fromRegion:region
+                mipmapLevel:0];
+        
+        
+        stbi_write_png(filename, (int)width, (int)height, 4, imageData, (int)bytesPerRow);
+        free(imageData);
+
         return true;
     }
 
     bool CreateApplicationContext(ApplicationGraphicsContext& applicationContext, uint32_t width, uint32_t height)
     {
-        // TODO: Implement
+        applicationContext.Device = MTLCreateSystemDefaultDevice();
+        applicationContext.Context = nullptr;
+        
+        MTLTextureDescriptor *desc = [[MTLTextureDescriptor alloc] init];
+        desc.textureType = MTLTextureType2D;
+        desc.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        desc.width = width;
+        desc.height = height;
+        desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        desc.storageMode = MTLStorageModePrivate;
+        
+        applicationContext.RenderText = [applicationContext.Device newTextureWithDescriptor:desc];
         return true;
     }
 }
