@@ -22,8 +22,8 @@ elseif(GRAPHICS_API STREQUAL Metal)
         "Source/Platforms/Metal/BabylonRendererImpl.mm"
         "Source/Platforms/Metal/GraphicsDebug.mm"
         "Source/Platforms/Metal/PlatformUtils.mm"
-        "Include/Platforms/Metal/RenderTypes.mm"
-        "Include/Platforms/Metal/BabylonRendererImpl.cpp")
+        "Include/Platforms/Metal/RenderTypes.h"
+        "Include/Platforms/Metal/BabylonRendererImpl.h")
 endif()
 
 add_executable(IntegrationTestApp ${INTEGRATION_APP_SOURCES} ${ASSETS})

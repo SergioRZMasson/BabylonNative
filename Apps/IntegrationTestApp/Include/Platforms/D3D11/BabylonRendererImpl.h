@@ -1,7 +1,5 @@
 #pragma once
 
-#pragma once
-
 #include <Babylon/AppRuntime.h>
 #include <Babylon/Graphics/Device.h>
 #include <Babylon/Plugins/ExternalTexture.h>

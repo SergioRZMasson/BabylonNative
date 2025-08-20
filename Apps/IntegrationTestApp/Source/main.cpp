@@ -32,15 +32,15 @@ int main(int argc, char* argv[])
     renderer.LoadModel3D(modelData, environmentData);
     renderer.BindRenderTarget();
 
-    Matrix4 transform = Matrix4::Identity();
+    IntegrationTestApp::Matrix4 transform = IntegrationTestApp::Matrix4::Identity();
 
     // Set up viewport and camera transform
-    Rect viewport(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
-    ICameraTransform cameraTransform;
+    IntegrationTestApp::Rect viewport(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
+    IntegrationTestApp::ICameraTransform cameraTransform;
 
-    cameraTransform.SetPosition(Vector3(0, 0, 2.26f));
-    cameraTransform.SetTargetPoint(Vector3(0, 0, 0));
-    cameraTransform.SetUpVector(Vector3(0, 1, 0));
+    cameraTransform.SetPosition(IntegrationTestApp::Vector3(0, 0, 2.26f));
+    cameraTransform.SetTargetPoint(IntegrationTestApp::Vector3(0, 0, 0));
+    cameraTransform.SetUpVector(IntegrationTestApp::Vector3(0, 1, 0));
 
     cameraTransform.SetFovInDegree(45.0f);
     cameraTransform.SetNearClip(1.38834774f);
