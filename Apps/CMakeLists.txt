@@ -12,5 +12,4 @@ if((WIN32 AND NOT WINDOWS_STORE) OR (APPLE AND NOT IOS AND NOT VISIONOS) OR (UNI
 endif()
 
 add_subdirectory(IntegrationTestApp)
-
-npm(install --silent)
+npm(install --silent --yes)

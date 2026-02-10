@@ -9,57 +9,86 @@ include(FetchContent)
 # --------------------------------------------------
 # Declarations
 # --------------------------------------------------
+
+# EXCLUDE_FROM_ALL is used to prevent FetchContent from automatically adding
+# targets to the ALL_BUILD target.  We do this for all dependencies except
+# JsRuntimeHost because JsRuntimeHost has top-level targets (e.g., AppRuntime)
+# that are part of the Babylon Native contract. When adding dependencies using
+# FetchContent, add the EXCLUDE_FROM_ALL option except where there are top-level
+# targets that are part of the Babylon Native contract.
+
 FetchContent_Declare(AndroidExtensions
     GIT_REPOSITORY https://github.com/BabylonJS/AndroidExtensions.git
-    GIT_TAG 7d88a601fda9892791e7b4e994e375e049615688)
+    GIT_TAG 2d5af72259cc73e5f249d3c99bee2010be9cb042
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(arcana.cpp
     GIT_REPOSITORY https://github.com/microsoft/arcana.cpp.git
-    GIT_TAG 1a8a5d6e95413ed14b38a6ac9419048f9a9c8009)
+    GIT_TAG c02527c32d51b6b3ffeda36f8cf140d2e1c60bb9
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(arcore-android-sdk
     GIT_REPOSITORY https://github.com/google-ar/arcore-android-sdk.git
-    GIT_TAG 98cb803de5482fb2b36effe8be3b5a0d3b726976)
+    GIT_TAG 98cb803de5482fb2b36effe8be3b5a0d3b726976
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(base-n
     GIT_REPOSITORY https://github.com/azawadzki/base-n.git
-    GIT_TAG 7573e77c0b9b0e8a5fb63d96dbde212c921993b4)
+    GIT_TAG 7573e77c0b9b0e8a5fb63d96dbde212c921993b4
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(bgfx.cmake
     GIT_REPOSITORY https://github.com/BabylonJS/bgfx.cmake.git
-    GIT_TAG fdf3ed4a62acabd7025d0a843f6d8a9aff5e3612)
+    GIT_TAG 0af3c9865a66aff1748a51bb466b24f05a123043
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(CMakeExtensions
     GIT_REPOSITORY https://github.com/BabylonJS/CMakeExtensions.git
-    GIT_TAG ea28b7689530bfdc4905806f27ecf7e8ed4b5419)
+    GIT_TAG ea28b7689530bfdc4905806f27ecf7e8ed4b5419
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(glslang
     GIT_REPOSITORY https://github.com/BabylonJS/glslang.git
-    GIT_TAG 6388a301b23edf0ae6a9342d46efa9cb21f05d9b)
+    GIT_TAG 39a80699a315cb7f66c4ab3180edd4e2910fab28
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(googletest
-    URL "https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz")
+    URL "https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz"
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(ios-cmake
     GIT_REPOSITORY https://github.com/leetal/ios-cmake.git
-    GIT_TAG 4.5.0)
+    GIT_TAG 4.5.0
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(JsRuntimeHost
     GIT_REPOSITORY https://github.com/BabylonJS/JsRuntimeHost.git
-    GIT_TAG 8e6a71e78de6880d12b225cfbcc2cc6348c55e61)
+    GIT_TAG 06d4420e92f9555b5356071444cd13767d3e4eb8)
 FetchContent_Declare(SPIRV-Cross
     GIT_REPOSITORY https://github.com/BabylonJS/SPIRV-Cross.git
-    GIT_TAG 6abfcf066d171e9ade7604d91381ebebe4209edc)
+    GIT_TAG 6277baf62877f6b1a66a5801da94f0c9276991dc
+    EXCLUDE_FROM_ALL)
 FetchContent_Declare(libwebp
     GIT_REPOSITORY https://github.com/webmproject/libwebp.git
-    GIT_TAG 57e324e2eb99be46df46d77b65705e34a7ae616c)
+    GIT_TAG 57e324e2eb99be46df46d77b65705e34a7ae616c
+    EXCLUDE_FROM_ALL)
+
 # --------------------------------------------------
 
 FetchContent_MakeAvailable(CMakeExtensions)
 
-if(VISIONOS)
+# BABYLON_NATIVE_BUILD_SOURCETREE flag is used by BabylonReactNative NPM build process.
+# CMake script is run twice. At package creation, BABYLON_NATIVE_BUILD_SOURCETREE is ON
+# which makes all dependencies to be fetched and packaged.
+# At build time, cmake is run again on BabylonNative root but FETCHCONTENT_FULLY_DISCONNECTED is ON
+# and FetchContent_MakeAvailable_With_Message will use provided local folder provided to cmake command line
+# like '-DFETCHCONTENT_SOURCE_DIR_BGFX.CMAKE=../shared/Babylon/....'
+
+if(VISIONOS OR IOS OR BABYLON_NATIVE_BUILD_SOURCETREE)
     FetchContent_MakeAvailable_With_Message(ios-cmake)
-    set(CMAKE_TOOLCHAIN_FILE "${ios-cmake_SOURCE_DIR}/ios.toolchain.cmake" CACHE PATH "")
+    if(NOT BABYLON_NATIVE_BUILD_SOURCETREE)
+        set(CMAKE_TOOLCHAIN_FILE "${ios-cmake_SOURCE_DIR}/ios.toolchain.cmake" CACHE PATH "")
+    endif()
+    set(ENABLE_ARC OFF CACHE STRING "Enables or disables ARC support.")
+endif()
+
+if(VISIONOS)
     set(PLATFORM "VISIONOSCOMBINED" CACHE STRING "")
     set(DEPLOYMENT_TARGET "1.0" CACHE STRING "")
-    set(ENABLE_ARC OFF CACHE STRING "Enables or disables ARC support.")
 elseif(IOS)
-    FetchContent_MakeAvailable_With_Message(ios-cmake)
-    set(CMAKE_TOOLCHAIN_FILE "${ios-cmake_SOURCE_DIR}/ios.toolchain.cmake" CACHE PATH "")
     set(PLATFORM "OS64COMBINED" CACHE STRING "")
     set(DEPLOYMENT_TARGET "13" CACHE STRING "")
-    set(ENABLE_ARC OFF CACHE STRING "Enables or disables ARC support.")
 endif()
 
 project(BabylonNative)
@@ -85,17 +114,50 @@ option(BABYLON_NATIVE_CHECK_THREAD_AFFINITY "Checks thread safety in the graphic
 option(BABYLON_NATIVE_PLUGIN_EXTERNALTEXTURE "Include Babylon Native Plugin ExternalTexture." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVECAMERA "Include Babylon Native Plugin NativeCamera." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVECAPTURE "Include Babylon Native Plugin NativeCapture." ON)
+option(BABYLON_NATIVE_PLUGIN_NATIVEENCODING "Include Babylon Native Plugin NativeEncoding." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVEENGINE "Include Babylon Native Plugin NativeEngine." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVEENGINE_WEBP "Include Babylon Native Plugin NativeEngine - WebP." ON)
+option(BABYLON_NATIVE_PLUGIN_NATIVEENGINE_COMPILESHADERS "Include Babylon Native Plugin NativeEngine - Compile Shaders." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVEINPUT "Include Babylon Native Plugin NativeInput." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVEOPTIMIZATIONS "Include Babylon Native Plugin NativeOptimizations." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVETRACING "Include Babylon Native Plugin NativeTracing." ON)
 option(BABYLON_NATIVE_PLUGIN_NATIVEXR "Include Babylon Native Plugin XR." ON)
+option(BABYLON_NATIVE_PLUGIN_SHADERCACHE "Include Babylon Native Plugin ShaderCache." ON)
+option(BABYLON_NATIVE_PLUGIN_SHADERCOMPILER "Include Babylon Native Plugin ShaderCompiler." ON)
+option(BABYLON_NATIVE_PLUGIN_SHADERTOOL "Include Babylon Native Plugin ShaderTool." ON)
 option(BABYLON_NATIVE_PLUGIN_TESTUTILS "Include Babylon Native Plugin TestUtils." ON)
 
 # Polyfills
 option(BABYLON_NATIVE_POLYFILL_WINDOW "Include Babylon Native Polyfill Window." ON)
 option(BABYLON_NATIVE_POLYFILL_CANVAS "Include Babylon Native Polyfill Canvas." ON)
+
+# Sanitizers
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UBSan" OFF)
+
+if(ENABLE_SANITIZERS)
+    set(ENABLE_RTTI ON CACHE BOOL "" FORCE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        set(SANITIZERS "address,undefined")
+        # Check for Clang since vptr and fdsan are Clang-specific
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            list(APPEND SANITIZERS "vptr")
+            # FDSan only works on Android builds with Clang
+            if (ANDROID)
+                list(APPEND SANITIZERS "fdsan")
+            endif()
+        endif()
+
+        string(JOIN "," SANITIZER_FLAGS ${SANITIZERS})
+
+        add_compile_options(-fsanitize=${SANITIZER_FLAGS} -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=${SANITIZER_FLAGS})
+    elseif(MSVC)
+        # MSVC only supports AddressSanitizer
+        add_compile_options(/fsanitize=address /Zi /Od)
+    else()
+        message(FATAL_ERROR "Sanitizers not supported on this compiler.")
+    endif()
+endif()
 
 # --------------------------------------------------
 
@@ -177,6 +239,6 @@ if(BABYLON_NATIVE_BUILD_APPS)
 endif()
 
 # no install for glslang compiled for shaderc
-if(BABYLON_NATIVE_INSTALL AND NOT BGFX_BUILD_TOOLS)
+if(BABYLON_NATIVE_INSTALL)
     include(Install/Install.cmake)
 endif()

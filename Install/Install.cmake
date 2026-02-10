@@ -5,12 +5,13 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 function(install_targets)
-    install(TARGETS ${ARGN})
-
-    # Install the pdb files if they exist
     foreach(target IN LISTS ARGN)
         get_target_property(target_type ${target} TYPE)
         if(NOT target_type STREQUAL "INTERFACE_LIBRARY")
+            # Install the library file
+            install(FILES "$<TARGET_FILE:${target}>" DESTINATION lib)
+
+            # Install the pdb file if it exists
             install(FILES "$<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_PREFIX:${target}>$<TARGET_FILE_BASE_NAME:${target}>.pdb" DESTINATION lib OPTIONAL)
         endif()
     endforeach()
@@ -35,10 +36,15 @@ endfunction()
 install_targets(arcana)
 
 ## bgfx
-install_targets(bimg_encode bimg_decode bgfx bimg bx)
+install_targets(bimg_encode bimg_decode bgfx bimg bx minz)
 
 ## glslang
-install_targets(GenericCodeGen glslang MachineIndependent OGLCompiler OSDependent SPIRV glslang-default-resource-limits)
+install_targets(GenericCodeGen glslang glslang-default-resource-limits MachineIndependent OGLCompiler OSDependent SPIRV)
+
+## libwebp
+if(TARGET webp)
+    install_targets(webp)
+endif()
 
 ## SPIRV-Cross
 install_targets(spirv-cross-core)
@@ -64,18 +70,17 @@ endif()
 ## UrlLib
 install_targets(UrlLib)
 
-## Fonudation
-install_targets(Foundation)
-
 # ----------------
 # Core
 # ----------------
+
+install_targets(Foundation)
 install_include_for_targets(Foundation)
 
 install_targets(JsRuntime)
 install_include_for_targets(JsRuntime)
 
- # Note libs are in the `Graphics` target but includes are in `GraphicsDevice` target
+# Note libs are in the `Graphics` target but includes are in `GraphicsDevice` target
 install_targets(Graphics)
 install_include_for_targets(GraphicsDevice)
 
@@ -119,6 +124,7 @@ install_include_for_targets(napi-extensions)
 # ----------------
 # Plugins
 # ----------------
+
 if(TARGET ExternalTexture)
     install_targets(ExternalTexture)
     install_include_for_targets(ExternalTexture)
@@ -159,6 +165,20 @@ if(TARGET NativeXr)
     install_include_for_targets(NativeXr)
 endif()
 
+if(TARGET NativeEncoding)
+    install_targets(NativeEncoding)
+    install_include_for_targets(NativeEncoding)
+endif()
+
+if(TARGET ShaderCache)
+    install_targets(ShaderCache)
+    install_include_for_targets(ShaderCache)
+endif()
+
+if(TARGET ShaderCompiler)
+    install_targets(ShaderCompiler)
+endif()
+
 # ----------------
 # Polyfills
 # ----------------
@@ -181,4 +201,29 @@ endif()
 if(TARGET XMLHttpRequest)
     install_targets(XMLHttpRequest)
     install_include_for_targets(XMLHttpRequest)
+endif()
+
+if(TARGET Blob)
+    install_targets(Blob)
+    install_include_for_targets(Blob)
+endif()
+
+if(TARGET URL)
+    install_targets(URL)
+    install_include_for_targets(URL)
+endif()
+
+if(TARGET AbortController)
+    install_targets(AbortController)
+    install_include_for_targets(AbortController)
+endif()
+
+if(TARGET WebSocket)
+    install_targets(WebSocket)
+    install_include_for_targets(WebSocket)
+endif()
+
+if(TARGET Performance)
+    install_targets(Performance)
+    install_include_for_targets(Performance)
 endif()

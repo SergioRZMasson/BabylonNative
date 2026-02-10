@@ -3,7 +3,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 # --------------------------------------------------
 # AndroidExtensions
 # --------------------------------------------------
-if(ANDROID)
+if(ANDROID OR BABYLON_NATIVE_BUILD_SOURCETREE)
     FetchContent_MakeAvailable_With_Message(AndroidExtensions)
 endif()
 
@@ -15,7 +15,7 @@ FetchContent_MakeAvailable_With_Message(arcana.cpp)
 # --------------------------------------------------
 # arcore-android-sdk
 # --------------------------------------------------
-if(ANDROID)
+if(ANDROID OR BABYLON_NATIVE_BUILD_SOURCETREE)
     FetchContent_MakeAvailable_With_Message(arcore-android-sdk)
 endif()
 
@@ -30,18 +30,26 @@ target_include_directories(base-n INTERFACE "${base-n_SOURCE_DIR}/include")
 # --------------------------------------------------
 # bgfx.cmake
 # --------------------------------------------------
-set(BGFX_BUILD_TOOLS OFF)
 set(BGFX_BUILD_EXAMPLES OFF)
-set(BGFX_INSTALL OFF)
+set(BGFX_BUILD_TOOLS OFF)
+set(BGFX_CONFIG_MULTITHREADED ON)
 set(BGFX_CUSTOM_TARGETS OFF)
-set(BGFX_USE_DEBUG_SUFFIX OFF)
+set(BGFX_INSTALL OFF)
 set(BGFX_OPENGL_USE_EGL ON)
+set(BGFX_USE_DEBUG_SUFFIX OFF)
 FetchContent_MakeAvailable_With_Message(bgfx.cmake)
 
-target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_MULTITHREADED=1)
-target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_MAX_VERTEX_STREAMS=18)
-target_compile_definitions(bgfx PRIVATE BGFX_GL_CONFIG_BLIT_EMULATION=1)
+# Turn off debug annotations as it causes an access violation in D3D12.
+# This flag is set using compile definitions because the bgfx.cmake option is ignored in debug configuration.
+# See https://github.com/BabylonJS/bgfx.cmake/blob/0af3c9865a66aff1748a51bb466b24f05a123043/cmake/bgfx/bgfx.cmake#L126.
 target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_DEBUG_ANNOTATION=0)
+
+target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_DEFAULT_MAX_ENCODERS=2)
+target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_MAX_VERTEX_STREAMS=18)
+target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_MIN_RESOURCE_COMMAND_BUFFER_SIZE=16)
+target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_MIN_UNIFORM_BUFFER_SIZE=4096)
+target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_UNIFORM_BUFFER_RESIZE_THRESHOLD_SIZE=256)
+target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_UNIFORM_BUFFER_RESIZE_INCREMENT_SIZE=1024)
 if(GRAPHICS_API STREQUAL "D3D11")
     target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_DIRECT3D11=1)
 elseif(GRAPHICS_API STREQUAL "D3D12")
@@ -50,6 +58,7 @@ elseif(GRAPHICS_API STREQUAL "Metal")
     target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_METAL=1)
 elseif(GRAPHICS_API STREQUAL "OpenGL")
     target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_OPENGLES=30)
+    target_compile_definitions(bgfx PRIVATE BGFX_GL_CONFIG_BLIT_EMULATION=1)
     target_compile_definitions(bgfx PRIVATE BGFX_GL_CONFIG_TEXTURE_READ_BACK_EMULATION=1)
 elseif(GRAPHICS_API STREQUAL "Vulkan")
     target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_VULKAN=1)
@@ -60,6 +69,8 @@ set_property(TARGET bimg_encode PROPERTY FOLDER Dependencies/bgfx/3rdparty)
 set_property(TARGET bimg_encode PROPERTY UNITY_BUILD false)
 set_property(TARGET bimg_decode PROPERTY FOLDER Dependencies/bgfx/3rdparty)
 set_property(TARGET bimg_decode PROPERTY UNITY_BUILD false)
+set_property(TARGET minz PROPERTY FOLDER Dependencies/bgfx/3rdparty)
+set_property(TARGET minz PROPERTY UNITY_BUILD false)
 if(TARGET tinyexr)
     set_property(TARGET tinyexr PROPERTY FOLDER Dependencies/bgfx/3rdparty)
 endif()
@@ -190,7 +201,7 @@ endif()
 # xr
 # --------------------------------------------------
 # Currently supported on Android via ARCore, and iOS via ARKit.
-if(BABYLON_NATIVE_PLUGIN_NATIVEXR AND (ANDROID OR IOS))
+if((BABYLON_NATIVE_PLUGIN_NATIVEXR AND (ANDROID OR IOS)) OR BABYLON_NATIVE_BUILD_SOURCETREE)
     add_subdirectory(xr)
     set_property(TARGET xr PROPERTY FOLDER Dependencies/xr)
     warnings_as_errors(xr)

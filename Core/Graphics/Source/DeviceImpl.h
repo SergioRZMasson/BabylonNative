@@ -1,10 +1,9 @@
 #pragma once
 
-#include "BgfxCallback.h"
-#include "SafeTimespanGuarantor.h"
-#include "DeviceContext.h"
-
+#include <Babylon/Graphics/BgfxCallback.h>
 #include <Babylon/Graphics/Device.h>
+#include <Babylon/Graphics/DeviceContext.h>
+#include <Babylon/Graphics/SafeTimespanGuarantor.h>
 
 #include <arcana/containers/ticketed_collection.h>
 #include <arcana/threading/blocking_concurrent_queue.h>
@@ -45,13 +44,17 @@ namespace Babylon::Graphics
         void UpdateSize(size_t width, size_t height);
         void UpdateMSAA(uint8_t value);
         void UpdateAlphaPremultiplied(bool enabled);
-        void UpdateDevicePixelRatio(float value);
-        void SetRenderResetCallback(std::function<void()> callback);
+
+#ifdef GRAPHICS_BACK_BUFFER_SUPPORT
+        void UpdateBackBuffer(BackBufferColorT backBufferColor, BackBufferDepthStencilT backBufferDepthStencil);
+#endif
 
         void AddToJavaScript(Napi::Env);
         static DeviceImpl& GetFromJavaScript(Napi::Env);
 
         Napi::Value CreateContext(Napi::Env);
+
+        void SetRenderResetCallback(std::function<void()> callback);
 
         void EnableRendering();
         void DisableRendering();
@@ -136,8 +139,8 @@ namespace Babylon::Graphics
 
             struct
             {
-                size_t Width{};
-                size_t Height{};
+                size_t Width{}; // in device-independent pixels
+                size_t Height{}; // in device-independent pixels
                 float HardwareScalingLevel{1.0f};
                 float DevicePixelRatio{1.0f};
             } Resolution{};
