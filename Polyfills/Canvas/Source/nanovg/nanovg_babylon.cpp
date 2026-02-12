@@ -26,6 +26,7 @@
 #include "nanovg/nanovg_babylon.h"
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <math.h>
 #include "nanovg.h"
 
@@ -49,6 +50,12 @@ BX_PRAGMA_DIAGNOSTIC_IGNORED_MSVC(4244) // warning C4244: '=' : conversion from 
 #include "Shaders/essl/fs_nanovg_fill.h"
 #include "Shaders/spirv/vs_nanovg_fill.h"
 #include "Shaders/spirv/fs_nanovg_fill.h"
+#include "Shaders/wgsl/vs_nanovg_fill.h"
+#include "Shaders/wgsl/fs_nanovg_fill.h"
+#include "Shaders/dxil/vs_nanovg_fill.h"
+#include "Shaders/dxil/fs_nanovg_fill.h"
+#include "Shaders/dxbc/vs_nanovg_fill.h"
+#include "Shaders/dxbc/fs_nanovg_fill.h"
 
 #include "nanovg_filterstack.h"
 

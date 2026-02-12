@@ -1,0 +1,1 @@
+static const uint8_t vs_nanovg_fill_dxbc[1] = { 0x00 };

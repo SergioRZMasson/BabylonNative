@@ -578,10 +578,10 @@ namespace Babylon
                 StaticValue("TEXTURE_FORMAT_D32F", Napi::Number::From(env, static_cast<uint32_t>(bgfx::TextureFormat::D32F))),
                 StaticValue("TEXTURE_FORMAT_D0S8", Napi::Number::From(env, static_cast<uint32_t>(bgfx::TextureFormat::D0S8))),
 
-                StaticValue("ATTRIB_TYPE_INT8", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Int8))),
+                StaticValue("ATTRIB_TYPE_INT8", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Uint8))),
                 StaticValue("ATTRIB_TYPE_UINT8", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Uint8))),
                 StaticValue("ATTRIB_TYPE_INT16", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Int16))),
-                StaticValue("ATTRIB_TYPE_UINT16", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Uint16))),
+                StaticValue("ATTRIB_TYPE_UINT16", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Int16))),
                 StaticValue("ATTRIB_TYPE_FLOAT", Napi::Number::From(env, static_cast<uint32_t>(bgfx::AttribType::Float))),
 
                 StaticValue("ALPHA_DISABLE", Napi::Number::From(env, AlphaMode::DISABLE)),
@@ -896,11 +896,9 @@ namespace Babylon
                 && (rendererType == bgfx::RendererType::Direct3D11 ||
                     rendererType == bgfx::RendererType::Direct3D12 ||
                     rendererType == bgfx::RendererType::Vulkan)
-                && (type == bgfx::AttribType::Int8 ||
-                    type == bgfx::AttribType::Uint8 ||
+                && (type == bgfx::AttribType::Uint8 ||
                     type == bgfx::AttribType::Uint10 ||
-                    type == bgfx::AttribType::Int16 ||
-                    type == bgfx::AttribType::Uint16);
+                    type == bgfx::AttribType::Int16);
             // clang-format on
 
             if (nonFloatVertexBuffers)

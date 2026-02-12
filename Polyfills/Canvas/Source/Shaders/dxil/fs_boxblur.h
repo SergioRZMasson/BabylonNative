@@ -1,0 +1,1 @@
+static const uint8_t fs_boxblur_dxil[1] = { 0x00 };

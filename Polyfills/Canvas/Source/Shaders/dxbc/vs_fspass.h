@@ -1,0 +1,1 @@
+static const uint8_t vs_fspass_dxbc[1] = { 0x00 };
