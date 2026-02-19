@@ -39,7 +39,7 @@ FetchContent_Declare(bgfx.cmake
     EXCLUDE_FROM_ALL)
 FetchContent_Declare(CMakeExtensions
     GIT_REPOSITORY https://github.com/BabylonJS/CMakeExtensions.git
-    GIT_TAG ea28b7689530bfdc4905806f27ecf7e8ed4b5419
+    GIT_TAG 892b0b70d908c37adeb5d8719fd8b0212a8fa17d
     EXCLUDE_FROM_ALL)
 FetchContent_Declare(glslang
     GIT_REPOSITORY https://github.com/BabylonJS/glslang.git
@@ -55,13 +55,17 @@ FetchContent_Declare(ios-cmake
 FetchContent_Declare(JsRuntimeHost
     GIT_REPOSITORY https://github.com/BabylonJS/JsRuntimeHost.git
     GIT_TAG 185ef9158385371b36dc9e2e19fd6e5d544f6ff9)
-FetchContent_Declare(SPIRV-Cross
-    GIT_REPOSITORY https://github.com/BabylonJS/SPIRV-Cross.git
-    GIT_TAG 6277baf62877f6b1a66a5801da94f0c9276991dc
-    EXCLUDE_FROM_ALL)
 FetchContent_Declare(libwebp
     GIT_REPOSITORY https://github.com/webmproject/libwebp.git
     GIT_TAG 57e324e2eb99be46df46d77b65705e34a7ae616c
+    EXCLUDE_FROM_ALL)
+FetchContent_Declare(metal-cpp
+    GIT_REPOSITORY https://github.com/bkaradzic/metal-cpp.git
+    GIT_TAG metal-cpp_26
+    EXCLUDE_FROM_ALL)
+FetchContent_Declare(SPIRV-Cross
+    GIT_REPOSITORY https://github.com/BabylonJS/SPIRV-Cross.git
+    GIT_TAG 6277baf62877f6b1a66a5801da94f0c9276991dc
     EXCLUDE_FROM_ALL)
 
 # --------------------------------------------------
@@ -97,6 +101,9 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Suppress "Performing Test ..." output from check_c_compiler_flag() and similar macros.
+set(CMAKE_REQUIRED_QUIET TRUE)
 
 # --------------------------------------------------
 # Options
@@ -218,9 +225,6 @@ if(MSVC)
 endif()
 
 if(APPLE)
-    # Without this option on azure pipelines, there is a mismatch with math.h giving a lot of undefined functions on macOS.
-    # Only enabled for Apple as there is no issue for Windows.
-    set(CMAKE_NO_SYSTEM_FROM_IMPORTED TRUE)
     # Create scheme for installation and other targets
     set(CMAKE_XCODE_GENERATE_SCHEME TRUE)
 endif()
