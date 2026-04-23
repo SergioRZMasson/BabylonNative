@@ -1,0 +1,1 @@
+export declare function transformPoint(x: number, y: number, z: number, invert: boolean, aspectRatio: number, orthographic: boolean, fovOrOrthographicSize: number, minZ: number, maxZ: number, positionX: number, positionY: number, positionZ: number, targetX: number, targetY: number, targetZ: number, upVectorX: number, upVectorY: number, upVectorZ: number): Float32Array;

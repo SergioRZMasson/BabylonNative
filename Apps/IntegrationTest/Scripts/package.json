@@ -1,0 +1,19 @@
+{
+  "name": "babylon-native-interop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Babylon.js interop bundle for Babylon Native integration testing.",
+  "scripts": {
+    "build": "webpack --mode production",
+    "build:dev": "webpack --mode development"
+  },
+  "devDependencies": {
+    "@babylonjs/core": "^9.4.1",
+    "@babylonjs/loaders": "^9.4.1",
+    "babylonjs-gltf2interface": "^9.4.1",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.0"
+  }
+}

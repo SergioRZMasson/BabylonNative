@@ -1,5 +1,8 @@
 if((WIN32 AND NOT WINDOWS_STORE) AND GRAPHICS_API STREQUAL D3D11)
     add_subdirectory(HeadlessScreenshotApp)
+    if(NAPI_JAVASCRIPT_ENGINE STREQUAL "V8")
+        add_subdirectory(IntegrationTest)
+    endif()
     add_subdirectory(StyleTransferApp)
 endif()
 
