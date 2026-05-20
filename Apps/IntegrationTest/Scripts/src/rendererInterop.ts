@@ -27,6 +27,7 @@ export async function createRenderTargetTextureAsync(
       colorAttachment: outputTexture,
       generateDepthBuffer: true,
       generateStencilBuffer: true,
+      samples: 4,
     }
   );
 }

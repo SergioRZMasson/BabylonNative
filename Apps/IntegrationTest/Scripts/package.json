@@ -8,9 +8,9 @@
     "build:dev": "webpack --mode development"
   },
   "devDependencies": {
-    "@babylonjs/core": "^9.4.1",
-    "@babylonjs/loaders": "^9.4.1",
-    "babylonjs-gltf2interface": "^9.4.1",
+    "@babylonjs/core": "file:../../../../Babylon.js/packages/public/@babylonjs/core",
+    "@babylonjs/loaders": "file:../../../../Babylon.js/packages/public/@babylonjs/loaders",
+    "babylonjs-gltf2interface": "file:../../../../Babylon.js/packages/public/glTF2Interface",
     "ts-loader": "^9.5.0",
     "typescript": "^5.3.0",
     "webpack": "^5.89.0",
