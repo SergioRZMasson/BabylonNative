@@ -1,7 +1,14 @@
-# HeadlessIntegrationTest reuses the IntegrationTest TypeScript bundle so the
-# JavaScript code path is identical to the windowed IntegrationTest.
+# HeadlessIntegrationTest uses the UMD babylon.max.js bundle (same as
+# HeadlessScreenshotApp) for a proven rendering path, plus a small
+# index.js harness that exposes startup() and loadAndRenderModelAsync().
 set(INTEGRATION_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../IntegrationTest")
-set(INTEGRATION_TEST_BUNDLE "${INTEGRATION_TEST_DIR}/Scripts/dist/BabylonInterop.bundle.js")
+
+set(BABYLON_SCRIPTS
+    "../node_modules/babylonjs/babylon.max.js"
+    "../node_modules/babylonjs-loaders/babylonjs.loaders.js")
+
+set(LOCAL_SCRIPTS
+    "Scripts/index.js")
 
 set(SOURCES
     "Source/App.cpp")
@@ -13,11 +20,6 @@ target_compile_definitions(HeadlessIntegrationTest
     PRIVATE UNICODE
     PRIVATE _UNICODE)
 
-# DirectXTK provides SaveWICTextureToFile for the PNG output. The
-# HeadlessScreenshotApp target already fetches it; reuse the same fetched
-# target if it's been added, otherwise this app won't compile in
-# configurations where HeadlessScreenshotApp is excluded. In our build
-# scope (D3D11 + V8 on Windows) HeadlessScreenshotApp is always present.
 target_link_libraries(HeadlessIntegrationTest
     PRIVATE AppRuntime
     PRIVATE Console
@@ -29,18 +31,17 @@ target_link_libraries(HeadlessIntegrationTest
     PRIVATE Window
     PRIVATE XMLHttpRequest)
 
-# Reuse the IntegrationTest's JS bundle. IntegrationTestBundle is the target
-# that produces it.
-add_dependencies(HeadlessIntegrationTest IntegrationTestBundle)
+# Copy UMD Babylon scripts to output directory.
+foreach(SCRIPT ${BABYLON_SCRIPTS} ${LOCAL_SCRIPTS})
+    get_filename_component(SCRIPT_NAME "${SCRIPT}" NAME)
+    add_custom_command(
+        OUTPUT "${CMAKE_CFG_INTDIR}/Scripts/${SCRIPT_NAME}"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/${SCRIPT}" "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/Scripts/${SCRIPT_NAME}"
+        COMMENT "Copying ${SCRIPT_NAME}"
+        MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${SCRIPT}")
+endforeach()
 
-add_custom_command(TARGET HeadlessIntegrationTest POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HeadlessIntegrationTest>/Scripts"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${INTEGRATION_TEST_BUNDLE}"
-        "$<TARGET_FILE_DIR:HeadlessIntegrationTest>/Scripts/BabylonInterop.bundle.js"
-    COMMENT "Copying BabylonInterop.bundle.js for HeadlessIntegrationTest")
-
-# Copy the same environment.env IntegrationTest uses.
+# Copy assets from IntegrationTest.
 file(GLOB INT_TEST_ASSETS "${INTEGRATION_TEST_DIR}/assets/*")
 foreach(ASSET ${INT_TEST_ASSETS})
     get_filename_component(ASSET_NAME "${ASSET}" NAME)
