@@ -1330,23 +1330,17 @@
         {
             "title": "Draco Mesh Compression (decodeMeshAsync, numWorkers = 1)",
             "playgroundId": "#22MFU2#77",
-            "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
             "referenceImage": "draco.png"
         },
         {
             "title": "Draco Mesh Compression (decodeMeshToGeometryAsync, numWorkers = 0)",
             "playgroundId": "#22MFU2#78",
-            "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
             "referenceImage": "draco.png"
         },
         {
             "title": "Draco Mesh Compression (decodeMeshToGeometryAsync, numWorkers = 1)",
             "playgroundId": "#22MFU2#78",
             "replace": "numWorkers = 0, numWorkers = 1",
-            "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
             "referenceImage": "draco.png"
         },
         {
@@ -1354,21 +1348,17 @@
             "playgroundId": "#22MFU2#75",
             "replace": "numWorkers = 0, numWorkers = 1",
             "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
+            "reason": "DracoDecoder.Default state leaks between tests in batch mode; passes standalone",
             "referenceImage": "draco.png"
         },
         {
             "title": "Draco Decoder",
             "playgroundId": "#22MFU2#82",
-            "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
             "referenceImage": "draco.png"
         },
         {
             "title": "Draco Decoder/Encoder roundtrip",
             "playgroundId": "#JNW207#4",
-            "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
             "referenceImage": "dracoRoundtrip.png"
         },
         {
@@ -1559,15 +1549,13 @@
         {
             "title": "GLTF Buggy with Draco Mesh Compression",
             "playgroundId": "#JNW207#1",
-            "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes on Win32 (heap corruption)",
             "referenceImage": "gltfBuggyDraco.png"
         },
         {
             "title": "GLTF Box with bad Draco normalized flag",
             "playgroundId": "#8KJJH9",
             "excludeFromAutomaticTesting": true,
-            "reason": "Test crashes or hangs on Babylon Native",
+            "reason": "Pixel comparison fails (bgfx vs WebGL Draco normalized attribute handling)",
             "referenceImage": "gltfBadDraco.png"
         },
         {
