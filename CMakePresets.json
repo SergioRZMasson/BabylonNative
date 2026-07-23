@@ -1,0 +1,70 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "NAPI_JAVASCRIPT_ENGINE": "V8",
+        "GRAPHICS_API": "D3D11",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      }
+    },
+    {
+      "name": "integration-test",
+      "displayName": "IntegrationTest (VS 2026, x64, D3D11, V8)",
+      "description": "Configure the IntegrationTest app: Visual Studio 2026 generator, x64, Direct3D 11, V8 JS engine. Requires CMake >= 4.2 (use the CMake bundled with Visual Studio 2026).",
+      "inherits": "windows-base",
+      "generator": "Visual Studio 18 2026"
+    },
+    {
+      "name": "integration-test-vs2022",
+      "displayName": "IntegrationTest (VS 2022, x64, D3D11, V8)",
+      "description": "Same as integration-test but using the Visual Studio 2022 generator, for machines that have VS 2022 instead of VS 2026.",
+      "inherits": "windows-base",
+      "generator": "Visual Studio 17 2022"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "integration-test-release",
+      "displayName": "IntegrationTest Release",
+      "configurePreset": "integration-test",
+      "configuration": "Release",
+      "targets": [ "IntegrationTest" ]
+    },
+    {
+      "name": "integration-test-debug",
+      "displayName": "IntegrationTest Debug",
+      "configurePreset": "integration-test",
+      "configuration": "Debug",
+      "targets": [ "IntegrationTest" ]
+    },
+    {
+      "name": "integration-test-vs2022-release",
+      "displayName": "IntegrationTest Release (VS 2022)",
+      "configurePreset": "integration-test-vs2022",
+      "configuration": "Release",
+      "targets": [ "IntegrationTest" ]
+    },
+    {
+      "name": "integration-test-vs2022-debug",
+      "displayName": "IntegrationTest Debug (VS 2022)",
+      "configurePreset": "integration-test-vs2022",
+      "configuration": "Debug",
+      "targets": [ "IntegrationTest" ]
+    }
+  ]
+}
