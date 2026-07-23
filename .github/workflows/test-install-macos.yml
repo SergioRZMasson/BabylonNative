@@ -6,22 +6,14 @@ on:
       xcode-version:
         required: false
         type: string
-        default: '16.4'
-
-env:
-  CMAKE_VERSION: '3.31.6'
+        default: "26.4.1"
 
 jobs:
   test-install:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-
-      - uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: ${{ env.CMAKE_VERSION }}
-
 
       - name: Select Xcode ${{ inputs.xcode-version }}
         run: sudo xcode-select --switch /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer

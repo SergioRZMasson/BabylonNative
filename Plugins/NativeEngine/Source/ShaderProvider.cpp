@@ -31,10 +31,16 @@ namespace
 
 namespace Babylon
 {
-    std::shared_ptr<Graphics::BgfxShaderInfo> ShaderProvider::Get(std::string_view vertexSource, std::string_view fragmentSource)
+    std::shared_ptr<Graphics::BgfxShaderInfo> ShaderProvider::Get(std::string_view vertexSource, std::string_view fragmentSource, const std::map<std::string, uint32_t>& instancedAttributes)
     {
+        // The shader cache is keyed only by source, so it must be bypassed when routing instanced
+        // attributes (otherwise a variant would collide with the base program's cached shader).
+        // Only referenced inside the SHADER_CACHE blocks below, so mark it maybe_unused for builds
+        // that compile with the ShaderCache plugin disabled.
+        [[maybe_unused]] const bool useCache = instancedAttributes.empty();
+
 #ifdef SHADER_CACHE
-        if (Plugins::ShaderCache::IsEnabled())
+        if (useCache && Plugins::ShaderCache::IsEnabled())
         {
             const auto shaderInfo = Plugins::ShaderCache::GetShader(vertexSource, fragmentSource);
             if (shaderInfo)
@@ -48,14 +54,14 @@ namespace Babylon
         CheckShaderCompilerAssumptions();
 
 #ifdef SHADER_CACHE
-        if (Plugins::ShaderCache::IsEnabled())
+        if (useCache && Plugins::ShaderCache::IsEnabled())
         {
-            auto compiledShaderInfo = m_shaderCompiler.Compile(vertexSource, fragmentSource);
+            auto compiledShaderInfo = m_shaderCompiler.Compile(vertexSource, fragmentSource, instancedAttributes);
             return Plugins::ShaderCache::AddShader(vertexSource, fragmentSource, compiledShaderInfo);
         }
 #endif
 
-        return std::make_shared<Graphics::BgfxShaderInfo>(m_shaderCompiler.Compile(vertexSource, fragmentSource));
+        return std::make_shared<Graphics::BgfxShaderInfo>(m_shaderCompiler.Compile(vertexSource, fragmentSource, instancedAttributes));
 #else
         throw std::runtime_error{"Shader compiler is not available"};
 #endif

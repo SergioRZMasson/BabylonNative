@@ -10,6 +10,9 @@ namespace Babylon::Plugins::Internal
     void TestUtils::Exit(const Napi::CallbackInfo& info)
     {
         auto exitCode = info[0].As<Napi::Number>().Int32Value();
+
+        InvokeExitCallback(exitCode);
+
         if (exitCode != 0)
         {
             std::quick_exit(exitCode);
@@ -27,8 +30,16 @@ namespace Babylon::Plugins::Internal
 
         dispatch_async(dispatch_get_main_queue(), ^{
             auto* window = [(NSView*)((__bridge CAMetalLayer*)m_window).delegate window];
-            CGFloat scale = window.backingScaleFactor;
-            [window setContentSize:NSMakeSize(width / scale, height / scale)];
+            // width/height are the desired framebuffer size in pixels (the
+            // validation reference images are authored at this exact size).
+            // Babylon Native sizes the bgfx backbuffer to the view's logical
+            // point extent (the host drives View::Resize with the layout
+            // bounds in points), so set the content size directly in points
+            // rather than dividing by backingScaleFactor. Dividing by the
+            // scale here would produce a half-resolution backbuffer on Retina
+            // displays and make the pixel-diff readback mismatch the
+            // reference image dimensions.
+            [window setContentSize:NSMakeSize(width, height)];
         });
     }
 

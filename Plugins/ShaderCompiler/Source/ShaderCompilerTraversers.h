@@ -2,8 +2,10 @@
 
 #include <glslang/Public/ShaderLang.h>
 
+#include <cstdint>
 #include <memory>
 #include <map>
+#include <string>
 
 namespace Babylon::ShaderCompilerTraversers
 {
@@ -68,9 +70,17 @@ namespace Babylon::ShaderCompilerTraversers
 
     /// Changes the names and locations of varying attributes in the vertex shader to
     /// match bgfx's expectations.
-    void AssignLocationsAndNamesToVertexVaryingsOpenGL(glslang::TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& vertexAttributeRenaming);
-    void AssignLocationsAndNamesToVertexVaryingsMetal(glslang::TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& vertexAttributeRenaming);
-    void AssignLocationsAndNamesToVertexVaryingsD3D(glslang::TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& vertexAttributeRenaming);
+    ///
+    /// `instancedAttributes` maps vertex-attribute names that the consumer binds with a
+    /// per-instance divisor (e.g. the fluid renderer's `position` or an instanced `color`)
+    /// to the bgfx per-instance i_data location (top TEXCOORD semantic) they must occupy.
+    /// The location is computed from the draw-time instance packing order so the attribute
+    /// is read from the slot bgfx actually fills. The built-in instanced names (`world0-3`,
+    /// `instanceColor`, `splatIndex0-3`) keep their fixed mapping; an empty map preserves
+    /// legacy behavior.
+    void AssignLocationsAndNamesToVertexVaryingsOpenGL(glslang::TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& vertexAttributeRenaming, const std::map<std::string, uint32_t>& instancedAttributes = {});
+    void AssignLocationsAndNamesToVertexVaryingsMetal(glslang::TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& vertexAttributeRenaming, const std::map<std::string, uint32_t>& instancedAttributes = {});
+    void AssignLocationsAndNamesToVertexVaryingsD3D(glslang::TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& vertexAttributeRenaming, const std::map<std::string, uint32_t>& instancedAttributes = {});
 
     /// WebGL (and therefore Babylon.js) treats texture samplers as a single variable.
     /// Native platforms expect them to be two separate variables -- a texture and a
@@ -78,8 +88,65 @@ namespace Babylon::ShaderCompilerTraversers
     /// the expectations of native platforms.
     void SplitSamplersIntoSamplersAndTextures(glslang::TProgram& program, IdGenerator& ids);
 
+    /// Split combined `sampler2D`/`samplerCube`/etc. function parameters of user-defined
+    /// functions into separate texture and sampler parameters. Must be called AFTER
+    /// SplitSamplersIntoSamplersAndTextures.
+    ///
+    /// The GLSL emitted by Babylon.js contains user functions that take combined
+    /// samplers as parameters and pass uniform samplers to them at the call site, e.g.
+    ///
+    ///     vec3 fetch(sampler2D s, vec2 uv) { return texture(s, uv).rgb; }
+    ///     void main() { ... fetch(myUniformSampler, uv); }
+    ///
+    /// glslang's SPIR-V emitter requires opaque (sampler) function arguments to be
+    /// l-values (it calls `accessChainGetLValue()` on them). After
+    /// SplitSamplersIntoSamplersAndTextures has rewritten the call-site sampler argument
+    /// into an `EOpConstructTextureSampler(t, s)` aggregate (an r-value), glslang
+    /// asserts at `SpvBuilder.cpp:accessChainGetLValue()`. See TPC #1584 for details.
+    ///
+    /// This pass fixes the assert by:
+    ///   1. Rewriting each user function with sampler parameters: each `sampler2D s`
+    ///      parameter becomes two parameters `texture2D sTexture, sampler s`, and every
+    ///      reference to the original `s` in the body becomes an
+    ///      `EOpConstructTextureSampler(sTexture, s)` aggregate.
+    ///   2. Rewriting every call site to such functions: the single
+    ///      `EOpConstructTextureSampler(t, s)` argument is replaced with two separate
+    ///      arguments (t and s).
+    void SplitSamplerFunctionParameters(glslang::TProgram& program, IdGenerator& ids);
+
+    /// Prepends a zero-initialization assignment at the start of every function body
+    /// for each struct-typed local variable referenced inside the body. Works around
+    /// Babylon.js shaders that read from uninitialized struct fields (e.g.
+    /// `lightingInfo result; result.diffuse += ...;` inside `computeAreaLighting`),
+    /// which compile successfully under WebGL but trip D3DCompile's `error X4000:
+    /// variable used without having been completely initialized` once SPIRV-Cross
+    /// emits the corresponding HLSL.
+    ///
+    /// Locals of array, scalar, vector and matrix type are left unchanged; only
+    /// struct-typed locals (the observed X4000 trigger) are initialized. Struct
+    /// locals declared in a nested scope are also initialized at the *function*
+    /// entry — see the implementation doc comment for the rationale (SPIR-V's
+    /// `OpVariable` hoisting rule plus the absence of per-iteration-freshness
+    /// accumulators in BabylonJS-generated GLSL).
+    void ZeroInitializeStructLocals(glslang::TProgram& program);
+
     /// Invert dFdy operands similar to bgfx_shader.sh
     /// https://github.com/bkaradzic/bgfx/blob/7be225bf490bb1cd231cfb4abf7e617bf35b59cb/src/bgfx_shader.sh#L44-L45
     /// https://github.com/bkaradzic/bgfx/blob/7be225bf490bb1cd231cfb4abf7e617bf35b59cb/src/bgfx_shader.sh#L62-L65
     void InvertYDerivativeOperands(glslang::TProgram& program);
+
+    /// Flip the vertical (V) component of 2D texture sample coordinates, i.e. rewrite the
+    /// coordinate `uv` of every `texture()`/`textureLod()` call to `vec2(uv.x, 1.0 - uv.y)`.
+    ///
+    /// bgfx's D3D/Metal/Vulkan backends sample textures with the opposite V-orientation from
+    /// WebGL/OpenGL. This was historically corrected by injecting a `#define texture(x,y)
+    /// texture(x, flip(y))` preprocessor macro into the shader source, but a 2-argument
+    /// function-like macro cannot match the 3-argument bias form `texture(sampler, uv, bias)`
+    /// that some Babylon.js shaders emit (e.g. GreasedLine), and glslang's preprocessor has no
+    /// variadic-macro support. Performing the flip on the AST handles every texture()/textureLod()
+    /// arity and sampler type. Only 2-component (sampler2D-style) coordinates are flipped, matching
+    /// the previous `flip(vec2)`/`flip(vec3)` overloads where vec3+ coordinates were left untouched.
+    /// Must only be used on the backends that apply ProcessSamplerFlip (D3D, Metal, Vulkan); the
+    /// OpenGL backend shares bgfx's V-orientation and must not flip.
+    void FlipSamplerCoordinates(glslang::TProgram& program);
 }

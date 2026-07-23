@@ -7,11 +7,14 @@
 #include <bgfx/bgfx.h>
 #include <bx/bx.h>
 
+#include <Babylon/Graphics/BgfxShaderInfo.h>
+
 #include <arcana/experimental/array.h>
 
 #include <gsl/gsl>
 
 #include <stdexcept>
+#include <string>
 #include <arcana/macros.h>
 
 using namespace glslang;
@@ -129,8 +132,12 @@ namespace Babylon::ShaderCompilerTraversers
 
             virtual void visitSymbol(TIntermSymbol* symbol) override
             {
-                // Collect all non-sampler uniforms and add the to the list of elements to process.
-                if (symbol->getType().getQualifier().isUniformOrBuffer() && symbol->getType().getBasicType() != EbtSampler)
+                // Collect all non-sampler scalar/vector/matrix uniforms. Excluding UBO blocks
+                // (EbtBlock) and uniform struct instances (EbtStruct) prevents this pass from
+                // mistakenly inserting whole blocks/structs into the consolidated uniform struct.
+                const auto basic = symbol->getType().getBasicType();
+                if (symbol->getType().getQualifier().isUniformOrBuffer()
+                    && (basic == EbtFloat || basic == EbtInt || basic == EbtUint || basic == EbtBool))
                 {
                     // Linker objects are treated differently by this traverser because unlike ordinary
                     // symbols which should simply be replaced with their struct members, the linker
@@ -305,8 +312,14 @@ namespace Babylon::ShaderCompilerTraversers
             {
                 auto& type = symbol->getType();
 
-                // We only care about uniforms that are neither samplers nor matrices.
-                if (type.getQualifier().isUniformOrBuffer() && type.getBasicType() != EbtSampler && !type.isMatrix())
+                // We only care about loose scalar/vector uniforms. Excluding matrices, samplers,
+                // UBO blocks (EbtBlock) and uniform struct instances (EbtStruct) prevents the
+                // traverser from rewriting whole blocks/structs to vec4, which destroys their
+                // member layout and member names.
+                const auto basic = type.getBasicType();
+                if (type.getQualifier().isUniformOrBuffer()
+                    && !type.isMatrix()
+                    && (basic == EbtFloat || basic == EbtInt || basic == EbtUint || basic == EbtBool))
                 {
                     // At present, this may end up creating layered swizzles; i.e., if a vec3 was already being projected
                     // down a la vec3.x, greedily adding a swizzle operator to deal with the new type mismatch may create
@@ -542,8 +555,12 @@ namespace Babylon::ShaderCompilerTraversers
                 replacementToOriginalName[newName] = name;
             }
 
-            static bool IsInstance(const char* name)
+            bool IsInstance(const char* name) const
             {
+                if (m_instancedAttributes != nullptr && m_instancedAttributes->count(name) != 0)
+                {
+                    return true;
+                }
                 return (!strcmp(name, "world0") ||
                         !strcmp(name, "world1") ||
                         !strcmp(name, "world2") ||
@@ -555,7 +572,49 @@ namespace Babylon::ShaderCompilerTraversers
                         !strcmp(name, "splatIndex3"));
             }
 
+            // True when the name has no built-in instance mapping and must be assigned a
+            // generic per-instance i_data slot (top TEXCOORD semantics).
+            bool IsGenericInstance(const char* name) const
+            {
+                if (m_instancedAttributes == nullptr || m_instancedAttributes->count(name) == 0)
+                {
+                    return false;
+                }
+                return strcmp(name, "world0") != 0 &&
+                       strcmp(name, "world1") != 0 &&
+                       strcmp(name, "world2") != 0 &&
+                       strcmp(name, "world3") != 0 &&
+                       strcmp(name, "instanceColor") != 0 &&
+                       strcmp(name, "splatIndex0") != 0 &&
+                       strcmp(name, "splatIndex1") != 0 &&
+                       strcmp(name, "splatIndex2") != 0 &&
+                       strcmp(name, "splatIndex3") != 0;
+            }
+
+            // The shader attribute location assigned to a varying must be stable regardless
+            // of how many attributes are instanced -- i.e. identical between the base program
+            // compile and any instanced variant. Vertex buffers are bound using the base
+            // program's attribute locations (VertexAttributeLocations), so if a variant
+            // reassigns a per-vertex attribute to a different location (as the instance/
+            // non-instance 2-pass ordering would), that buffer's data no longer reaches the
+            // shader and reads zero. The attribute's ordinal position in the name-sorted
+            // varying map is independent of the 2-pass ordering and therefore stable.
+            unsigned int GetStableLocation(const char* name) const
+            {
+                unsigned int index = 0;
+                for (const auto& entry : m_varyingNameToSymbol)
+                {
+                    if (entry.first == name)
+                    {
+                        break;
+                    }
+                    ++index;
+                }
+                return index;
+            }
+
             unsigned int m_genericAttributesRunningCount{0};
+            const std::map<std::string, uint32_t>* m_instancedAttributes{nullptr};
             std::map<std::string, TIntermSymbol*> m_varyingNameToSymbol{};
             std::vector<std::pair<TIntermSymbol*, TIntermNode*>> m_symbolsToParents{};
 
@@ -581,6 +640,14 @@ namespace Babylon::ShaderCompilerTraversers
                     "a_texcoord5",
                     "a_texcoord6",
                     "a_texcoord7",
+                    "a_texcoord8",
+                    "a_texcoord9",
+                    "a_texcoord10",
+                    "a_texcoord11",
+                    "a_texcoord12",
+                    "a_texcoord13",
+                    "a_texcoord14",
+                    "a_texcoord15",
                 };
             static_assert(bgfx::Attrib::Count == BX_COUNTOF(s_attribName));
             constexpr static const char* s_attribInstanceName[] =
@@ -590,6 +657,17 @@ namespace Babylon::ShaderCompilerTraversers
                     "i_data2",
                     "i_data3",
                     "i_data4",
+                    "i_data5",
+                    "i_data6",
+                    "i_data7",
+                    "i_data8",
+                    "i_data9",
+                    "i_data10",
+                    "i_data11",
+                    "i_data12",
+                    "i_data13",
+                    "i_data14",
+                    "i_data15",
                 };
         };
 
@@ -597,18 +675,21 @@ namespace Babylon::ShaderCompilerTraversers
         class VertexVaryingInTraverserOpenGL final : private VertexVaryingInTraverser
         {
         public:
-            static void Traverse(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName)
+            static void Traverse(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName, const std::map<std::string, uint32_t>& instancedAttributes)
             {
                 auto intermediate{program.getIntermediate(EShLangVertex)};
                 VertexVaryingInTraverserOpenGL traverser{};
+                traverser.m_instancedAttributes = &instancedAttributes;
                 intermediate->getTreeRoot()->traverse(&traverser);
 
                 // Pre-count instance attributes so i_data names can be assigned in reverse.
                 // bgfx maps i_data0 to the last attribute (TEXCOORD7), so instance names
-                // must be assigned in reverse order, matching the Metal traverser.
+                // must be assigned in reverse order, matching the Metal traverser. Generic
+                // (consumer-declared) instanced attributes are excluded here because they are
+                // routed to an explicit i_data slot from their caller-supplied location.
                 for (const auto& [name, symbol] : traverser.m_varyingNameToSymbol)
                 {
-                    if (IsInstance(name.c_str()))
+                    if (traverser.IsInstance(name.c_str()) && !traverser.IsGenericInstance(name.c_str()))
                     {
                         traverser.m_instanceAttributeCount++;
                     }
@@ -624,17 +705,27 @@ namespace Babylon::ShaderCompilerTraversers
                 // To work around this issue, instead of mapping our attributes to the most similar bgfx::attribute, instead replace
                 // the first attribute encountered with the symbol bgfx uses for attribute 0 and increment for each subsequent attribute encountered.
                 // This will cause our shader to have nonsensical naming, but will allow us to efficiently "pack" the attributes.
-                m_genericAttributesRunningCount++;
+                const unsigned int stableLocation = GetStableLocation(name);
+                if (stableLocation >= static_cast<unsigned int>(bgfx::Attrib::Count))
+                    throw std::runtime_error("Cannot support more than " + std::to_string(static_cast<int>(bgfx::Attrib::Count)) + " vertex attributes.");
+                if (IsGenericInstance(name))
+                {
+                    // Consumer-declared instanced attribute: route to the explicit bgfx i_data
+                    // slot derived from its caller-supplied per-instance location (INSTANCE_DATA_FIRST_LOCATION
+                    // == i_data0 == TEXCOORD31, descending), matching BuildInstanceDataBuffer's packing and the D3D path.
+                    const unsigned int location = m_instancedAttributes->at(name);
+                    const unsigned int slot = Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - location;
+                    if (slot >= BX_COUNTOF(s_attribInstanceName))
+                        throw std::runtime_error(std::string{"Instanced attribute '"} + name + "' has location " + std::to_string(location) + " which does not map to a valid bgfx i_data slot (computed slot " + std::to_string(slot) + ").");
+                    return {stableLocation, s_attribInstanceName[slot]};
+                }
                 if (IsInstance(name))
                 {
-                    // Reverse: bgfx maps i_data0 to the highest semantic (TEXCOORD7),
+                    // Reverse: bgfx maps i_data0 to the highest semantic (TEXCOORD31),
                     // so the first instance attribute gets the highest i_data index.
-                    return {static_cast<unsigned int>(m_genericAttributesRunningCount - 1), s_attribInstanceName[--m_instanceAttributeCount]};
+                    return {stableLocation, s_attribInstanceName[--m_instanceAttributeCount]};
                 }
-                if (m_genericAttributesRunningCount >= static_cast<unsigned int>(bgfx::Attrib::Count))
-                    throw std::runtime_error("Cannot support more than 18 vertex attributes.");
-
-                return {static_cast<unsigned int>(m_genericAttributesRunningCount - 1), s_attribName[static_cast<unsigned int>(m_genericAttributesRunningCount - 1)]};
+                return {stableLocation, s_attribName[stableLocation]};
             }
             unsigned int m_instanceAttributeCount{0};
         };
@@ -642,10 +733,11 @@ namespace Babylon::ShaderCompilerTraversers
         class VertexVaryingInTraverserMetal final : private VertexVaryingInTraverser
         {
         public:
-            static void Traverse(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName)
+            static void Traverse(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName, const std::map<std::string, uint32_t>& instancedAttributes)
             {
                 auto intermediate{program.getIntermediate(EShLangVertex)};
                 VertexVaryingInTraverserMetal traverser{};
+                traverser.m_instancedAttributes = &instancedAttributes;
                 intermediate->getTreeRoot()->traverse(&traverser);
                 traverser.Traverse(intermediate, ids, replacementToOriginalName);
             }
@@ -675,7 +767,10 @@ namespace Babylon::ShaderCompilerTraversers
                         const bool isInstance = IsInstance(name.c_str());
                         if ((pass == 0 && isInstance) || (pass == 1 && !isInstance))
                         {
-                            if (pass == 0)
+                            // Count only built-in instance attributes for the reverse i_data
+                            // assignment; generic (consumer-declared) instanced attributes are
+                            // routed to an explicit i_data slot from their caller-supplied location.
+                            if (pass == 0 && !IsGenericInstance(name.c_str()))
                             {
                                 m_instanceAttributeCount++;
                             }
@@ -695,15 +790,25 @@ namespace Babylon::ShaderCompilerTraversers
                 // the first attribute encountered with the symbol bgfx uses for attribute 0 and increment for each subsequent attribute encountered.
                 // This will cause our shader to have nonsensical naming, but will allow us to efficiently "pack" the attributes.
 
-                m_genericAttributesRunningCount++;
+                const unsigned int stableLocation = GetStableLocation(name);
+                if (stableLocation >= static_cast<unsigned int>(bgfx::Attrib::Count))
+                    throw std::runtime_error("Cannot support more than " + std::to_string(static_cast<int>(bgfx::Attrib::Count)) + " vertex attributes.");
+                if (IsGenericInstance(name))
+                {
+                    // Consumer-declared instanced attribute: route to the explicit bgfx i_data
+                    // slot derived from its caller-supplied per-instance location (INSTANCE_DATA_FIRST_LOCATION
+                    // == i_data0 == TEXCOORD31, descending), matching BuildInstanceDataBuffer's packing and the D3D path.
+                    const unsigned int location = m_instancedAttributes->at(name);
+                    const unsigned int slot = Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - location;
+                    if (slot >= BX_COUNTOF(s_attribInstanceName))
+                        throw std::runtime_error(std::string{"Instanced attribute '"} + name + "' has location " + std::to_string(location) + " which does not map to a valid bgfx i_data slot (computed slot " + std::to_string(slot) + ").");
+                    return {stableLocation, s_attribInstanceName[slot]};
+                }
                 if (IsInstance(name))
                 {
-                    return {static_cast<unsigned int>(m_genericAttributesRunningCount - 1), s_attribInstanceName[--m_instanceAttributeCount]};
+                    return {stableLocation, s_attribInstanceName[--m_instanceAttributeCount]};
                 }
-                if (m_genericAttributesRunningCount >= static_cast<unsigned int>(bgfx::Attrib::Count))
-                    throw std::runtime_error("Cannot support more than 18 vertex attributes.");
-
-                return {static_cast<unsigned int>(m_genericAttributesRunningCount - 1), s_attribName[static_cast<unsigned int>(m_genericAttributesRunningCount - 1)]};
+                return {stableLocation, s_attribName[stableLocation]};
             }
             unsigned int m_instanceAttributeCount{0};
         };
@@ -712,10 +817,11 @@ namespace Babylon::ShaderCompilerTraversers
         class VertexVaryingInTraverserD3D final : private VertexVaryingInTraverser
         {
         public:
-            static void Traverse(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName)
+            static void Traverse(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName, const std::map<std::string, uint32_t>& instancedAttributes)
             {
                 auto intermediate{program.getIntermediate(EShLangVertex)};
                 VertexVaryingInTraverserD3D traverser{};
+                traverser.m_instancedAttributes = &instancedAttributes;
                 intermediate->getTreeRoot()->traverse(&traverser);
                 // UVs are effectively a special kind of generic attribute since they both use
                 // are implemented using texture coordinates, so we preprocess to pre-count the
@@ -733,6 +839,20 @@ namespace Babylon::ShaderCompilerTraversers
         private:
             std::pair<unsigned int, const char*> GetVaryingLocationAndNewNameForName(const char* name)
             {
+                // Consumer-declared instanced attributes with no built-in mapping (e.g. the
+                // fluid renderer's `position` or an instanced `color`) are routed to the bgfx
+                // per-instance i_data location supplied by the caller. That location is derived
+                // from the draw-time instance packing order (INSTANCE_DATA_FIRST_LOCATION == i_data0
+                // == TEXCOORD31, descending), so per-instance data reaches the shader instead of the
+                // per-vertex input.
+                if (IsGenericInstance(name))
+                {
+                    const unsigned int location = m_instancedAttributes->at(name);
+                    const unsigned int slot = Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - location;
+                    if (slot >= BX_COUNTOF(s_attribInstanceName))
+                        throw std::runtime_error(std::string{"Instanced attribute '"} + name + "' has location " + std::to_string(location) + " which does not map to a valid bgfx i_data slot (computed slot " + std::to_string(slot) + ").");
+                    return {location, s_attribInstanceName[slot]};
+                }
 #define IF_NAME_RETURN_ATTRIB(varyingName, attrib, newName)  \
     if (std::strcmp(name, varyingName) == 0)                 \
     {                                                        \
@@ -748,19 +868,25 @@ namespace Babylon::ShaderCompilerTraversers
                 IF_NAME_RETURN_ATTRIB("color", bgfx::Attrib::Color0, "a_color0")
                 IF_NAME_RETURN_ATTRIB("matricesIndices", bgfx::Attrib::Indices, "a_indices")
                 IF_NAME_RETURN_ATTRIB("matricesWeights", bgfx::Attrib::Weight, "a_weight")
-                IF_NAME_RETURN_ATTRIB("instanceColor", bgfx::Attrib::TexCoord3, "i_data5")
-                IF_NAME_RETURN_ATTRIB("world0", bgfx::Attrib::TexCoord4, "i_data0")
-                IF_NAME_RETURN_ATTRIB("world1", bgfx::Attrib::TexCoord5, "i_data1")
-                IF_NAME_RETURN_ATTRIB("world2", bgfx::Attrib::TexCoord6, "i_data2")
-                IF_NAME_RETURN_ATTRIB("world3", bgfx::Attrib::TexCoord7, "i_data3")
-                IF_NAME_RETURN_ATTRIB("splatIndex0", bgfx::Attrib::TexCoord4, "i_data0")
-                IF_NAME_RETURN_ATTRIB("splatIndex1", bgfx::Attrib::TexCoord5, "i_data1")
-                IF_NAME_RETURN_ATTRIB("splatIndex2", bgfx::Attrib::TexCoord6, "i_data2")
-                IF_NAME_RETURN_ATTRIB("splatIndex3", bgfx::Attrib::TexCoord7, "i_data3")
+                // Built-in instanced attributes: each occupies a fixed synthetic instance-data location.
+                // world0..world3 (and splatIndex0..3) pack lowest-location -> highest i_data slot so that,
+                // combined with BuildInstanceDataBuffer's descending-key packing, world3 lands on i_data0
+                // (TEXCOORD31) and world0 on i_data3. instanceColor follows at i_data4. The i_data name is
+                // cosmetic on D3D (binding is by TEXCOORD semantic, resolved from the location via the
+                // HLSLVertexAttributeRemap table).
+                IF_NAME_RETURN_ATTRIB("instanceColor", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 4, "i_data4")
+                IF_NAME_RETURN_ATTRIB("world0", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 3, "i_data3")
+                IF_NAME_RETURN_ATTRIB("world1", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 2, "i_data2")
+                IF_NAME_RETURN_ATTRIB("world2", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 1, "i_data1")
+                IF_NAME_RETURN_ATTRIB("world3", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 0, "i_data0")
+                IF_NAME_RETURN_ATTRIB("splatIndex0", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 3, "i_data3")
+                IF_NAME_RETURN_ATTRIB("splatIndex1", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 2, "i_data2")
+                IF_NAME_RETURN_ATTRIB("splatIndex2", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 1, "i_data1")
+                IF_NAME_RETURN_ATTRIB("splatIndex3", Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION - 0, "i_data0")
 #undef IF_NAME_RETURN_ATTRIB
                 const unsigned int attributeLocation = FIRST_GENERIC_ATTRIBUTE_LOCATION + m_genericAttributesRunningCount++;
                 if (attributeLocation >= static_cast<unsigned int>(bgfx::Attrib::Count))
-                    throw std::runtime_error("Cannot support more than 18 vertex attributes.");
+                    throw std::runtime_error("Cannot support more than " + std::to_string(static_cast<int>(bgfx::Attrib::Count)) + " vertex attributes.");
                 return {attributeLocation, name};
             }
             const unsigned int FIRST_GENERIC_ATTRIBUTE_LOCATION{10};
@@ -795,13 +921,25 @@ namespace Babylon::ShaderCompilerTraversers
 
             static void Traverse(TProgram& program, IdGenerator& ids)
             {
-                unsigned int layoutBinding{0};
-                Traverse(program.getIntermediate(EShLangVertex), ids, layoutBinding);
-                Traverse(program.getIntermediate(EShLangFragment), ids, layoutBinding);
+                // bgfx binds samplers using a single per-name "stage" index that is shared between
+                // vertex and fragment shaders (e.g. bgfx Metal's TextureMtl::commit uses the same
+                // `_stage` for both `setVertexTexture` and `setFragmentTexture`). The same sampler
+                // name appearing in both stages must therefore receive the SAME binding number,
+                // otherwise:
+                //   * AppendSamplers' per-name stage map records only one of the two bindings,
+                //     so the other stage cannot resolve the binding and ends up reading garbage.
+                //   * Backends with a per-stage binding limit (Metal allows binding indices 0-15)
+                //     run out of slots much faster if bindings are sequential across stages.
+                // Sharing the binding map across stages also keeps the binding space compact for
+                // shaders that declare many sampler uniforms but only use a few.
+                std::map<std::string, unsigned int> nameToBinding{};
+                unsigned int nextBinding{0};
+                Traverse(program.getIntermediate(EShLangVertex), ids, nameToBinding, nextBinding);
+                Traverse(program.getIntermediate(EShLangFragment), ids, nameToBinding, nextBinding);
             }
 
         private:
-            static void Traverse(TIntermediate* intermediate, IdGenerator& ids, unsigned int& layoutBinding)
+            static void Traverse(TIntermediate* intermediate, IdGenerator& ids, std::map<std::string, unsigned int>& nameToBinding, unsigned int& nextBinding)
             {
                 SamplerSplitterTraverser traverser{};
                 intermediate->getTreeRoot()->traverse(&traverser);
@@ -815,6 +953,21 @@ namespace Babylon::ShaderCompilerTraversers
                 // Create all the new replacers.
                 for (const auto& [name, symbol] : traverser.m_samplerNameToSymbol)
                 {
+                    // Reuse the binding assigned in a previous stage if this sampler name was
+                    // already seen, otherwise assign a new sequential binding. See the comment
+                    // on the public Traverse() overload for why bindings are shared.
+                    unsigned int layoutBinding;
+                    const auto bindingIt = nameToBinding.find(name);
+                    if (bindingIt != nameToBinding.end())
+                    {
+                        layoutBinding = bindingIt->second;
+                    }
+                    else
+                    {
+                        layoutBinding = nextBinding++;
+                        nameToBinding[name] = layoutBinding;
+                    }
+
                     // For each name and symbol, create a replacer.
                     const auto& type = symbol->getType();
 
@@ -869,7 +1022,6 @@ namespace Babylon::ShaderCompilerTraversers
                     }
 
                     nameToReplacement[name] = aggregate;
-                    ++layoutBinding;
                 }
 
                 // Perform linker object replacements.
@@ -903,6 +1055,636 @@ namespace Babylon::ShaderCompilerTraversers
 
             std::map<std::string, TIntermSymbol*> m_samplerNameToSymbol{};
             std::vector<std::pair<TIntermSymbol*, TIntermNode*>> m_symbolsToParents{};
+        };
+
+        /// <summary>
+        /// Split combined sampler parameters of user-defined functions into separate
+        /// texture and sampler parameters. See `SplitSamplerFunctionParameters` in the
+        /// header for the full rationale. This pass must run AFTER `SamplerSplitterTraverser`
+        /// so that uniform sampler call-site arguments have already been rewritten into
+        /// `EOpConstructTextureSampler(t, s)` aggregates whose operands we can unpack at
+        /// call sites.
+        /// </summary>
+        class SamplerFunctionParameterSplitterTraverser final
+        {
+        public:
+            static void Traverse(TProgram& program, IdGenerator& ids)
+            {
+                SamplerFunctionParameterSplitterTraverser pass{};
+                pass.Traverse(program.getIntermediate(EShLangVertex), ids);
+                pass.Traverse(program.getIntermediate(EShLangFragment), ids);
+            }
+
+        private:
+            struct RewrittenFunction
+            {
+                std::string NewMangledName;
+                std::vector<int> OriginalSamplerParamIndices;
+            };
+
+            // Per-stage scope: the call-site rewriter must only see functions rewritten
+            // for the current stage (vertex/fragment), since each stage has its own
+            // intermediate and ID space.
+            std::map<std::string, RewrittenFunction> m_rewrittenFunctions{};
+
+            void Traverse(TIntermediate* intermediate, IdGenerator& ids)
+            {
+                if (intermediate == nullptr)
+                {
+                    return;
+                }
+
+                auto* root = intermediate->getTreeRoot()->getAsAggregate();
+                if (root == nullptr)
+                {
+                    return;
+                }
+
+                m_rewrittenFunctions.clear();
+
+                // Phase 1: rewrite function declarations that have sampler parameters.
+                for (auto* node : root->getSequence())
+                {
+                    auto* function = node->getAsAggregate();
+                    if (function != nullptr && function->getOp() == EOpFunction)
+                    {
+                        RewriteFunctionDefinition(intermediate, ids, function);
+                    }
+                }
+
+                if (m_rewrittenFunctions.empty())
+                {
+                    return;
+                }
+
+                // Phase 2: rewrite call sites in every function body to match the new
+                // parameter lists.
+                CallSiteRewriter callRewriter{m_rewrittenFunctions};
+                for (auto* node : root->getSequence())
+                {
+                    auto* function = node->getAsAggregate();
+                    if (function != nullptr && function->getOp() == EOpFunction)
+                    {
+                        function->traverse(&callRewriter);
+                    }
+                }
+            }
+
+            void RewriteFunctionDefinition(TIntermediate* intermediate, IdGenerator& ids, TIntermAggregate* function)
+            {
+                auto& functionSequence = function->getSequence();
+                if (functionSequence.empty())
+                {
+                    return;
+                }
+
+                auto* paramsAggregate = functionSequence[0]->getAsAggregate();
+                if (paramsAggregate == nullptr || paramsAggregate->getOp() != EOpParameters)
+                {
+                    return;
+                }
+
+                // Find positions of combined-sampler parameters in the original parameter list.
+                std::vector<int> originalSamplerParamIndices{};
+                auto& params = paramsAggregate->getSequence();
+                for (int i = 0; i < gsl::narrow_cast<int>(params.size()); ++i)
+                {
+                    auto* paramSymbol = params[i]->getAsSymbolNode();
+                    if (paramSymbol != nullptr && IsCombinedSamplerType(paramSymbol->getType()))
+                    {
+                        originalSamplerParamIndices.push_back(i);
+                    }
+                }
+
+                if (originalSamplerParamIndices.empty())
+                {
+                    return;
+                }
+
+                const std::string oldMangledName{function->getName().c_str()};
+
+                // For each sampler parameter, allocate a texture symbol and a sampler symbol
+                // and an `EOpConstructTextureSampler(texture, sampler)` aggregate that takes
+                // their place in the function body. Walk right-to-left so that earlier indices
+                // remain valid as we expand the parameter list in place.
+                std::map<long long, TIntermAggregate*> originalParamIdToConstruction{};
+                for (auto it = originalSamplerParamIndices.rbegin(); it != originalSamplerParamIndices.rend(); ++it)
+                {
+                    const int idx = *it;
+                    auto* originalParam = params[idx]->getAsSymbolNode();
+                    const TType& originalType = originalParam->getType();
+                    const long long originalId = originalParam->getId();
+                    const std::string originalName{originalParam->getName().c_str()};
+
+                    TIntermSymbol* newTextureSymbol;
+                    {
+                        TPublicType publicType{};
+                        publicType.qualifier.clearLayout();
+                        publicType.basicType = originalType.getBasicType();
+                        publicType.qualifier = originalType.getQualifier();
+                        publicType.sampler = originalType.getSampler();
+                        publicType.sampler.combined = false;
+
+                        TType newType{publicType};
+                        const std::string newName = originalName + "Texture";
+                        newTextureSymbol = intermediate->addSymbol(TIntermSymbol{ids.Next(), newName.c_str(), newType});
+                    }
+
+                    TIntermSymbol* newSamplerSymbol;
+                    {
+                        TPublicType publicType{};
+                        publicType.qualifier.clearLayout();
+                        publicType.basicType = originalType.getBasicType();
+                        publicType.qualifier = originalType.getQualifier();
+                        publicType.sampler.sampler = true;
+
+                        TType newType{publicType};
+                        newSamplerSymbol = intermediate->addSymbol(TIntermSymbol{ids.Next(), originalName.c_str(), newType});
+                    }
+
+                    // Build the `EOpConstructTextureSampler(texture, sampler)` aggregate that
+                    // will replace every reference to the original sampler parameter inside
+                    // the function body. Mirror the type construction performed by
+                    // SamplerSplitterTraverser for uniform samplers.
+                    auto* construction = intermediate->growAggregate(newTextureSymbol, newSamplerSymbol);
+                    construction->setOperator(EOpConstructTextureSampler);
+                    {
+                        TPublicType publicType{};
+                        publicType.basicType = originalType.getBasicType();
+                        publicType.qualifier.clearLayout();
+                        publicType.qualifier.storage = EvqTemporary;
+                        publicType.sampler = originalType.getSampler();
+                        publicType.sampler.combined = true;
+                        construction->setType(TType{publicType});
+                    }
+
+                    originalParamIdToConstruction[originalId] = construction;
+
+                    // Replace params[idx] with the new texture symbol, then insert the new
+                    // sampler symbol immediately after it. This expands one sampler parameter
+                    // into two parameters at the original position.
+                    RemoveAllTreeNodes(params[idx]);
+                    params[idx] = newTextureSymbol;
+                    params.insert(params.begin() + idx + 1, newSamplerSymbol);
+                }
+
+                // Rewrite the function body: every reference to an original sampler parameter
+                // becomes a reference to its `EOpConstructTextureSampler(t, s)` aggregate.
+                if (functionSequence.size() >= 2)
+                {
+                    BodySamplerParamReferenceRewriter bodyRewriter{originalParamIdToConstruction};
+                    functionSequence[1]->traverse(&bodyRewriter);
+                    bodyRewriter.ApplyReplacements();
+                }
+
+                // Update the function's mangled name to reflect the new parameter list and
+                // record the rewrite so Phase 2 can update matching call sites.
+                const std::string newMangledName = ComputeMangledName(oldMangledName, paramsAggregate);
+                function->setName(newMangledName.c_str());
+
+                m_rewrittenFunctions[oldMangledName] = RewrittenFunction{
+                    std::move(newMangledName),
+                    std::move(originalSamplerParamIndices),
+                };
+            }
+
+            static bool IsCombinedSamplerType(const TType& type)
+            {
+                return type.getBasicType() == EbtSampler && type.getSampler().isCombined();
+            }
+
+            static std::string ComputeMangledName(const std::string& oldMangledName, TIntermAggregate* paramsAggregate)
+            {
+                // glslang mangles function names as `funcName(typeMangle1;typeMangle2;...`.
+                // Preserve the function-name prefix from the original mangled name and
+                // re-mangle each parameter from its updated TType.
+                const auto parenPos = oldMangledName.find('(');
+                if (parenPos == std::string::npos)
+                {
+                    return oldMangledName;
+                }
+
+                TString mangled{oldMangledName.substr(0, parenPos + 1).c_str()};
+                for (auto* paramNode : paramsAggregate->getSequence())
+                {
+                    auto* paramSymbol = paramNode->getAsSymbolNode();
+                    if (paramSymbol != nullptr)
+                    {
+                        paramSymbol->getType().appendMangledName(mangled);
+                    }
+                }
+                return mangled.c_str();
+            }
+
+            /// Collects references to specific symbol IDs inside a function body and replaces
+            /// them in their parents with the corresponding `EOpConstructTextureSampler`
+            /// aggregate. Mirrors the parent-node-type dispatch from `MakeReplacements`.
+            class BodySamplerParamReferenceRewriter final : public TIntermTraverser
+            {
+            public:
+                explicit BodySamplerParamReferenceRewriter(std::map<long long, TIntermAggregate*>& idToConstruction)
+                    : m_idToConstruction{idToConstruction}
+                {
+                }
+
+                void visitSymbol(TIntermSymbol* symbol) override
+                {
+                    if (m_idToConstruction.find(symbol->getId()) != m_idToConstruction.end())
+                    {
+                        m_pendingReplacements.emplace_back(symbol, this->getParentNode());
+                    }
+                }
+
+                void ApplyReplacements()
+                {
+                    for (const auto& [symbol, parent] : m_pendingReplacements)
+                    {
+                        TIntermAggregate* replacement = m_idToConstruction.at(symbol->getId());
+                        ReplaceInParent(parent, symbol, replacement);
+                    }
+                }
+
+            private:
+                static void ReplaceInParent(TIntermNode* parent, TIntermSymbol* oldSymbol, TIntermAggregate* replacement)
+                {
+                    if (auto* aggregate = parent->getAsAggregate())
+                    {
+                        auto& sequence = aggregate->getSequence();
+                        for (size_t i = 0; i < sequence.size(); ++i)
+                        {
+                            if (sequence[i] == oldSymbol)
+                            {
+                                sequence[i] = replacement;
+                            }
+                        }
+                    }
+                    else if (auto* binary = parent->getAsBinaryNode())
+                    {
+                        if (binary->getLeft() == oldSymbol)
+                        {
+                            binary->setLeft(replacement);
+                        }
+                        else if (binary->getRight() == oldSymbol)
+                        {
+                            binary->setRight(replacement);
+                        }
+                    }
+                    else if (auto* unary = parent->getAsUnaryNode())
+                    {
+                        if (unary->getOperand() == oldSymbol)
+                        {
+                            unary->setOperand(replacement);
+                        }
+                    }
+                    else if (auto* selection = parent->getAsSelectionNode())
+                    {
+                        if (oldSymbol == selection->getCondition())
+                        {
+                            selection->setCondition(replacement);
+                        }
+                        else if (oldSymbol == selection->getTrueBlock())
+                        {
+                            selection->setTrueBlock(replacement);
+                        }
+                        else if (oldSymbol == selection->getFalseBlock())
+                        {
+                            selection->setFalseBlock(replacement);
+                        }
+                    }
+                    else
+                    {
+                        throw std::runtime_error{
+                            "SamplerFunctionParameterSplitter: unsupported parent node when rewriting body sampler reference"};
+                    }
+                }
+
+                std::map<long long, TIntermAggregate*>& m_idToConstruction;
+                std::vector<std::pair<TIntermSymbol*, TIntermNode*>> m_pendingReplacements{};
+            };
+
+            /// Walks function bodies looking for `EOpFunctionCall` nodes that call a
+            /// rewritten function. For each, unpacks the `EOpConstructTextureSampler(t, s)`
+            /// aggregate at each original sampler parameter position into two separate
+            /// arguments (the texture and the sampler), and updates the call's mangled name.
+            class CallSiteRewriter final : public TIntermTraverser
+            {
+            public:
+                explicit CallSiteRewriter(const std::map<std::string, RewrittenFunction>& rewrittenFunctions)
+                    : m_rewrittenFunctions{rewrittenFunctions}
+                {
+                }
+
+                bool visitAggregate(TVisit visit, TIntermAggregate* node) override
+                {
+                    if (visit == EvPreVisit && node->getOp() == EOpFunctionCall)
+                    {
+                        auto it = m_rewrittenFunctions.find(node->getName().c_str());
+                        if (it != m_rewrittenFunctions.end())
+                        {
+                            RewriteCallSite(node, it->second);
+                        }
+                    }
+                    return true;
+                }
+
+            private:
+                static void RewriteCallSite(TIntermAggregate* call, const RewrittenFunction& info)
+                {
+                    auto& args = call->getSequence();
+                    // glslang's SPIR-V emitter (handleUserFunctionCall) indexes its qualifier
+                    // list in lockstep with the args sequence. Expanding args without expanding
+                    // the qualifier list reads past-the-end memory for the trailing args, which
+                    // silently elides their OpStore instructions and yields uninitialized
+                    // function-call temporaries in the generated HLSL/SPIR-V.
+                    auto& qualifiers = call->getQualifierList();
+
+                    // Invariant: glslang populates the qualifier list in lockstep with args for
+                    // every EOpFunctionCall reaching this rewriter. If they ever disagree, we
+                    // must fail loudly -- silently degrading would re-introduce the very bug
+                    // this pass exists to fix (qualifiers OOB-read -> elided OpStore ->
+                    // uninitialized texture access -> accessChain.isRValue() assert).
+                    if (qualifiers.size() != args.size())
+                    {
+                        throw std::runtime_error{
+                            "SamplerFunctionParameterSplitter: call qualifier list size does not match argument list size"};
+                    }
+
+                    // Process right-to-left so earlier sampler indices remain valid as we
+                    // expand each `EOpConstructTextureSampler(t, s)` argument into two args.
+                    for (auto it = info.OriginalSamplerParamIndices.rbegin(); it != info.OriginalSamplerParamIndices.rend(); ++it)
+                    {
+                        const int idx = *it;
+                        if (idx < 0 || idx >= gsl::narrow_cast<int>(args.size()))
+                        {
+                            throw std::runtime_error{
+                                "SamplerFunctionParameterSplitter: call site argument index out of bounds"};
+                        }
+
+                        auto* argAggregate = args[idx]->getAsAggregate();
+                        if (argAggregate == nullptr || argAggregate->getOp() != EOpConstructTextureSampler)
+                        {
+                            throw std::runtime_error{
+                                "SamplerFunctionParameterSplitter: expected EOpConstructTextureSampler at sampler argument position"};
+                        }
+
+                        auto& constructionOperands = argAggregate->getSequence();
+                        if (constructionOperands.size() != 2)
+                        {
+                            throw std::runtime_error{
+                                "SamplerFunctionParameterSplitter: EOpConstructTextureSampler aggregate must have exactly two operands"};
+                        }
+
+                        TIntermNode* textureOperand = constructionOperands[0];
+                        TIntermNode* samplerOperand = constructionOperands[1];
+
+                        args[idx] = textureOperand;
+                        args.insert(args.begin() + idx + 1, samplerOperand);
+
+                        // Keep the qualifier list aligned with args. Both the texture and the
+                        // sampler inherit the original sampler argument's qualifier (typically
+                        // EvqIn for function parameters); samplers are opaque types so glslang
+                        // takes the originalParam l-value path regardless.
+                        qualifiers.insert(qualifiers.begin() + idx + 1, qualifiers[idx]);
+                    }
+
+                    call->setName(info.NewMangledName.c_str());
+                }
+
+                const std::map<std::string, RewrittenFunction>& m_rewrittenFunctions;
+            };
+        };
+
+        /// Prepends a zero-initialization assignment to the start of every function body
+        /// for each struct-typed local variable referenced anywhere in that body.
+        ///
+        /// Babylon.js emits patterns like
+        ///
+        ///     lightingInfo computeAreaLighting(...) {
+        ///         lightingInfo result;             // declared, no initializer
+        ///         result.specular += value;        // read-modify-write of an
+        ///         result.diffuse  += value;        // uninitialized field
+        ///         return result;
+        ///     }
+        ///
+        /// which is undefined behavior in GLSL but tolerated by WebGL drivers. The HLSL
+        /// emitted by SPIRV-Cross faithfully reproduces the pattern, and D3DCompile
+        /// rejects it with `error X4000: variable 'result_1' used without having been
+        /// completely initialized`.
+        ///
+        /// This pass walks every function body, collects all struct-typed local
+        /// (`EvqTemporary`) symbols it references, and prepends an assignment of an
+        /// `EOpConstructStruct(0, 0, ...)` aggregate at the start of the body. The
+        /// SPIR-V emitter sees this as a normal store and emits well-defined SPIR-V;
+        /// SPIRV-Cross then emits HLSL with the struct local initialized at declaration
+        /// (or shortly after). Any subsequent real assignment in the body is dead-code
+        /// eliminated by the HLSL compiler's optimizer (FXC for the DXBC backend, DXC
+        /// for DXIL), so functional behavior is unchanged for previously-well-defined
+        /// shaders.
+        ///
+        /// Note on nested-scope locals: a struct local declared inside a loop body or
+        /// conditional branch (e.g. `for (...) { lightingInfo r; r.x += ...; }`) also
+        /// gets its init prepended at the *function* entry rather than at its lexical
+        /// scope entry. This is safe — and necessary — because:
+        ///
+        ///   1. SPIR-V's `OpVariable` rule requires every function-scope variable to
+        ///      live in the function's entry basic block, so glslang already hoists
+        ///      nested-scope locals to function scope in the SPIR-V it emits; SPIRV-
+        ///      Cross then emits HLSL with the variable at function scope as well,
+        ///      meaning a function-entry init reaches every use site correctly.
+        ///   2. Real BabylonJS shaders (Standard / PBR / OpenPBR area lighting,
+        ///      `computeAreaLighting` inlined per-light) hit this exact pattern — the
+        ///      inlined struct locals are referenced *only* from nested scopes — and
+        ///      need the init to suppress X4000.
+        ///   3. The marginal semantic change versus per-scope init (a hypothetical
+        ///      "accumulator that depends on per-iteration freshness" pattern) does
+        ///      not occur in BabylonJS-generated GLSL, which only ever uses the
+        ///      uninitialized-first-read pattern this pass targets.
+        class StructLocalZeroInitializerTraverser final
+        {
+        public:
+            static void Traverse(TProgram& program)
+            {
+                StructLocalZeroInitializerTraverser pass{};
+                pass.TraverseStage(program.getIntermediate(EShLangVertex));
+                pass.TraverseStage(program.getIntermediate(EShLangFragment));
+            }
+
+        private:
+            void TraverseStage(TIntermediate* intermediate)
+            {
+                if (intermediate == nullptr)
+                {
+                    return;
+                }
+
+                auto* root = intermediate->getTreeRoot()->getAsAggregate();
+                if (root == nullptr)
+                {
+                    return;
+                }
+
+                for (auto* node : root->getSequence())
+                {
+                    auto* function = node->getAsAggregate();
+                    if (function != nullptr && function->getOp() == EOpFunction)
+                    {
+                        ProcessFunction(intermediate, function);
+                    }
+                }
+            }
+
+            static void ProcessFunction(TIntermediate* intermediate, TIntermAggregate* function)
+            {
+                auto& functionSequence = function->getSequence();
+                if (functionSequence.size() < 2)
+                {
+                    return;
+                }
+
+                auto* body = functionSequence[1]->getAsAggregate();
+                if (body == nullptr)
+                {
+                    return;
+                }
+
+                SymbolCollector collector{};
+                body->traverse(&collector);
+
+                if (collector.UniqueLocals.empty())
+                {
+                    return;
+                }
+
+                std::vector<TIntermNode*> initStatements{};
+                initStatements.reserve(collector.UniqueLocals.size());
+                for (const auto& [id, symbolNode] : collector.UniqueLocals)
+                {
+                    BX_UNUSED(id);
+                    const TType& type = symbolNode->getType();
+                    TIntermTyped* zeroValue = MakeZeroForType(intermediate, type, symbolNode->getLoc());
+                    if (zeroValue == nullptr)
+                    {
+                        continue;
+                    }
+                    TIntermSymbol* lhs = intermediate->addSymbol(*symbolNode);
+                    TIntermTyped* assign = intermediate->addAssign(EOpAssign, lhs, zeroValue, symbolNode->getLoc());
+                    if (assign != nullptr)
+                    {
+                        initStatements.push_back(assign);
+                    }
+                }
+
+                if (!initStatements.empty())
+                {
+                    auto& bodySequence = body->getSequence();
+                    bodySequence.insert(bodySequence.begin(), initStatements.begin(), initStatements.end());
+                }
+            }
+
+            /// Build a typed expression that evaluates to the all-zero value of `type`.
+            /// For struct types, recursively constructs `EOpConstructStruct(zero_field_0, ...)`.
+            /// For scalar/vector/matrix types, builds a `TIntermConstantUnion` with zeros.
+            /// Returns nullptr for unsupported types (currently: array types).
+            static TIntermTyped* MakeZeroForType(TIntermediate* intermediate, const TType& type, const TSourceLoc& loc)
+            {
+                if (type.isArray())
+                {
+                    // Skipping array initialization keeps this pass focused on the
+                    // X4000-on-struct-local case observed in BabylonJS's
+                    // `computeAreaLighting`. Array-of-struct is rare in BJS shaders and
+                    // can be added later if a concrete failure surfaces.
+                    return nullptr;
+                }
+
+                if (type.isStruct())
+                {
+                    const TTypeList* structFields = type.getStruct();
+                    if (structFields == nullptr || structFields->empty())
+                    {
+                        return nullptr;
+                    }
+
+                    TIntermAggregate* construct = nullptr;
+                    for (const TTypeLoc& field : *structFields)
+                    {
+                        TIntermTyped* fieldZero = MakeZeroForType(intermediate, *field.type, loc);
+                        if (fieldZero == nullptr)
+                        {
+                            return nullptr;
+                        }
+                        construct = intermediate->growAggregate(construct, fieldZero, loc);
+                    }
+
+                    if (construct == nullptr)
+                    {
+                        return nullptr;
+                    }
+                    construct->setOperator(EOpConstructStruct);
+                    construct->setType(type);
+                    return construct;
+                }
+
+                const size_t numComponents = gsl::narrow_cast<size_t>(type.computeNumComponents());
+                if (numComponents == 0)
+                {
+                    return nullptr;
+                }
+
+                TConstUnionArray zeros{gsl::narrow_cast<int>(numComponents)};
+                for (size_t i = 0; i < numComponents; ++i)
+                {
+                    switch (type.getBasicType())
+                    {
+                        case EbtFloat:
+                        case EbtDouble:
+                        case EbtFloat16:
+                            zeros[i].setDConst(0.0);
+                            break;
+                        case EbtInt:
+                        case EbtInt8:
+                        case EbtInt16:
+                        case EbtInt64:
+                            zeros[i].setIConst(0);
+                            break;
+                        case EbtUint:
+                        case EbtUint8:
+                        case EbtUint16:
+                        case EbtUint64:
+                            zeros[i].setUConst(0);
+                            break;
+                        case EbtBool:
+                            zeros[i].setBConst(false);
+                            break;
+                        default:
+                            // Unknown basic type (e.g. opaque sampler); skip.
+                            return nullptr;
+                    }
+                }
+
+                return intermediate->addConstantUnion(zeros, type, loc, true);
+            }
+
+            class SymbolCollector final : public TIntermTraverser
+            {
+            public:
+                // Map uniqueId -> a representative symbol node (used to read type/loc when
+                // building the init statement). One entry per distinct local variable.
+                std::map<long long, TIntermSymbol*> UniqueLocals{};
+
+                void visitSymbol(TIntermSymbol* symbol) override
+                {
+                    const TType& type = symbol->getType();
+                    if (type.getQualifier().storage != EvqTemporary)
+                    {
+                        return;
+                    }
+                    if (!type.isStruct() || type.isArray())
+                    {
+                        return;
+                    }
+                    UniqueLocals.try_emplace(symbol->getId(), symbol);
+                }
+            };
         };
 
         class InvertYDerivativeOperandsTraverser : public TIntermTraverser
@@ -939,6 +1721,76 @@ namespace Babylon::ShaderCompilerTraversers
 
             TIntermediate* m_intermediate{};
         };
+
+        class FlipSamplerCoordinatesTraverser : public TIntermTraverser
+        {
+        public:
+            static void Traverse(TProgram& program)
+            {
+                for (auto stage : {EShLangVertex, EShLangFragment})
+                {
+                    auto* intermediate{program.getIntermediate(stage)};
+                    if (intermediate != nullptr)
+                    {
+                        FlipSamplerCoordinatesTraverser traverser{intermediate};
+                        intermediate->getTreeRoot()->traverse(&traverser);
+                    }
+                }
+            }
+
+        protected:
+            virtual bool visitAggregate(TVisit visit, TIntermAggregate* node) override
+            {
+                if (visit == EvPreVisit && (node->getOp() == EOpTexture || node->getOp() == EOpTextureLod))
+                {
+                    auto& sequence = node->getSequence();
+                    if (sequence.size() >= 2)
+                    {
+                        // The coordinate is the operand right after the sampler. Only 2-component
+                        // float coordinates (sampler2D-style) are flipped; cube/array/3D coordinates
+                        // (vec3+) are left untouched, matching the original flip(vec2)/flip(vec3).
+                        auto* coordinate = sequence[1]->getAsTyped();
+                        if (coordinate != nullptr &&
+                            coordinate->getType().getBasicType() == EbtFloat &&
+                            !coordinate->getType().isArray() &&
+                            coordinate->getType().getVectorSize() == 2)
+                        {
+                            sequence[1] = FlipVerticalCoordinate(coordinate);
+                        }
+                    }
+                }
+
+                return true;
+            }
+
+        private:
+            FlipSamplerCoordinatesTraverser(TIntermediate* intermediate)
+                : m_intermediate{intermediate}
+            {
+            }
+
+            // Builds `coordinate * vec2(1.0, -1.0) + vec2(0.0, 1.0)`, i.e. (u, 1.0 - v).
+            TIntermTyped* FlipVerticalCoordinate(TIntermTyped* coordinate)
+            {
+                const TSourceLoc& loc{coordinate->getLoc()};
+                TType vec2Type{EbtFloat, EvqConst, 2};
+
+                TConstUnionArray scaleValues{2};
+                scaleValues[0].setDConst(1.0);
+                scaleValues[1].setDConst(-1.0);
+                TIntermTyped* scale{m_intermediate->addConstantUnion(scaleValues, vec2Type, loc)};
+
+                TConstUnionArray offsetValues{2};
+                offsetValues[0].setDConst(0.0);
+                offsetValues[1].setDConst(1.0);
+                TIntermTyped* offset{m_intermediate->addConstantUnion(offsetValues, vec2Type, loc)};
+
+                TIntermTyped* scaled{m_intermediate->addBinaryMath(EOpMul, coordinate, scale, loc)};
+                return m_intermediate->addBinaryMath(EOpAdd, scaled, offset, loc);
+            }
+
+            TIntermediate* m_intermediate{};
+        };
     }
 
     ScopeT MoveNonSamplerUniformsIntoStruct(TProgram& program, IdGenerator& ids)
@@ -951,19 +1803,19 @@ namespace Babylon::ShaderCompilerTraversers
         return UniformTypeChangeTraverser::Traverse(program, ids);
     }
 
-    void AssignLocationsAndNamesToVertexVaryingsOpenGL(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName)
+    void AssignLocationsAndNamesToVertexVaryingsOpenGL(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName, const std::map<std::string, uint32_t>& instancedAttributes)
     {
-        VertexVaryingInTraverserOpenGL::Traverse(program, ids, replacementToOriginalName);
+        VertexVaryingInTraverserOpenGL::Traverse(program, ids, replacementToOriginalName, instancedAttributes);
     }
 
-    void AssignLocationsAndNamesToVertexVaryingsMetal(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName)
+    void AssignLocationsAndNamesToVertexVaryingsMetal(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName, const std::map<std::string, uint32_t>& instancedAttributes)
     {
-        VertexVaryingInTraverserMetal::Traverse(program, ids, replacementToOriginalName);
+        VertexVaryingInTraverserMetal::Traverse(program, ids, replacementToOriginalName, instancedAttributes);
     }
 
-    void AssignLocationsAndNamesToVertexVaryingsD3D(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName)
+    void AssignLocationsAndNamesToVertexVaryingsD3D(TProgram& program, IdGenerator& ids, std::map<std::string, std::string>& replacementToOriginalName, const std::map<std::string, uint32_t>& instancedAttributes)
     {
-        VertexVaryingInTraverserD3D::Traverse(program, ids, replacementToOriginalName);
+        VertexVaryingInTraverserD3D::Traverse(program, ids, replacementToOriginalName, instancedAttributes);
     }
 
     void SplitSamplersIntoSamplersAndTextures(TProgram& program, IdGenerator& ids)
@@ -971,8 +1823,23 @@ namespace Babylon::ShaderCompilerTraversers
         SamplerSplitterTraverser::Traverse(program, ids);
     }
 
+    void SplitSamplerFunctionParameters(TProgram& program, IdGenerator& ids)
+    {
+        SamplerFunctionParameterSplitterTraverser::Traverse(program, ids);
+    }
+
+    void ZeroInitializeStructLocals(TProgram& program)
+    {
+        StructLocalZeroInitializerTraverser::Traverse(program);
+    }
+
     void InvertYDerivativeOperands(TProgram& program)
     {
         InvertYDerivativeOperandsTraverser::Traverse(program);
+    }
+
+    void FlipSamplerCoordinates(TProgram& program)
+    {
+        FlipSamplerCoordinatesTraverser::Traverse(program);
     }
 }

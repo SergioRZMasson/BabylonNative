@@ -4,9 +4,9 @@ set(SOURCES
     "Include/Shared/Babylon/Graphics/Device.h"
     "InternalInclude/Babylon/Graphics/BgfxCallback.h"
     "InternalInclude/Babylon/Graphics/continuation_scheduler.h"
-    "InternalInclude/Babylon/Graphics/FrameBuffer.h"
     "InternalInclude/Babylon/Graphics/DeviceContext.h"
-    "InternalInclude/Babylon/Graphics/SafeTimespanGuarantor.h"
+    "InternalInclude/Babylon/Graphics/DeviceQueries.h"
+    "InternalInclude/Babylon/Graphics/FrameBuffer.h"
     "InternalInclude/Babylon/Graphics/Texture.h"
     "Source/BgfxCallback.cpp"
     "Source/FrameBuffer.cpp"
@@ -16,7 +16,6 @@ set(SOURCES
     "Source/DeviceImpl.h"
     "Source/DeviceImpl_${BABYLON_NATIVE_PLATFORM}.${BABYLON_NATIVE_PLATFORM_IMPL_EXT}"
     "Source/DeviceImpl_${GRAPHICS_API}.${BABYLON_NATIVE_PLATFORM_IMPL_EXT}"
-    "Source/SafeTimespanGuarantor.cpp"
     "Source/Texture.cpp")
 
 add_library(Graphics ${SOURCES})
@@ -38,9 +37,6 @@ target_compile_definitions(Graphics
 target_link_libraries(Graphics
     PRIVATE JsRuntimeInternal
     PRIVATE bgfx
-    PRIVATE bimg
-    PRIVATE bimg_encode
-    PRIVATE bimg_decode
     PRIVATE minz
     PRIVATE bx)
 
@@ -57,6 +53,17 @@ elseif(ANDROID)
 elseif(APPLE)
     target_link_libraries(Graphics
         PRIVATE metal-cpp)
+    if(IOS)
+        # bgfx's metal-cpp (compiled as C++ against the iOS 26 SDK) emits direct link-time
+        # externs for the MTLIOErrorDomain / MTLTensorDomain constants. The iPhoneSimulator
+        # Metal stub in Xcode 26.x does not export them (the device stub does), so simulator
+        # links fail with undefined symbols. Allow these two symbols to be resolved by dynamic
+        # lookup at runtime; this is harmless on device, where they resolve normally. Propagated
+        # to consumers (the final app link) via INTERFACE.
+        target_link_options(Graphics INTERFACE
+            "LINKER:-U,_MTLIOErrorDomain"
+            "LINKER:-U,_MTLTensorDomain")
+    endif()
 endif()
 
 set_property(TARGET Graphics PROPERTY FOLDER Core)
@@ -98,7 +105,6 @@ target_link_libraries(GraphicsDeviceContext
     INTERFACE JsRuntimeInternal
     INTERFACE arcana
     INTERFACE bgfx
-    INTERFACE bimg
     INTERFACE bx)
 
 if(APPLE)

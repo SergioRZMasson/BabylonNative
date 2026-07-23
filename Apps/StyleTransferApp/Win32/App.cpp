@@ -69,7 +69,6 @@ namespace
     WCHAR szWindowClass[MAX_LOADSTRING]; // the main window class name
 
     std::optional<Babylon::Graphics::Device> g_device{};
-    std::optional<Babylon::Graphics::DeviceUpdate> g_update{};
     Babylon::Plugins::NativeInput* g_nativeInput{};
     std::optional<Babylon::AppRuntime> g_runtime{};
     bool g_minimized{false};
@@ -219,13 +218,11 @@ namespace
     {
         if (g_device)
         {
-            g_update->Finish();
             g_device->FinishRenderingCurrentFrame();
         }
 
         g_nativeInput = {};
         g_runtime.reset();
-        g_update.reset();
         g_device.reset();
     }
 
@@ -300,12 +297,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // --------------------- Babylon Native initialization --------------------------
 
     g_device = CreateBabylonGraphicsDevice(d3d11Device.get());
-    g_update.emplace(g_device->GetUpdate("update"));
 
     // Start rendering a frame to unblock the JavaScript from queuing graphics
     // commands.
     g_device->StartRenderingCurrentFrame();
-    g_update->Start();
 
     // Create a Babylon Native application runtime which hosts a JavaScript
     // engine on a new thread.
@@ -334,36 +329,33 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     loader.LoadScript("app:///Scripts/babylonjs.loaders.js");
     loader.LoadScript("app:///Scripts/index.js");
 
-    std::promise<void> addToContext{};
+    // Close the script-load frame.
+    g_device->FinishRenderingCurrentFrame();
+
+    // Open a new frame for `startup` so the JS-side resource creation and
+    // startup() call run in the same frame as the wait that observes them.
+    g_device->StartRenderingCurrentFrame();
+
     std::promise<void> startup{};
 
     // Create an external texture for the render target texture and pass it to
     // the `startup` JavaScript function.
-    loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{g_BabylonRenderTexture.get()}, &addToContext, &startup](Napi::Env env) {
-        auto jsPromise = externalTexture.AddToContextAsync(env);
-        addToContext.set_value();
-
-        jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {Napi::Function::New(env, [&startup](const Napi::CallbackInfo& info) {
-            auto nativeTexture = info[0];
-            info.Env().Global().Get("startup").As<Napi::Function>().Call(
-                {
-                    nativeTexture,
-                    Napi::Value::From(info.Env(), WIDTH),
-                    Napi::Value::From(info.Env(), HEIGHT),
-                });
-            startup.set_value();
-        })});
+    loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{g_BabylonRenderTexture.get()}, &startup](Napi::Env env) {
+        auto nativeTexture = externalTexture.CreateForJavaScript(env);
+        env.Global().Get("startup").As<Napi::Function>().Call(
+            {
+                nativeTexture,
+                Napi::Value::From(env, WIDTH),
+                Napi::Value::From(env, HEIGHT),
+            });
+        startup.set_value();
     });
-
-    // Wait for `AddToContextAsync` to be called.
-    addToContext.get_future().wait();
-
-    // Render a frame so that `AddToContextAsync` will complete.
-    g_update->Finish();
-    g_device->FinishRenderingCurrentFrame();
 
     // Wait for `startup` to finish.
     startup.get_future().wait();
+
+    // Close the startup frame.
+    g_device->FinishRenderingCurrentFrame();
 
     // --------------------------- Rendering loop -------------------------
 
@@ -372,7 +364,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     MSG msg{};
 
     g_device->StartRenderingCurrentFrame();
-    g_update->Start();
 
     // Main message loop:
     while (msg.message != WM_QUIT)
@@ -388,7 +379,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             if (g_device)
             {
                 // Finish Babylon Native rendering.
-                g_update->Finish();
                 g_device->FinishRenderingCurrentFrame();
 
                 if (g_selectedModel >= 0)
@@ -406,7 +396,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 // Present and start rendering next frame.
                 swapChain->Present(1, 0);
                 g_device->StartRenderingCurrentFrame();
-                g_update->Start();
             }
 
             result = PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE) && msg.message != WM_QUIT;
@@ -460,7 +449,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
                 if (g_device)
                 {
-                    g_update->Finish();
                     g_device->FinishRenderingCurrentFrame();
                 }
 
@@ -479,7 +467,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     if (g_device)
                     {
                         g_device->StartRenderingCurrentFrame();
-                        g_update->Start();
                     }
                 }
             }

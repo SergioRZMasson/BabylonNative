@@ -67,9 +67,6 @@ namespace ModuleLoadTest
             "d3d12core.dll",
             "d3d12sdklayers.dll",
             "d3dscache.dll",
-            // TODO: bgfx loads dbghelp.dll at boot (callstack/crash helper). Drop this
-            // entry once bgfx stops pulling it in.
-            "dbghelp.dll",
             "dcomp.dll",
             "devobj.dll",
             "directxdatabasehelper.dll",
@@ -132,6 +129,10 @@ namespace ModuleLoadTest
             "dxil.dll",
             // VS Start-Without-Debugging launch environment
             "kernel.appcore.dll",
+            // Ambient shell/appcore DLL pulled in transitively (e.g. via
+            // windows.storage.dll / DComp) on some Windows images such as the
+            // GitHub windows-2022 runner; not introduced by BabylonNative.
+            "twinapi.appcore.dll",
         };
         for (const auto& prefix : kPrefixes)
         {

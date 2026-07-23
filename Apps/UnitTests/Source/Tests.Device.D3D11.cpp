@@ -2,9 +2,11 @@
 
 #include <Babylon/Graphics/Device.h>
 
-#include "Utils.h"
+#include "Helpers.h"
 
 #include <winrt/base.h>
+
+extern Babylon::Graphics::Configuration g_deviceConfig;
 
 namespace
 {
@@ -87,17 +89,37 @@ TEST(Device, BackBuffer)
     config.Height = dimensions[0].cy;
 
     Babylon::Graphics::Device device{config};
-    Babylon::Graphics::DeviceUpdate update{device.GetUpdate("update")};
 
     for (size_t i = 1; i < std::size(dimensions); ++i)
     {
         device.StartRenderingCurrentFrame();
-        update.Start();
 
         device.UpdateBackBuffer(renderTargetTextures[i].View.get());
         device.UpdateSize(dimensions[i].cx, dimensions[i].cy);
 
-        update.Finish();
         device.FinishRenderingCurrentFrame();
     }
+}
+
+// Verifies that UpdateDevice throws when called while rendering is enabled.
+TEST(Device, UpdateDeviceThrowsWhenRenderingEnabled)
+{
+    winrt::com_ptr<ID3D11Device> d3dDevice = CreateDevice();
+
+    Babylon::Graphics::Configuration config = g_deviceConfig;
+    config.Device = d3dDevice.get();
+
+    Babylon::Graphics::Device device{config};
+
+    // Permitted before EnableRendering.
+    EXPECT_NO_THROW(device.UpdateDevice(d3dDevice.get()));
+
+    // StartRenderingCurrentFrame triggers EnableRendering -> throws.
+    device.StartRenderingCurrentFrame();
+    EXPECT_THROW(device.UpdateDevice(d3dDevice.get()), std::runtime_error);
+    device.FinishRenderingCurrentFrame();
+
+    // Permitted again after DisableRendering.
+    device.DisableRendering();
+    EXPECT_NO_THROW(device.UpdateDevice(d3dDevice.get()));
 }

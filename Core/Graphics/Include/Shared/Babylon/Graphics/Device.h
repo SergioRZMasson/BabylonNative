@@ -58,44 +58,29 @@ namespace Babylon::Graphics
         DepthStencilFormat BackBufferDepthStencilFormat{DepthStencilFormat::Depth24Stencil8};
     };
 
-    class Device;
+    class DeviceImpl;
 
+    // Deprecated: DeviceUpdate is a no-op compatibility shim. Frame synchronization
+    // is now handled by FrameCompletionScope inside StartRenderingCurrentFrame/
+    // FinishRenderingCurrentFrame. This class will be removed in a future PR.
     class DeviceUpdate
     {
     public:
-        void Start()
-        {
-            m_start();
-        }
+        [[deprecated("DeviceUpdate is a no-op; frame synchronization is handled by "
+                     "StartRenderingCurrentFrame/FinishRenderingCurrentFrame.")]]
+        void Start() {}
 
+        [[deprecated("DeviceUpdate is a no-op; frame synchronization is handled by "
+                     "StartRenderingCurrentFrame/FinishRenderingCurrentFrame.")]]
+        void Finish() {}
+
+        [[deprecated("DeviceUpdate is a no-op; frame synchronization is handled by "
+                     "StartRenderingCurrentFrame/FinishRenderingCurrentFrame.")]]
         void RequestFinish(std::function<void()> onFinishCallback)
         {
-            m_requestFinish(std::move(onFinishCallback));
+            onFinishCallback();
         }
-
-        void Finish()
-        {
-            std::promise<void> promise{};
-            auto future = promise.get_future();
-            RequestFinish([&promise] { promise.set_value(); });
-            future.wait();
-        }
-
-    private:
-        friend class Device;
-
-        template<typename StartCallableT, typename RequestEndCallableT>
-        DeviceUpdate(StartCallableT&& start, RequestEndCallableT&& requestEnd)
-            : m_start{std::forward<StartCallableT>(start)}
-            , m_requestFinish{std::forward<RequestEndCallableT>(requestEnd)}
-        {
-        }
-
-        std::function<void()> m_start{};
-        std::function<void(std::function<void()>)> m_requestFinish{};
     };
-
-    class DeviceImpl;
 
     class Device
     {
@@ -112,7 +97,15 @@ namespace Babylon::Graphics
         // method and structure might change.
 
         void UpdateWindow(WindowT window);
+
+        // Sets the underlying graphics device used for rendering. The new device takes effect on
+        // the next EnableRendering call.
+        //
+        // Only valid when rendering is disabled -- i.e. before the first EnableRendering /
+        // StartRenderingCurrentFrame call, or after a DisableRendering call. Throws
+        // std::runtime_error otherwise.
         void UpdateDevice(DeviceT device);
+
         void UpdateSize(size_t width, size_t height);
         void UpdateMSAA(uint8_t value);
         void UpdateAlphaPremultiplied(bool enabled);
@@ -128,7 +121,8 @@ namespace Babylon::Graphics
         void EnableRendering();
         void DisableRendering();
 
-        DeviceUpdate GetUpdate(const char* updateName);
+        [[deprecated("DeviceUpdate is a no-op; remove GetUpdate/Start/Finish calls.")]]
+        DeviceUpdate GetUpdate(const char* /*updateName*/) { return {}; }
 
         void StartRenderingCurrentFrame();
         void FinishRenderingCurrentFrame();

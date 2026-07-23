@@ -15,8 +15,10 @@ on:
         type: string
         default: macos-latest
 
+# Absorb transient npm registry / CDN flakes during `npm install` in Apps/CMakeLists.txt.
+# npm's default fetch-retries is 2; bump to 5 (npm's own exponential backoff handles spacing).
 env:
-  CMAKE_VERSION: '3.31.6'
+  npm_config_fetch_retries: '5'
 
 jobs:
   build:
@@ -24,10 +26,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-
-      - uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: ${{ env.CMAKE_VERSION }}
 
 
       - name: Select Xcode ${{ inputs.xcode-version }}

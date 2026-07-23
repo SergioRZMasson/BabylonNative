@@ -13,6 +13,13 @@ namespace bgfx
 
 namespace Babylon::ShaderCompilerCommon
 {
+    // The synthetic instance-data locations must line up with the live bgfx::Attrib enum so that
+    // per-instance inputs land on the top TEXCOORD semantics bgfx binds them to, and so that they
+    // sort above every real vertex attribute (and can therefore be excluded from the shader's
+    // attribute table below).
+    static_assert(Babylon::Graphics::TEXCOORD0_ATTRIBUTE_LOCATION == static_cast<uint32_t>(bgfx::Attrib::TexCoord0));
+    static_assert(Babylon::Graphics::INSTANCE_DATA_FIRST_LOCATION >= static_cast<uint32_t>(bgfx::Attrib::Count));
+
     // Patching shader code to append clip space coordinates for the current rendering API.
     // Can be done with glslang shader traversal. Done with string patching for now.
     std::string ProcessShaderCoordinates(std::string_view source)
@@ -35,18 +42,14 @@ namespace Babylon::ShaderCompilerCommon
             throw std::runtime_error{"ProcessSamplerFlip: Could not find shader name define."};
         }
 
+        // The vertical (V) flip applied to texture()/textureLod() sample coordinates is performed by
+        // the FlipSamplerCoordinates AST traverser, not by a preprocessor macro. A 2-argument
+        // function-like macro (`#define texture(x,y) texture(x, flip(y))`) cannot match the
+        // 3-argument bias form `texture(sampler, uv, bias)` emitted by some Babylon.js shaders (e.g.
+        // GreasedLine), and glslang's preprocessor has no variadic-macro support, so those shaders
+        // failed to compile. texelFetch keeps its macro because it takes integer texel coordinates,
+        // which the float-coordinate AST flip does not handle.
         static const auto textureSamplerFunctions = R"(
-            highp vec2 flip(highp vec2 uv)
-            {
-                return vec2(uv.x, 1. - uv.y);
-            }
-            highp vec3 flip(highp vec3 uv)
-            {
-                return uv;
-            }
-
-            #define texture(x,y) texture(x, flip(y))
-            #define textureLod(x,y,z) textureLod(x, flip(y), z)
             #define texelFetch(tex, uv, lod) texelFetch((tex), ivec2((uv).x, textureSize((tex), (lod)).y - 1 - (uv).y), (lod))
             #define SHADER_NAME)";
 
@@ -102,11 +105,50 @@ namespace Babylon::ShaderCompilerCommon
 
 #if OPENGL
             BX_UNUSED(compiler);
-            const auto stage{static_cast<uint8_t>(stages.size())};
-            stages[sampler.name] = stage;
+            // A program's vertex and fragment shaders share this stages map, and Babylon's
+            // generated GLSL frequently declares the same sampler in both stages. Assign a stage
+            // (texture unit) the first time a sampler name is seen and reuse it thereafter; without
+            // the guard the second pass would re-run stages[name] = stages.size() on already-present
+            // names, which doesn't grow the map, collapsing every such sampler onto the same unit.
+            // That produced multiple sampler2D uniforms and a samplerCube all pointing at one unit,
+            // which GLES/ANGLE rejects at draw time with GL_INVALID_OPERATION (D3D11/Metal don't
+            // validate this, so the bug was GL-only). Each sampler now gets its own distinct unit,
+            // mirroring WebGL's Effect._bindSamplerUniformToChannel.
+            if (stages.find(sampler.name) == stages.end())
+            {
+                stages[sampler.name] = static_cast<uint8_t>(stages.size());
+            }
 #else
             stages[sampler.name] = static_cast<uint8_t>(compiler.get_decoration(sampler.id, spv::DecorationBinding));
 #endif
+        }
+    }
+
+    void AssignUniformBufferBindings(spirv_cross::Compiler& compiler)
+    {
+        // bgfx's D3D11/D3D12 backends bind their predefined constant buffer at register b0
+        // (see VSSetConstantBuffers/PSSetConstantBuffers in renderer_d3d11.cpp), so the "Frame"
+        // block synthesized by MoveNonSamplerUniformsIntoStruct must keep DecorationBinding=0.
+        // Any other uniform blocks declared by the source shader get sequential bindings
+        // starting at 1 so SPIRV-Cross emits distinct `register(bN)` annotations and FXC
+        // doesn't reject the shader with X4578 ("cbuffer bank N used more than once").
+        const auto resources = compiler.get_shader_resources();
+
+        for (const auto& uniformBuffer : resources.uniform_buffers)
+        {
+            if (uniformBuffer.name == "Frame")
+            {
+                compiler.set_decoration(uniformBuffer.id, spv::DecorationBinding, 0);
+            }
+        }
+
+        uint32_t nextBinding = 1;
+        for (const auto& uniformBuffer : resources.uniform_buffers)
+        {
+            if (uniformBuffer.name != "Frame")
+            {
+                compiler.set_decoration(uniformBuffer.id, spv::DecorationBinding, nextBinding++);
+            }
         }
     }
 
@@ -170,10 +212,17 @@ namespace Babylon::ShaderCompilerCommon
                 auto& type = compiler.get_type_from_variable(id);
                 if (var.storage == spv::StorageClassUniformConstant &&
                     type.basetype != spirv_cross::SPIRType::BaseType::SampledImage &&
-                    type.basetype != spirv_cross::SPIRType::BaseType::Sampler)
+                    type.basetype != spirv_cross::SPIRType::BaseType::Sampler &&
+                    type.basetype != spirv_cross::SPIRType::BaseType::Image &&
+                    type.basetype != spirv_cross::SPIRType::BaseType::Struct &&
+                    type.basetype != spirv_cross::SPIRType::BaseType::AtomicCounter)
                 {
                     auto& uniform = info.Uniforms.emplace_back();
                     uniform.Name = compiler.get_name(id);
+                    if (uniform.Name.empty())
+                    {
+                        throw std::runtime_error{"Uniform with empty name detected — likely a UBO block or struct uniform was incorrectly type-converted."};
+                    }
                     uniform.Offset = 0; // Not actually used for anything by OpenGL.
 
                     if (type.columns == 1 && 1 <= type.vecsize && type.vecsize <= 4)
@@ -255,14 +304,34 @@ namespace Babylon::ShaderCompilerCommon
             AppendBytes(vertexBytes, vertexShaderInfo.Bytes);
             AppendBytes(vertexBytes, static_cast<uint8_t>(0));
 
-            AppendBytes(vertexBytes, static_cast<uint8_t>(resources.stage_inputs.size()));
+            // Per-instance vertex attributes are encoded with synthetic locations at/above
+            // bgfx::Attrib::Count (they occupy the top TEXCOORD semantics that bgfx binds by
+            // semantic rather than via bgfx::Attrib). They must be excluded from the shader's
+            // attribute table: bgfx::attribToId only covers real bgfx::Attrib values, and the
+            // backends resolve instance data from the instance-data buffer independently. This
+            // mirrors bgfx's own reflection, which skips semantics without a bgfx::Attrib mapping.
+            uint8_t numVertexAttributes{0};
+            for (const spirv_cross::Resource& stageInput : resources.stage_inputs)
+            {
+                const uint32_t location = compiler.get_decoration(stageInput.id, spv::DecorationLocation);
+                if (location < static_cast<uint32_t>(bgfx::Attrib::Count))
+                {
+                    ++numVertexAttributes;
+                }
+            }
+
+            AppendBytes(vertexBytes, numVertexAttributes);
 
             for (const spirv_cross::Resource& stageInput : resources.stage_inputs)
             {
                 const uint32_t location = compiler.get_decoration(stageInput.id, spv::DecorationLocation);
-                AppendBytes(vertexBytes, bgfx::attribToId(static_cast<bgfx::Attrib::Enum>(location)));
+                if (location < static_cast<uint32_t>(bgfx::Attrib::Count))
+                {
+                    AppendBytes(vertexBytes, bgfx::attribToId(static_cast<bgfx::Attrib::Enum>(location)));
+                }
 
                 // Map from symbolName -> originalName to associate babylon.js shader attribute -> Babylon Native attribute location.
+                // Instance-data inputs are still exposed here so the consumer can bind their vertex buffers.
                 bgfxShaderInfo.VertexAttributeLocations[vertexShaderInfo.AttributeRenaming[stageInput.name]] = location;
             }
             AppendBytes(vertexBytes, static_cast<uint16_t>(uniformsInfo.ByteSize));

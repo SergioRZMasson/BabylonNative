@@ -2,6 +2,7 @@
 #include <map>
 #include <algorithm>
 #include <cassert>
+#include <optional>
 #include <regex>
 
 #ifdef __GNUC__
@@ -105,7 +106,6 @@ namespace Babylon::Polyfills::Internal
         , m_canvas{NativeCanvas::Unwrap(info[0].As<Napi::Object>())}
         , m_nvg{std::make_shared<NVGcontext*>(nvgCreate(1))}
         , m_graphicsContext{m_canvas->GetGraphicsContext()}
-        , m_update{m_graphicsContext.GetUpdate("update")}
         , m_cancellationSource{std::make_shared<arcana::cancellation_source>()}
         , m_runtimeScheduler{Babylon::JsRuntime::GetFromJavaScript(info.Env())}
         , Polyfills::Canvas::Impl::MonitoredResource{Polyfills::Canvas::Impl::GetFromJavaScript(info.Env())}
@@ -114,11 +114,7 @@ namespace Babylon::Polyfills::Internal
         //info.This().ToObject().DefineProperty(Napi::PropertyDescriptor::Value("canvas", info[0], napi_enumerable));
         info.This().ToObject().Set("canvas", info[0]);
 
-        for (auto& font : NativeCanvas::fontsInfos)
-        {
-            // TODO: update nvgCreateFontMem safely when old font buffer invalidated
-            m_fonts[font.first] = nvgCreateFontMem(*m_nvg, font.first.c_str(), font.second.data(), static_cast<int>(font.second.size()), 0);
-        }
+        // Fonts loaded after this Context is created are picked up in Flush().
     }
 
     Context::~Context()
@@ -156,7 +152,11 @@ namespace Babylon::Polyfills::Internal
     {
         if (std::holds_alternative<std::string>(m_fillStyle))
         {
-            const auto color = StringToColor(info.Env(), std::get<std::string>(m_fillStyle));
+            const auto& str = std::get<std::string>(m_fillStyle);
+            // Treat unset/empty fillStyle as opaque white (nvg's default fill color) instead of
+            // the transparent black returned by StringToColor("") — this matches how fillStyle
+            // behaves before any explicit assignment via SetFillStyle.
+            const auto color = str.empty() ? nvgRGBA(255, 255, 255, 255) : StringToColor(info.Env(), str);
             nvgFillColor(*m_nvg, color);
         }
         else if (std::holds_alternative<CanvasGradient*>(m_fillStyle))
@@ -275,11 +275,22 @@ namespace Babylon::Polyfills::Internal
     void Context::Save(const Napi::CallbackInfo&)
     {
         nvgSave(*m_nvg);
+        // Track our wrapper-side fillStyle/strokeStyle alongside the nvg state stack so that
+        // ctx.restore() correctly rewinds them — otherwise FillText/BindFillStyle would re-bind
+        // a stale color from after a fillStyle change that nvg has since popped.
+        m_savedStyles.push_back({m_fillStyle, m_strokeStyle});
     }
 
     void Context::Restore(const Napi::CallbackInfo&)
     {
         nvgRestore(*m_nvg);
+        if (!m_savedStyles.empty())
+        {
+            const auto& saved = m_savedStyles.back();
+            m_fillStyle = saved.fillStyle;
+            m_strokeStyle = saved.strokeStyle;
+            m_savedStyles.pop_back();
+        }
         m_isClipped = false;
     }
 
@@ -560,11 +571,42 @@ namespace Babylon::Polyfills::Internal
     Napi::Value Context::MeasureText(const Napi::CallbackInfo& info)
     {
         std::string text{info[0].As<Napi::String>()};
+
+        // If the JS-requested font family hasn't been loaded, return Arial-equivalent metrics
+        // instead of measuring with whatever fallback font is bound. Browsers use the system
+        // Arial for "Arial"/"sans-serif"/etc.; here we have e.g. droidsans only, which is
+        // ~1.7x wider per em. Returning droidsans widths makes Babylon helpers like
+        // DynamicTexture.drawText center text via t = (canvas - measureText.width)/2 to a
+        // negative x and clip the text off-canvas. Arial-ish synthesised metrics keep the
+        // centering on-canvas, while the actual FillText still substitutes our loaded font.
+        const bool familyAvailable = !m_font.Familiy().empty()
+            && m_fonts.find(m_font.Familiy()) != m_fonts.end();
+
+        if (!familyAvailable && m_font.Size() > 0.f)
+        {
+            // Approximate Arial proportional metrics: average advance ~ 0.55 em.
+            const float fontSize = m_font.Size();
+            const float advance = fontSize * 0.55f;
+            const float width = advance * static_cast<float>(text.length());
+            const float ascent = fontSize * 0.75f;
+            const float descent = fontSize * 0.25f;
+
+            auto obj{Napi::Object::New(info.Env())};
+            obj.Set("width", Napi::Value::From(info.Env(), width));
+            obj.Set("height", Napi::Value::From(info.Env(), ascent + descent));
+            obj.Set("actualBoundingBoxLeft", Napi::Value::From(info.Env(), 0.f));
+            obj.Set("actualBoundingBoxRight", Napi::Value::From(info.Env(), width));
+            obj.Set("fontBoundingBoxAscent", Napi::Value::From(info.Env(), ascent));
+            obj.Set("fontBoundingBoxDescent", Napi::Value::From(info.Env(), descent));
+            return obj.As<Napi::Value>();
+        }
+
         return MeasureText::CreateInstance(info.Env(), this, text);
     }
 
     bool Context::SetFontFaceId()
     {
+        EnsureFontsLoaded();
         if (m_fonts.empty())
         {
             return false;
@@ -606,56 +648,110 @@ namespace Babylon::Polyfills::Internal
         }
     }
 
-    void Context::Flush(const Napi::CallbackInfo&)
+    void Context::EnsureFontsLoaded()
     {
-        bool needClear = m_canvas->UpdateRenderTarget();
-
-        Graphics::FrameBuffer& frameBuffer = m_canvas->GetFrameBuffer();
-
-        auto updateToken{m_update.GetUpdateToken()};
-        bgfx::Encoder* encoder = updateToken.GetEncoder();
-        frameBuffer.Bind(*encoder);
-        if (needClear)
+        // Pick up any fonts that were loaded after this Context was created.
+        for (auto& font : NativeCanvas::fontsInfos)
         {
-            frameBuffer.Clear(*encoder, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL, 0, 1.f, 0);
+            if (m_fonts.end() == m_fonts.find(font.first))
+            {
+                // TODO: update nvgCreateFontMem safely when old font buffer invalidated
+                m_fonts[font.first] = nvgCreateFontMem(*m_nvg, font.first.c_str(), font.second.data(), static_cast<int>(font.second.size()), 0);
+            }
         }
-        frameBuffer.SetViewPort(*encoder, 0.f, 0.f, 1.f, 1.f);
-        const auto width = m_canvas->GetWidth();
-        const auto height = m_canvas->GetHeight();
+    }
 
-        for (auto& buffer : m_canvas->m_frameBufferPool.GetPoolBuffers())
+    void Context::Flush(const Napi::CallbackInfo& info)
+    {
+        // Pick up any fonts loaded after this Context was created (#1683).
+        EnsureFontsLoaded();
+
+        // If called outside the frame cycle (e.g., during initialization/font loading
+        // or async texture load callbacks), acquire a FrameCompletionScope which blocks
+        // until StartRenderingCurrentFrame provides the encoder.
+        std::optional<Graphics::FrameCompletionScope> scope;
+        if (m_graphicsContext.GetActiveEncoder() == nullptr)
         {
-            // sanity check no buffers should have been acquired yet
-            assert(buffer.isAvailable == true);
+            scope.emplace(m_graphicsContext.AcquireFrameCompletionScope());
         }
-        std::function<Babylon::Graphics::FrameBuffer*()> acquire = [this, encoder]() -> Babylon::Graphics::FrameBuffer* {
-            Babylon::Graphics::FrameBuffer *frameBuffer = this->m_canvas->m_frameBufferPool.Acquire();
-            frameBuffer->Bind(*encoder);
-            return frameBuffer;
-        };
-        std::function<void(Babylon::Graphics::FrameBuffer*)> release = [this, encoder](Babylon::Graphics::FrameBuffer* frameBuffer) -> void {
-            // clear framebuffer when released
-            frameBuffer->Clear(*encoder, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL, 0, 1.f, 0);
-            this->m_canvas->m_frameBufferPool.Release(frameBuffer);
-            frameBuffer->Unbind(*encoder);
-        };
 
-        nvgBeginFrame(*m_nvg, float(width), float(height), 1.0f);
-        nvgSetFrameBufferAndEncoder(*m_nvg, frameBuffer, encoder);
-        nvgSetFrameBufferPool(*m_nvg, { acquire, release });
-        nvgEndFrame(*m_nvg);
-        frameBuffer.Unbind(*encoder);
-
-        for (auto& buffer : m_canvas->m_frameBufferPool.GetPoolBuffers())
+        bgfx::Encoder* encoder = m_graphicsContext.GetActiveEncoder();
+        if (encoder == nullptr)
         {
-            // sanity check no unreleased buffers
-            assert(buffer.isAvailable == true);
+            return;
+        }
+
+        // Discard any residual encoder state from NativeEngine rendering.
+        // In the old model Canvas had its own per-thread encoder with clean state;
+        // now it shares the frame encoder with NativeEngine.
+        encoder->discard(BGFX_DISCARD_ALL);
+
+        try
+        {
+            // The entire flush is wrapped: bgfx framebuffer pool exhaustion can throw both from
+            // UpdateRenderTarget() and from FrameBufferPool::Acquire() reached via nvgEndFrame()
+            // below. Converting any such C++ failure into a catchable JS error lets the offending
+            // test fail cleanly instead of aborting the whole sweep.
+            const bool needClear = m_canvas->UpdateRenderTarget();
+
+            Graphics::FrameBuffer& frameBuffer = m_canvas->GetFrameBuffer();
+
+            frameBuffer.Bind();
+            if (needClear)
+            {
+                frameBuffer.Clear(*encoder, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL, 0, 1.f, 0);
+            }
+            frameBuffer.SetViewPort(0.f, 0.f, 1.f, 1.f);
+            const auto width = m_canvas->GetWidth();
+            const auto height = m_canvas->GetHeight();
+
+            for (auto& buffer : m_canvas->m_frameBufferPool.GetPoolBuffers())
+            {
+                // sanity check no buffers should have been acquired yet
+                assert(buffer.isAvailable == true);
+            }
+            std::function<Babylon::Graphics::FrameBuffer*()> acquire = [this]() -> Babylon::Graphics::FrameBuffer* {
+                Babylon::Graphics::FrameBuffer *frameBuffer = this->m_canvas->m_frameBufferPool.Acquire();
+                frameBuffer->Bind();
+                return frameBuffer;
+            };
+            std::function<void(Babylon::Graphics::FrameBuffer*)> release = [this, encoder](Babylon::Graphics::FrameBuffer* frameBuffer) -> void {
+                // clear framebuffer when released
+                frameBuffer->Clear(*encoder, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL, 0, 1.f, 0);
+                this->m_canvas->m_frameBufferPool.Release(frameBuffer);
+                frameBuffer->Unbind();
+            };
+
+            nvgBeginFrame(*m_nvg, float(width), float(height), 1.0f);
+            nvgSetFrameBufferAndEncoder(*m_nvg, frameBuffer, encoder);
+            nvgSetFrameBufferPool(*m_nvg, { acquire, release });
+            nvgEndFrame(*m_nvg);
+            frameBuffer.Unbind();
+
+            // Reserve the view id for the eventual canvas->texture blit NOW, while we are
+            // sequenced immediately after this canvas' draws but before the scene/backbuffer
+            // render is recorded. bgfx processes blits in numeric view-id order, so the copy
+            // must land AFTER the canvas Flush (source ready) yet BEFORE the fullscreen ADT
+            // layer samples the destination texture. Deferring to CopyTexture's
+            // PeekNextViewId() would place the blit after the backbuffer view, so the layer
+            // would sample the previous frame's content (a one-frame GUI latency).
+            m_canvas->SetBlitViewId(m_graphicsContext.AcquireNewViewId());
+
+            for (auto& buffer : m_canvas->m_frameBufferPool.GetPoolBuffers())
+            {
+                // sanity check no unreleased buffers
+                assert(buffer.isAvailable == true);
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            throw Napi::Error::New(info.Env(), ex.what());
         }
     }
 
     void Context::PutImageData(const Napi::CallbackInfo&)
     {
-        throw std::runtime_error{"not implemented"};
+        throw std::runtime_error{"Context2D.putImageData: not implemented"};
     }
 
     void Context::Arc(const Napi::CallbackInfo& info)
@@ -768,7 +864,7 @@ namespace Babylon::Polyfills::Internal
 
     void Context::SetLineDash(const Napi::CallbackInfo& info)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.setLineDash: not implemented");
     }
 
     void Context::StrokeText(const Napi::CallbackInfo& info)
@@ -953,6 +1049,7 @@ namespace Babylon::Polyfills::Internal
         }
 
         nvgFontSize(*m_nvg, font->Size());
+        EnsureFontsLoaded();
         if (m_fonts.find(font->Familiy()) == m_fonts.end())
         {
             // TODO: handle finding font face for a specific weight and style
@@ -996,41 +1093,41 @@ namespace Babylon::Polyfills::Internal
 
     Napi::Value Context::GetShadowColor(const Napi::CallbackInfo& info)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowColor (get): not implemented");
     }
 
     void Context::SetShadowColor(const Napi::CallbackInfo& info, const Napi::Value& value)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowColor (set): not implemented");
     }
 
     Napi::Value Context::GetShadowBlur(const Napi::CallbackInfo& info)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowBlur (get): not implemented");
     }
 
     void Context::SetShadowBlur(const Napi::CallbackInfo& info, const Napi::Value& value)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowBlur (set): not implemented");
     }
 
     Napi::Value Context::GetShadowOffsetX(const Napi::CallbackInfo& info)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowOffsetX (get): not implemented");
     }
 
     void Context::SetShadowOffsetX(const Napi::CallbackInfo& info, const Napi::Value& value)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowOffsetX (set): not implemented");
     }
 
     Napi::Value Context::GetShadowOffsetY(const Napi::CallbackInfo& info)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowOffsetY (get): not implemented");
     }
 
     void Context::SetShadowOffsetY(const Napi::CallbackInfo& info, const Napi::Value& value)
     {
-        throw Napi::Error::New(info.Env(), "not implemented");
+        throw Napi::Error::New(info.Env(), "Context2D.shadowOffsetY (set): not implemented");
     }
 }
