@@ -2,7 +2,7 @@ import type { NativeTexture } from "@babylonjs/core/Engines/Native/nativeInterfa
 import "@babylonjs/core/Helpers/sceneHelpers";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import type { SceneContext } from "./sceneContext";
-export declare function createRenderTargetTextureAsync(context: SceneContext, texturePromise: Promise<NativeTexture>, textureWidth: number, textureHeight: number): Promise<RenderTargetTexture>;
+export declare function createRenderTargetTexture(context: SceneContext, texture: NativeTexture, textureWidth: number, textureHeight: number, sampleCount: number, samplingMode: number): RenderTargetTexture;
 export declare function destroyRenderTargetTexture(texture: RenderTargetTexture): void;
 export interface EngineInfo {
     name: string;

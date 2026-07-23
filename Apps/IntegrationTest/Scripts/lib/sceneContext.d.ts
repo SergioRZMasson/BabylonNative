@@ -1,8 +1,10 @@
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
+import { NativeEngine } from "@babylonjs/core/Engines/nativeEngine";
 import type { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { Scene } from "@babylonjs/core/scene";
 import type { Nullable } from "@babylonjs/core/types";
 import "@babylonjs/loaders/glTF";
+export declare const engine: NativeEngine;
 interface SceneStats {
     indexCount: number;
     materialCount: number;
@@ -24,7 +26,7 @@ export declare class SceneContext {
     private _boundingInfoCache;
     private _statsCache;
     private constructor();
-    static createAsync(environmentData: ArrayBuffer, modelData: ArrayBuffer): Promise<SceneContext>;
+    static createAsync(modelData: ArrayBuffer): Promise<SceneContext>;
     dispose(): void;
     get scene(): Scene;
     get camera(): FreeCamera;
@@ -33,7 +35,6 @@ export declare class SceneContext {
         duration: number;
     }>;
     get gltfExtensions(): Array<string>;
-    waitForSceneReadyAsync(): Promise<void>;
     applyRootNodeTransform(transformArray: Float32Array): void;
     applyCameraTransform(aspectRatio: number, orthographic: boolean, fovOrOrthographicSize: number, minZ: number, maxZ: number, positionX: number, positionY: number, positionZ: number, targetX: number, targetY: number, targetZ: number, upVectorX: number, upVectorY: number, upVectorZ: number, viewportMinX: number, viewportMinY: number, viewportMaxX: number, viewportMaxY: number, scissorLeft: number, scissorTop: number, scissorRight: number, scissorBottom: number): void;
     applyAnimationProgress(animationIndex: number, progress: number): void;

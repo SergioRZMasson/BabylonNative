@@ -5,6 +5,7 @@ import { BoundingBox } from "@babylonjs/core/Culling/boundingBox";
 import { NativeEngine } from "@babylonjs/core/Engines/nativeEngine";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import type { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
+import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import {
   RegisterMaterialPlugin,
   UnregisterMaterialPlugin,
@@ -45,20 +46,30 @@ const target = new Vector3();
 
 let sceneId = 0;
 
-// Fallback dimensions for render target sizing
+// WORKAROUND: The native engine's getRenderWidth/getRenderHeight report the *device* (default framebuffer)
+//             size, not the bound render target's size. This host always renders into a RenderTargetTexture,
+//             so render() stashes the target's size in fallbackRenderWidth/Height and we return that here.
+//             We prefer the fallback and only fall back to the native value when it isn't set yet (before the
+//             first render). NOTE: this must be `fallback || native`, not `native || fallback`: the device is
+//             initialized to a small non-zero size because Babylon Native rejects a zero-sized initialization,
+//             so `native` is always truthy and would otherwise shadow the real target size, causing geometry
+//             to be projected for the device size while the target is a different size (only the
+//             viewport-independent clear would then appear). The native value still guards against a
+//             zero-height division in the projection matrix before the first render sets the fallback.
 let fallbackRenderWidth = 0;
 let fallbackRenderHeight = 0;
 const prototype = (NativeEngine as any).prototype;
 const getRenderWidth = prototype.getRenderWidth;
 const getRenderHeight = prototype.getRenderHeight;
 prototype.getRenderWidth = function (this: any, useScreen: any): number {
-  return getRenderWidth.call(this, useScreen) || fallbackRenderWidth;
+  return fallbackRenderWidth || getRenderWidth.call(this, useScreen);
 };
 prototype.getRenderHeight = function (this: any, useScreen: any): number {
-  return getRenderHeight.call(this, useScreen) || fallbackRenderHeight;
+  return fallbackRenderHeight || getRenderHeight.call(this, useScreen);
 };
 
-const engine = new NativeEngine();
+// Global engine with disabled async shader compilation
+export const engine = new NativeEngine();
 engine.getCaps().parallelShaderCompile = undefined;
 
 interface BoundingInfo {
@@ -72,6 +83,56 @@ interface SceneStats {
   meshCount: number;
   textureCount: number;
   vertexCount: number;
+}
+
+// Guards KHR_materials_transmission models against rendering opaque on their first render.
+//
+// Two Babylon behaviours combine to break transmission on a host that renders on demand (one render per
+// size change):
+//   1. The glTF loader assigns the transmissive material's opaque refraction render target on a deferred
+//      Tools.SetImmediate tick, so a render that happens before it fires compiles a no-refraction (opaque)
+//      shader variant.
+//   2. Babylon Native compiles shaders on a background thread, so the correct refraction shader may still be
+//      compiling on the first render; with shader hot-swapping (on by default) the material keeps drawing its
+//      previous opaque effect until the new one is ready.
+// Because the host renders only once per size, that single frame is the opaque one and the self-correcting
+// second frame never comes. We disable hot-swapping on transmissive materials (so a not-ready material is
+// skipped rather than drawn opaque) and wait for the deferred refraction assignment plus all shader
+// compilation to finish before the scene is first rendered. Ordinary (non-transmissive) models are left
+// untouched so their load latency is unchanged.
+async function ensureTransmissionReadyForFirstRender(
+  scene: Scene
+): Promise<void> {
+  const transmissiveMaterials = scene.meshes
+    .map((mesh) => mesh.material as Nullable<PBRMaterial>)
+    .filter(
+      (material): material is PBRMaterial =>
+        !!material?.subSurface?.isRefractionEnabled
+    );
+
+  if (transmissiveMaterials.length === 0) {
+    return;
+  }
+
+  for (const material of transmissiveMaterials) {
+    material.allowShaderHotSwapping = false;
+  }
+
+  // Bounded so a resource that never becomes ready can't hang scene creation.
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 16));
+
+    // Don't accept readiness until the loader's deferred refraction-texture assignment has run - otherwise
+    // scene.isReady() would report the opaque (no-refraction) shader variant as ready. Calling scene.isReady
+    // also drives the shader compilation it is waiting on.
+    const refractionAssigned = transmissiveMaterials.every(
+      (material) => !!material.subSurface.refractionTexture
+    );
+    if ((refractionAssigned && scene.isReady(true)) || Date.now() >= deadline) {
+      break;
+    }
+  }
 }
 
 export class SceneContext {
@@ -138,7 +199,6 @@ export class SceneContext {
   }
 
   public static async createAsync(
-    environmentData: ArrayBuffer,
     modelData: ArrayBuffer
   ): Promise<SceneContext> {
     const materialPlugins = new Array<ViewportMaterialPlugin>();
@@ -154,7 +214,7 @@ export class SceneContext {
       scene.useRightHandedSystem = true;
       scene.clearColor.a = 0;
 
-      configureEnvironment(scene, environmentData);
+      configureEnvironment(scene);
 
       let extensionsUsed: Array<string> | undefined = [];
 
@@ -192,13 +252,20 @@ export class SceneContext {
 
       model.meshes[0].rotationQuaternion = Quaternion.Identity();
 
-      return new SceneContext(
+      const context = new SceneContext(
         scene,
         materialPlugins,
         model.meshes[0],
         model.animationGroups,
         extensionsUsed
       );
+
+      // Ensure KHR_materials_transmission materials have their refraction render target assigned and their
+      // shaders fully compiled before the host renders the scene for the first time, so transmissive models
+      // don't render opaque on that first (and, for an on-demand host, only) frame.
+      await ensureTransmissionReadyForFirstRender(scene);
+
+      return context;
     } finally {
       UnregisterMaterialPlugin("viewport");
     }
@@ -240,10 +307,6 @@ export class SceneContext {
 
   public get gltfExtensions(): Array<string> {
     return this._gltfExtensions;
-  }
-
-  public async waitForSceneReadyAsync(): Promise<void> {
-    return this._scene.whenReadyAsync();
   }
 
   public applyRootNodeTransform(transformArray: Float32Array): void {

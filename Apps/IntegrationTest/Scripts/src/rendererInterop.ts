@@ -5,16 +5,18 @@ import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTa
 import type { SceneContext } from "./sceneContext";
 import { Engine } from "@babylonjs/core/Engines/engine";
 
-export async function createRenderTargetTextureAsync(
+export function createRenderTargetTexture(
   context: SceneContext,
-  texturePromise: Promise<NativeTexture>,
+  texture: NativeTexture,
   textureWidth: number,
-  textureHeight: number
-): Promise<RenderTargetTexture> {
+  textureHeight: number,
+  sampleCount: number,
+  samplingMode: number
+): RenderTargetTexture {
   const scene = context.scene;
-  const externalTexture = await texturePromise;
+
   const nativeEngine = scene.getEngine() as NativeEngine;
-  const outputTexture = nativeEngine.wrapNativeTexture(externalTexture);
+  const outputTexture = nativeEngine.wrapNativeTexture(texture);
 
   return new RenderTargetTexture(
     "outputTexture",
@@ -27,6 +29,11 @@ export async function createRenderTargetTextureAsync(
       colorAttachment: outputTexture,
       generateDepthBuffer: true,
       generateStencilBuffer: true,
+      // The sample count and sampling mode are provided by the native side so the render target matches the
+      // texture Babylon renders into: sampleCount is the MSAA sample count of that (external) texture - the
+      // depth buffer is created to match - and samplingMode reflects the texture (non-mipmapped for MSAA).
+      samples: sampleCount,
+      samplingMode: samplingMode,
     }
   );
 }

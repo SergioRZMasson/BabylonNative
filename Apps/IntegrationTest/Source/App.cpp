@@ -196,14 +196,24 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     // Initialize Babylon renderer
     g_renderer.emplace();
 
-    // Find the bundle path relative to the executable
+    // Find the bundle and environment paths relative to the executable
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    std::filesystem::path bundlePath = std::filesystem::path(exePath).parent_path() / "Scripts" / "BabylonInterop.bundle.js";
+    auto exeDir = std::filesystem::path(exePath).parent_path();
+    std::filesystem::path bundlePath = exeDir / "Scripts" / "BabylonInterop.bundle.js";
+    std::filesystem::path envPath = exeDir / "assets" / "environment.env";
+
+    // The environment/IBL map is uploaded once at init and shared by every scene.
+    auto environmentData = LoadBinaryFile(envPath.string());
+    if (environmentData.empty())
+    {
+        MessageBoxW(hWnd, L"Failed to load assets/environment.env.", L"Error", MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
 
     try
     {
-        g_renderer->Init(bundlePath.string(), g_width, g_height);
+        g_renderer->Init(bundlePath.string(), std::move(environmentData), g_width, g_height);
     }
     catch (const std::exception& e)
     {
@@ -408,23 +418,11 @@ void LoadModelFromFile(const std::wstring& filePath)
 {
     std::string modelPath = WideToUtf8(filePath);
 
-    // Find environment.env relative to the executable
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    auto envPath = std::filesystem::path(exePath).parent_path() / "assets" / "environment.env";
-
     auto modelData = LoadBinaryFile(modelPath);
-    auto environmentData = LoadBinaryFile(envPath.string());
 
     if (modelData.empty())
     {
         MessageBoxW(g_hWnd, L"Failed to load model file.", L"Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    if (environmentData.empty())
-    {
-        MessageBoxW(g_hWnd, L"Failed to load environment.env.", L"Error", MB_OK | MB_ICONERROR);
         return;
     }
 
@@ -439,7 +437,7 @@ void LoadModelFromFile(const std::wstring& filePath)
     try
     {
         // Load the model into Babylon
-        g_renderer->LoadModel(std::move(modelData), std::move(environmentData));
+        g_renderer->LoadModel(std::move(modelData));
 
         // Bind the render target
         g_renderer->BindRenderTarget(g_renderTarget);

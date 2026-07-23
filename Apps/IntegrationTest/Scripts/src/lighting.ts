@@ -1,3 +1,4 @@
+import type { ThinEngine } from "@babylonjs/core/Engines/thinEngine";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
 import { PointLight } from "@babylonjs/core/Lights/pointLight";
@@ -9,7 +10,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Tools } from "@babylonjs/core/Misc/tools";
 import type { Scene } from "@babylonjs/core/scene";
-import type { DeepImmutable } from "@babylonjs/core/types";
+import type { DeepImmutable, Nullable } from "@babylonjs/core/types";
 
 function getBlurKernel(light: PointLight, bufferSize: number) {
   const normalizedBlurKernel = 0.03 / light.shadowAngle;
@@ -77,20 +78,39 @@ export function createLights(scene: Scene): Array<ShadowLight> {
   ];
 }
 
-export function configureEnvironment(
-  scene: Scene,
-  environmentData: ArrayBuffer
-) {
-  scene.imageProcessingConfiguration.toneMappingEnabled = true;
-  scene.imageProcessingConfiguration.toneMappingType =
-    ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
+// The environment (IBL) texture is identical for every model/scene, so we cache it once and reuse it across
+// all scenes instead of receiving the environment bytes from the native host and rebuilding a CubeTexture on
+// every scene load. The texture is created against the engine (not a specific Scene) so it is NOT tracked by
+// any scene's `scene.textures` list and therefore survives `scene.dispose()` - letting a single instance be
+// shared by every scene for the lifetime of the engine.
+let cachedEnvironmentTexture: Nullable<CubeTexture> = null;
 
-  const hdrTexture = new CubeTexture("data:environment.env", scene, {
+// Caches the shared environment/IBL texture from the raw `.env` bytes sent once by the native host. Called
+// before any scene is created; the resulting CubeTexture is reused by `configureEnvironment` for every scene.
+export function setEnvironmentTexture(
+  engine: ThinEngine,
+  environmentData: ArrayBuffer
+): void {
+  // Release any previously cached texture (e.g. if the environment is ever re-sent) to avoid leaking it.
+  cachedEnvironmentTexture?.dispose();
+
+  const hdrTexture = new CubeTexture("data:environment.env", engine, {
     buffer: new Uint8Array(environmentData),
     forcedExtension: ".env",
   });
   hdrTexture.rotationY = 2.73;
-  scene.environmentTexture = hdrTexture;
+  cachedEnvironmentTexture = hdrTexture;
+}
+
+export function configureEnvironment(scene: Scene) {
+  // Add `Khronos PBR Neutral` tone mapping.
+  scene.imageProcessingConfiguration.toneMappingEnabled = true;
+  scene.imageProcessingConfiguration.toneMappingType =
+    ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
+
+  // Reuse the globally cached environment texture (set once via setEnvironmentTexture) instead of building a
+  // new one from environment bytes per scene.
+  scene.environmentTexture = cachedEnvironmentTexture;
 }
 
 export function enableShadows(
