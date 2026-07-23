@@ -289,7 +289,8 @@ void BabylonRenderer::LoadModel(std::vector<char> modelData)
     doneFuture.get();
 }
 
-void BabylonRenderer::BindRenderTarget(Microsoft::WRL::ComPtr<ID3D11Texture2D> outputTexture)
+void BabylonRenderer::BindRenderTarget(Microsoft::WRL::ComPtr<ID3D11Texture2D> outputTexture,
+                                       uint32_t contentWidth, uint32_t contentHeight)
 {
     m_outputTexture = outputTexture;
 
@@ -297,6 +298,10 @@ void BabylonRenderer::BindRenderTarget(Microsoft::WRL::ComPtr<ID3D11Texture2D> o
     m_outputTexture->GetDesc(&outputDesc);
     m_textureWidth = outputDesc.Width;
     m_textureHeight = outputDesc.Height;
+    // The on-screen content size the model should fill (centered in the texture). Defaults to the full texture
+    // when not specified, i.e. a snug render with no margin.
+    m_contentWidth = contentWidth ? contentWidth : m_textureWidth;
+    m_contentHeight = contentHeight ? contentHeight : m_textureHeight;
     m_aspectRatio = static_cast<float>(outputDesc.Width) / static_cast<float>(outputDesc.Height);
 
     // Destroy old render target if rebinding
@@ -388,15 +393,18 @@ void BabylonRenderer::ApplyCameraTransformJS(Napi::Env env, const ICameraTransfo
 {
     constexpr float pi = 3.14159265358979f;
 
-    // The model's screen rectangle within the render target, in pixels. This host frames the model to fill
-    // the whole target, so the rectangle is the full texture and there is no viewport margin. A host that
-    // renders the model into a sub-rectangle (to leave room for it to overflow while rotating) would pass a
-    // smaller rectangle here, and the oversized-viewport math below enlarges the viewport and pads the field
-    // of view to match - the same behaviour the ViewportMaterialPlugin applies in the vertex shader.
-    const float left = 0.0f;
-    const float top = 0.0f;
-    const float right = static_cast<float>(m_textureWidth);
-    const float bottom = static_cast<float>(m_textureHeight);
+    // The model's screen rectangle within the render target, in pixels: an m_contentWidth x m_contentHeight
+    // area centered in the texture. When the content is smaller than the texture (the render target is
+    // oversized to leave room for the model to overflow while rotating), the surrounding area is margin and
+    // the oversized-viewport math below enlarges the viewport and pads the field of view so the model keeps
+    // the same apparent size - the same compensation the ViewportMaterialPlugin applies in the vertex shader.
+    // When the content equals the texture, this reduces to a full viewport with no margin.
+    const float contentW = static_cast<float>(m_contentWidth ? m_contentWidth : m_textureWidth);
+    const float contentH = static_cast<float>(m_contentHeight ? m_contentHeight : m_textureHeight);
+    const float left = (static_cast<float>(m_textureWidth) - contentW) / 2.0f;
+    const float top = (static_cast<float>(m_textureHeight) - contentH) / 2.0f;
+    const float right = left + contentW;
+    const float bottom = top + contentH;
     const bool clipped = false;
 
     float viewportScaleForMargin = 1.0f;

@@ -10,6 +10,7 @@
 #include <shobjidl.h>
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -40,6 +41,15 @@ static bool g_modelLoaded = false;
 static uint32_t g_width = 1280;
 static uint32_t g_height = 853;
 
+// Repro toggle ('R'): when enabled, the render target is created larger than the window while the model is
+// rendered into the centered, window-sized region and scaled back to the same apparent size by the viewport
+// material plugin. This mirrors an on-demand host that renders into an oversized canvas while the model is
+// being manipulated (so it can overflow the window while rotating) and into a snug canvas at rest. The two
+// render sizes disagree by a sub-pixel amount, so toggling this makes the model visibly shift/shrink - the
+// bug under test.
+static bool g_oversized = false;
+static constexpr float g_oversizeFactor = 1.2f;
+
 // Animation state
 static int g_animIndex = 0;
 static float g_animDuration = 0.0f;
@@ -57,6 +67,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 bool InitD3D11(HWND hWnd, uint32_t width, uint32_t height);
 void ResizeD3D11(uint32_t width, uint32_t height);
+uint32_t RenderTargetWidth();
+uint32_t RenderTargetHeight();
+bool CreateRenderTargetTexture();
+void ToggleOversizedRenderTarget();
 void PresentFrame();
 void OpenFileDialog();
 void LoadModelFromFile(const std::wstring& filePath);
@@ -230,6 +244,62 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     return TRUE;
 }
 
+// --- Render Target Helpers ---
+uint32_t RenderTargetWidth()
+{
+    return g_oversized ? static_cast<uint32_t>(std::lround(g_width * g_oversizeFactor)) : g_width;
+}
+
+uint32_t RenderTargetHeight()
+{
+    return g_oversized ? static_cast<uint32_t>(std::lround(g_height * g_oversizeFactor)) : g_height;
+}
+
+// Creates g_renderTarget at the current render-target size (the window size, or oversized when g_oversized).
+bool CreateRenderTargetTexture()
+{
+    g_renderTarget.Reset();
+
+    D3D11_TEXTURE2D_DESC texDesc{};
+    texDesc.Width = RenderTargetWidth();
+    texDesc.Height = RenderTargetHeight();
+    texDesc.MipLevels = 1;
+    texDesc.ArraySize = 1;
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+
+    return SUCCEEDED(g_device->CreateTexture2D(&texDesc, nullptr, g_renderTarget.GetAddressOf()));
+}
+
+// Toggles the oversized render target (bound to 'R'). Recreates the render target at the new size and rebinds
+// it, keeping the model's on-screen content size (the window) constant. Ideally the model would look
+// identical in both modes; the sub-pixel difference between the two render sizes is what makes it visibly
+// shift/shrink - the bug this app exists to reproduce.
+void ToggleOversizedRenderTarget()
+{
+    g_oversized = !g_oversized;
+
+    g_deviceContext->ClearState();
+    g_deviceContext->Flush();
+
+    if (!CreateRenderTargetTexture())
+        return;
+
+    if (g_renderer && g_modelLoaded)
+    {
+        g_renderer->BindRenderTarget(g_renderTarget, g_width, g_height);
+    }
+
+    std::wstring title = L"Babylon Native Integration Test";
+    title += g_oversized ? L"  -  render target 20% oversized (viewport-compensated)"
+                         : L"  -  render target matches window";
+    SetWindowTextW(g_hWnd, title.c_str());
+
+    g_dirty = true;
+}
+
 // --- D3D11 Initialization ---
 bool InitD3D11(HWND hWnd, uint32_t width, uint32_t height)
 {
@@ -286,19 +356,8 @@ bool InitD3D11(HWND hWnd, uint32_t width, uint32_t height)
     if (FAILED(hr))
         return false;
 
-    // Create intermediate render target texture
-    D3D11_TEXTURE2D_DESC texDesc{};
-    texDesc.Width = width;
-    texDesc.Height = height;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-
-    hr = g_device->CreateTexture2D(&texDesc, nullptr, g_renderTarget.GetAddressOf());
-    return SUCCEEDED(hr);
+    // Create the intermediate render target texture (at window size; g_oversized is false at startup).
+    return CreateRenderTargetTexture();
 }
 
 // --- Resize ---
@@ -320,23 +379,13 @@ void ResizeD3D11(uint32_t width, uint32_t height)
     if (FAILED(hr))
         return;
 
-    // Recreate render target texture
-    D3D11_TEXTURE2D_DESC texDesc{};
-    texDesc.Width = width;
-    texDesc.Height = height;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    // Recreate the render target texture (respects the current oversized toggle) and rebind it. The model's
+    // on-screen content size stays the window size regardless of the render target size.
+    CreateRenderTargetTexture();
 
-    g_device->CreateTexture2D(&texDesc, nullptr, g_renderTarget.GetAddressOf());
-
-    // Rebind in Babylon renderer
     if (g_renderer && g_modelLoaded)
     {
-        g_renderer->BindRenderTarget(g_renderTarget);
+        g_renderer->BindRenderTarget(g_renderTarget, g_width, g_height);
     }
 
     g_dirty = true;
@@ -347,7 +396,28 @@ void PresentFrame()
 {
     ComPtr<ID3D11Texture2D> backBuffer;
     g_swapChain->GetBuffer(0, IID_PPV_ARGS(backBuffer.GetAddressOf()));
-    g_deviceContext->CopyResource(backBuffer.Get(), g_renderTarget.Get());
+
+    if (g_oversized)
+    {
+        // The render target is larger than the window. Present the centered, window-sized region the model
+        // was rendered into so it appears at the same on-screen size as the snug render; any sub-pixel
+        // difference between the two renders is what shows up as the model shifting/shrinking.
+        const uint32_t rtW = RenderTargetWidth();
+        const uint32_t rtH = RenderTargetHeight();
+        D3D11_BOX box{};
+        box.left = (rtW - g_width) / 2;
+        box.top = (rtH - g_height) / 2;
+        box.front = 0;
+        box.right = box.left + g_width;
+        box.bottom = box.top + g_height;
+        box.back = 1;
+        g_deviceContext->CopySubresourceRegion(backBuffer.Get(), 0, 0, 0, 0, g_renderTarget.Get(), 0, &box);
+    }
+    else
+    {
+        g_deviceContext->CopyResource(backBuffer.Get(), g_renderTarget.Get());
+    }
+
     g_swapChain->Present(1, 0);
 }
 
@@ -440,7 +510,7 @@ void LoadModelFromFile(const std::wstring& filePath)
         g_renderer->LoadModel(std::move(modelData));
 
         // Bind the render target
-        g_renderer->BindRenderTarget(g_renderTarget);
+        g_renderer->BindRenderTarget(g_renderTarget, g_width, g_height);
 
         // Frame the camera on the model
         float center[3], extents[3];
@@ -501,6 +571,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (wParam == 'O')
             {
                 OpenFileDialog();
+            }
+            else if (wParam == 'R')
+            {
+                ToggleOversizedRenderTarget();
             }
             else if (wParam == VK_F12 && g_renderer)
             {

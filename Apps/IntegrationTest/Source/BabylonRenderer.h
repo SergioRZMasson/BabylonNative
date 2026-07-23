@@ -43,8 +43,13 @@ public:
     // Loads a 3D model from binary data. The environment is uploaded once in Init and shared by all scenes.
     void LoadModel(std::vector<char> modelData);
 
-    // Binds the output texture for Babylon to render into.
-    void BindRenderTarget(Microsoft::WRL::ComPtr<ID3D11Texture2D> outputTexture);
+    // Binds the output texture for Babylon to render into. outputTexture may be larger than the on-screen
+    // content: contentWidth/contentHeight is the size the model should occupy, centered within the texture,
+    // with the extra area acting as margin the model can overflow into while rotating. The viewport material
+    // plugin scales clip-space so the model keeps the same apparent size regardless of the texture/content
+    // ratio. Pass content == texture size for a snug (no-margin) render.
+    void BindRenderTarget(Microsoft::WRL::ComPtr<ID3D11Texture2D> outputTexture,
+                          uint32_t contentWidth, uint32_t contentHeight);
 
     // Queries animation information from the loaded model.
     std::vector<AnimationInfo> GetAnimationInfos();
@@ -93,6 +98,8 @@ private:
 
     uint32_t m_textureWidth{0};
     uint32_t m_textureHeight{0};
+    uint32_t m_contentWidth{0};
+    uint32_t m_contentHeight{0};
     float m_aspectRatio{1.0f};
 
     RenderDocCapture m_renderDoc;
