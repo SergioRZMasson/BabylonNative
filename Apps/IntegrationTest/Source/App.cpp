@@ -245,14 +245,31 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 // --- Render Target Helpers ---
+namespace
+{
+    // Oversized targets pad the base extent by (factor - 1), rounded to an even pixel count so the padding
+    // splits evenly on each side. If the total padding were odd, the centered content region could not be
+    // cropped back to the exact same pixels, adding a half-pixel centering artifact on top of the sub-pixel
+    // viewport-plugin difference this app is meant to isolate.
+    uint32_t OversizedExtent(uint32_t base)
+    {
+        if (!g_oversized)
+        {
+            return base;
+        }
+        const long halfPad = std::lround(base * (g_oversizeFactor - 1.0f) * 0.5f);
+        return base + 2u * static_cast<uint32_t>(halfPad);
+    }
+}
+
 uint32_t RenderTargetWidth()
 {
-    return g_oversized ? static_cast<uint32_t>(std::lround(g_width * g_oversizeFactor)) : g_width;
+    return OversizedExtent(g_width);
 }
 
 uint32_t RenderTargetHeight()
 {
-    return g_oversized ? static_cast<uint32_t>(std::lround(g_height * g_oversizeFactor)) : g_height;
+    return OversizedExtent(g_height);
 }
 
 // Creates g_renderTarget at the current render-target size (the window size, or oversized when g_oversized).
