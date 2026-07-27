@@ -1,5 +1,6 @@
 #include <Babylon/Graphics/FrameBuffer.h>
 #include "DeviceImpl.h"
+#include <bx/debug.h>
 #include <arcana/macros.h>
 #include <cmath>
 
@@ -209,11 +210,29 @@ namespace Babylon::Graphics
         bgfx::setViewFrameBuffer(m_viewId.value(), m_handle);
 
         m_bgfxViewPort = viewPort;
+        const int16_t viewportX = static_cast<int16_t>(std::lround(m_bgfxViewPort.X * Width()));
+        const int16_t viewportY = static_cast<int16_t>(std::lround(m_bgfxViewPort.Y * Height()));
+        const uint16_t viewportWidth = static_cast<uint16_t>(std::lround(m_bgfxViewPort.Width * Width()));
+        const uint16_t viewportHeight = static_cast<uint16_t>(std::lround(m_bgfxViewPort.Height * Height()));
+
+        bx::debugPrintf(
+            "[BabylonNativeViewport] target=%ux%u normalized=(%.6f, %.6f, %.6f, %.6f) pixels=(%d, %d, %u, %u)\n",
+            static_cast<unsigned>(Width()),
+            static_cast<unsigned>(Height()),
+            m_bgfxViewPort.X,
+            m_bgfxViewPort.Y,
+            m_bgfxViewPort.Width,
+            m_bgfxViewPort.Height,
+            viewportX,
+            viewportY,
+            static_cast<unsigned>(viewportWidth),
+            static_cast<unsigned>(viewportHeight));
+
         bgfx::setViewRect(m_viewId.value(),
-            static_cast<int16_t>(std::lround(m_bgfxViewPort.X * Width())),
-            static_cast<int16_t>(std::lround(m_bgfxViewPort.Y * Height())),
-            static_cast<uint16_t>(std::lround(m_bgfxViewPort.Width * Width())),
-            static_cast<uint16_t>(std::lround(m_bgfxViewPort.Height * Height())));
+            viewportX,
+            viewportY,
+            viewportWidth,
+            viewportHeight);
 
         m_bgfxScissor = scissor;
         bgfx::setViewScissor(
