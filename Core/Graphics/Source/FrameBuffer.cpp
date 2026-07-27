@@ -210,8 +210,8 @@ namespace Babylon::Graphics
 
         m_bgfxViewPort = viewPort;
         bgfx::setViewRect(m_viewId.value(),
-            static_cast<uint16_t>(m_bgfxViewPort.X * Width()),
-            static_cast<uint16_t>(m_bgfxViewPort.Y * Height()),
+            static_cast<int16_t>(m_bgfxViewPort.X * Width()),
+            static_cast<int16_t>(m_bgfxViewPort.Y * Height()),
             static_cast<uint16_t>(m_bgfxViewPort.Width * Width()),
             static_cast<uint16_t>(m_bgfxViewPort.Height * Height()));
 
