@@ -1,0 +1,128 @@
+{
+  "scope": "Executed original full Minecraft C++ application projected onto handwritten C99 LiteLayer; separate from the prior 12-test JavaScript host milestone; not complete Babylon Lite/corpus coverage",
+  "originalSource": {
+    "package": "@babylonjs/lite 1.32.0",
+    "pin": "2e064d88ec7422af946f8ec7f089ac6519f99295",
+    "seed": 1337,
+    "renderRadius": 6,
+    "minecraftModules": 24,
+    "originalTsFiles": 27,
+    "sourceEdits": false
+  },
+  "executedResults": {
+    "fullNativeFrontendLowering": "PASS: all original modules lower to 27 application files and 21 reached feature labels",
+    "fullStandardFrontendLowering": "PASS: independent standard-mode comparison",
+    "generatedNativeUserTerrain": "PASS: 169 radius-six chunks exactly match untouched TypeScript",
+    "terrainNonzeroBlocks": 1392067,
+    "terrainFNV64": "3315049788837698003",
+    "userTerrainCTest": "LiteMinecraftUserTerrain169 passed, Release /W4 /WX",
+    "nativeCppGameFrame180": "PASS: 169 active chunks, original runtime WGSL, real GPU/HUD PNGs, zero physical input, clean teardown",
+    "nativeCppGameReplay240": "PASS: 37 scripted events, native gameplay, one block edit and nonzero original synthesized samples submitted to actual XAudio2 output",
+    "nativeCppGameSaveLoad": "PASS: 41 scripted events, two real Win32 file dialogs, original save/load restores seed/player/time/edited-world hash",
+    "nativeCppAdapterContract": "PASS: independent material-instance uniforms, geometry, native hierarchy/identity, mutable position/scaling, camera target, visibility and stale retirement",
+    "nativeCppCTest": "Six isolated Release /W4 /WX tests passed in 32.33 seconds on the final executable",
+    "nativeCppIdleRepeat": "PASS: two fresh 180-frame runs have identical world/camera/time/mob/draw observations and GPU capture hash 7051416437625520103",
+    "postWaterPrefillFNV64": "6859480570131883071",
+    "postWaterPrefillNonzeroBlocks": 1417083,
+    "note": "Post-prefill world includes the original WaterSim flood operation, unlike the raw terrain oracle."
+  },
+  "resolvedInputFailures": [
+    {
+      "diagnostic": "atlas.ts:84:23: Canvas readback asset directories must be within the entry directory.",
+      "classification": "Packager filesystem/layout constraint, not a language or LiteLayer failure",
+      "resolution": "Source-identical ignored staging with entry-local original licensed PNGs"
+    },
+    {
+      "diagnostic": "Unable to locate the bblitec repository from the staged Minecraft module directory.",
+      "classification": "Canvas closure packager repository-root discovery assumption",
+      "resolution": "Explicit staging package/pin metadata, with original compiler checkout/cwd unchanged"
+    }
+  ],
+  "currentBoundary": {
+    "classification": "Full original C++ application output-projection/ABI integration is executed; broader compiler/API/DOM parity remains outside the verified workload",
+    "emittedNativeFacadeCalls": 19,
+    "emittedPalCalls": 21,
+    "emittedInternalRuntimeCalls": 37,
+    "implemented": [
+      "C99Client.h/.cpp forwards opaque handles, live node/camera/scene properties, hierarchy, geometry, material and texture operations through public C99",
+      "project-game.mjs uses the compiler token reader and material manifest DATA; no renderer/engine algorithm bodies are reused",
+      "Each material retains its own native identity; original uniform names and sampler names replace emitted offsets/slots",
+      "Separate Win32 input/HUD/WIC/dialog transport and reused NAPI-free NativeAudio service; no legacy PAL objects",
+      "Header-only user-language values/containers/closures/JSON/GC support stays outside Core; no JavaScript VM",
+      "Core/public header and compiler checkout are not edited"
+    ],
+    "remainingBoundaries": [
+      "Repeated same-factory material instances are explicitly refused when emitted scene setters have lost original instance identity; this full game reaches one instance per factory",
+      "Options-variable MaterialIdentity.ts frontend refusal is retained; this is not general arbitrary-application projection",
+      "Native HUD is a scoped adaptation, not full CSS/DOM or RmlUI-equivalent rendering",
+      "Human interaction/hearing and cross-backend pixel equivalence are not established",
+      "Long-lived/general client lifetime and complete corpus/API semantics beyond executed tests are not claimed"
+    ],
+    "historicalAbiReproducer": "Fixtures/C99SymbolRename.cpp intentionally preserves the MSVC C2664 symbol-rename failure; real data/property adapters now resolve the Minecraft integration",
+    "additionalNonMinecraftCompilerReproducer": "Fixtures/MaterialIdentity.ts: createShaderMaterial(optionsVariable) fails with Expected an object literal",
+    "coreArchitectureOrHeaderChanged": false,
+    "generatedEngineOrRendererObjectsCompiled": []
+  },
+  "nativeBenchmark": {
+    "executable": "build/lite-c99/full-native-game/LiteMinecraftNative.exe",
+    "command": "--benchmark-output=<fresh-json-path> --warmup=180 --measure=1200",
+    "configuration": "SEED 1337/radius 6/169 chunks/1280x720/MSAA 1/hidden/bgfx D3D11/no vsync/fixed 1000/60 ms; first frame zero",
+    "executedControl": "PASS: 180 warmup plus 1200 measured frames, 1200 finite positive CPU samples, zero input and zero captures",
+    "cpuSamplesMs": "QPC total native host frame: timers/audio polling, original application update, C99 rendering, bgfx submission/present, native HUD backing render and user-language cycle collection",
+    "coreCpuSamplesMs": "QPC bl_frame including user update/render plus bgfx::frame; excludes HUD/GC/platform timers and audio polling",
+    "exclusions": "OS poll/replay dispatch, screenshot/readback/PNG, JSON I/O, dialogs, sleeps and deliberate pacing; no desktop overlay presentation for hidden HUD",
+    "gpu": "1200 actual positive asynchronous GPU query samples in final control qualification; 1195 unique GPU frame IDs. Repeated IDs are explicitly reported, unavailable queries use -1 rather than fallback measured zeros. bgfx profiling is enabled.",
+    "receipt": "build/lite-c99/full-native-game/Benchmark/control.json",
+    "nativeAudit": "PASS: actual Ninja object/header/link graph and PE imports contain no legacy engine/PAL objects, JS VM or Dawn/WebGPU GPU runtime; current Core/header is unchanged except checkout line endings",
+    "nativeProvenance": "build/lite-c99/full-native-game/native-provenance.json",
+    "comparison": {
+      "date": "2026-10-07",
+      "rounds": 15,
+      "warmupFrames": 180,
+      "measuredFrames": 1200,
+      "sampleCount": 1,
+      "nativeMedianTotalCpuMs": 4.550661916666667,
+      "nativeMedianCoreCpuMs": 0.7402024166666666,
+      "nativeMedianNonCoreCpuMs": 3.8098954999999997,
+      "nativeMedianGpuMs": 1.3383132343619684,
+      "standardBblitecMedianCpuMs": 1.948,
+      "versusStandardMeanPairedChangePercent": 130.00346226104867,
+      "versusStandardBootstrap95Percent": [
+        123.79182672822141,
+        134.4859447009382
+      ],
+      "conclusion": "Native complete host path is slower; not an isolated engine-algorithm effect. HUD/platform/GC, GPU render-thread work and backend differences are explicitly separated.",
+      "evidence": "Investigation artifacts/pure-native-comparison/matched-15-rounds-20261007/measurements.json"
+    }
+  },
+  "testedApiInventory": {
+    "scannedExistingTestFiles": 638,
+    "packageExports": 1814,
+    "packageFunctionOwners": 1035,
+    "currentC99FunctionDeclarations": 98,
+    "staticallyImportedExportsFound": 246,
+    "beyondMinecraftFunctionOwnersFound": 216,
+    "beyondMinecraftWithoutExactC99Declaration": 204,
+    "exactNamedC99DeclarationMatches": 32,
+    "semanticCoverageClaim": false,
+    "examplesBeyondCurrentScope": [
+      "ArcRotate/default/orthographic camera controls",
+      "Directional/hemispheric/point/spot lights and PBR/standard materials",
+      "Morph targets, additional primitive factories, instances and CSG",
+      "Animation, compute/frame graphs, shadows, sprites/text and postprocessing",
+      "GLTF/asset decoders, physics, navigation, picking and gizmos"
+    ],
+    "limitations": "Static full application literals/imports only. Dynamic templates and fixture/runtime call coverage are not inferred; old native-babylon tests do not validate this LiteLayer."
+  },
+  "evidenceCommands": [
+    "node Tools/generate.mjs <bblitec> <BabylonNative> <ignored-output>",
+    "node Tools/inventory.mjs <bblitec> <BabylonNative> <ignored-output>",
+    "node Tools/worldgen-oracle.mjs <bblitec> <original-Demos>",
+    "cmake -S FullMinecraft -B <ignored-build> -DBBLITEC_SOURCE_DIR=<bblitec> -DLITE_MINECRAFT_EMITTED_DIR=<generated>/Emitted",
+    "cmake --build <ignored-build> --parallel 3",
+    "ctest --test-dir <ignored-build> --output-on-failure",
+    "cmake -S FullMinecraft -B build/lite-c99/full-native-game -DLITE_MINECRAFT_BUILD_GAME=ON with documented exact-pin native-library/source and JSON include overrides",
+    "node Tools/verify-run.mjs <benchmark-or-save-load-summary>",
+    "node Tools/verify-run.mjs <fresh-idle-summary> <previous-identical-idle-summary>"
+  ]
+}

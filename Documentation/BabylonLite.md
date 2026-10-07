@@ -30,6 +30,7 @@ are carried by the static target.
 | `LiteApplicationBundles` | Application-only bundling and source/import provenance; no Babylon engine implementation. |
 | `LiteNativeProjectedTests` | Optional real bblitec-transpiled test applications projected onto C99; no generated engine/runtime objects. |
 | `LitePlatformAudioTests` | Separate real XAudio2 host primitive/routing tests; no human-audibility assertion. |
+| `LiteMinecraftNative` | Complete bblitec-transpiled original Minecraft C++ application with C99-backed handles and a separate Win32 platform host; no JS VM or legacy engine/PAL objects. |
 
 The runtime compiler uses the full public Tint reader/SPIR-V writer at
 `a21a4a1c7c497e6366947ccaefbab768d16f32a8`, repository-pinned SPIRV-Cross and
@@ -161,8 +162,8 @@ for component-only builds without a desktop.
 
 The fully enabled exact-pin Release integration passes all twelve CTests,
 including the three full-game tests, separate real-device audio test and optional
-projected application tests. The complete bblitec corpus and full Minecraft's native
-C++ application projection are still unfinished. Passing the scoped Minecraft workload
+projected application tests. The complete bblitec corpus remains unfinished. The separate full Minecraft C++
+application projection is described below. Passing the scoped Minecraft workload
 does not establish coverage of all 1814 package exports.
 
 ### Audio and binding boundaries
@@ -192,6 +193,159 @@ exposing unpinned borrowed Core storage. This boundary is not full cross-client
 live-view parity.
 
 Generated engine implementation/runtime must never be linked into `LiteLayer`.
+
+### Complete original Minecraft C++ application
+
+`NativeProjection/FullMinecraft` retains the original SEED 1337/radius-6 game
+and its 24 modules byte-for-byte. Its projection compiles 26 emitted application
+translation units (plus the generated data-only material description), not the
+compiler's suggested Babylon engine, renderer or PAL sources. Shader sources,
+declarations, defaults and options come from the application's lowering manifest;
+the real separate WGSL compiler prepares them through C99.
+
+`C99Client` contains client handle/property forwarding and ownership bookkeeping,
+not engine algorithms or copies of legacy Engine records. Node and camera writes
+immediately use public C99 getters/setters. Each material has its own native
+identity and uniform storage. The emitted variant/offset setters are mapped to
+original uniform names and the single material instance reached by each factory
+in this game. Repeating such a factory is explicitly refused: this compiler's
+lost instance identity cannot establish general multi-instance material parity.
+The `MaterialIdentity.ts` non-Minecraft lowering limitation is also retained.
+
+Only header-only user-language container, closure, JSON and synchronous-promise
+support is reused from the compiler checkout. These C++ value/collection helpers
+are outside `LiteLayer`; they are not a JavaScript VM. The host links the existing
+native XAudio2 service and provides input, WIC icons/PNG captures, a scoped native
+HUD backing surface and real save/open dialogs. Its HUD is a native adaptation,
+not a complete CSS/DOM implementation or RmlUI-equivalent renderer.
+Human mouse usability, human hearing and cross-renderer pixel equivalence are
+not established by the automated tests.
+
+Build in the Visual Studio developer environment. This isolated target imports
+only the existing exact-pin Release native libraries, not the integration
+build's JavaScript/NativeEngine link graph. `nlohmann/json.hpp` is required for
+the emitted user's save/load values, outside the Core library.
+
+```powershell
+node Apps\LiteTests\NativeProjection\FullMinecraft\Tools\generate.mjs `
+    <built-bblitec-checkout> <BabylonNative-root> `
+    build\lite-c99\full-native-projection
+cmake -S Apps\LiteTests\NativeProjection\FullMinecraft `
+    -B build\lite-c99\full-native-game -G Ninja -DCMAKE_BUILD_TYPE=Release `
+    -DBBLITEC_SOURCE_DIR=<built-bblitec-checkout> `
+    -DLITE_MINECRAFT_EMITTED_DIR=<root>\build\lite-c99\full-native-projection\Emitted `
+    -DLITE_MINECRAFT_BUILD_GAME=ON `
+    -DLITE_NATIVE_LIBRARY_DIR=<exact-pin-Release-integration-build> `
+    -DLITE_BGFX_SOURCE_DIR=<exact-pin-bgfx.cmake-source> `
+    -DLITE_TINT_LIBRARY_DIR=<exact-pin-Release-Tint-library-tree> `
+    -DLITE_JSON_INCLUDE_DIR=<nlohmann-json-include-directory>
+cmake --build build\lite-c99\full-native-game --parallel 3
+ctest --test-dir build\lite-c99\full-native-game --output-on-failure
+.\build\lite-c99\full-native-game\LiteMinecraftNative.exe
+```
+
+The isolated tests cover the 169-chunk original terrain oracle, independent
+material instances and native mutable properties, full 180-frame GPU captures,
+240-frame gameplay/audio replay, original save/load through two real OS dialogs,
+and benchmark-control qualification. The game activates all 169 render chunks
+before its first frame. Its post-water-prefill world hash is intentionally
+different from the raw terrain-generation oracle.
+Capture PNGs and receipts are under the isolated build's `Captures` directory.
+`Tools/verify-run.mjs` verifies receipts and can compare two identical idle runs.
+After `dumpbin /imports` is saved as build-local `imports.txt`,
+`Tools/audit-native.mjs` checks the actual object/header/link/import graph and
+records source, binary and public-header hashes in `native-provenance.json`.
+These scoped results do not establish all 1814 exports or full corpus coverage.
+
+Bounded `--frames` runs and benchmarks reject physical keyboard/raw-mouse input;
+only the explicit scripted transport is dispatched. Hidden benchmarks do not
+take pointer lock, move the cursor or activate a visible window. Interactive
+visible play retains native input and uses elapsed wall-clock simulation delta.
+
+#### Native benchmark controls and timing boundaries
+
+```powershell
+.\build\lite-c99\full-native-game\LiteMinecraftNative.exe `
+    --benchmark-output=build\lite-c99\full-native-game\Benchmark\idle.json `
+    --warmup=180 --measure=1200
+```
+
+This runs real D3D11/bgfx rendering at 1280×720, SEED 1337/radius 6, MSAA 1,
+no vsync and fixed `1000/60` milliseconds (the original first frame still gets
+zero). `BBLITE_BENCHMARK_FRAMES`, `BBLITE_BENCHMARK_WARMUP_FRAMES` and
+`BBLITE_MSAA` are also accepted; this host supports sample counts 1 and 4.
+`--replay` enables the separately documented host replay, not an assumed match
+to a different compiler host's event-tape protocol.
+Capture and save/load modes are forbidden during benchmarking.
+
+QPC `cpuSamplesMs` and `totalHostCpuSamplesMs` measure the complete native host
+frame: wall-clock platform timers/audio retry polling, original user update,
+C99 rendering, bgfx submission/
+present, native HUD GDI backing render, and user-language cycle collection.
+`coreCpuSamplesMs` excludes the HUD and cycle-collection work. Both exclude OS
+poll/replay dispatch, capture/readback, JSON writing, sleeps and deliberate pacing.
+Native real-time audio generation runs on a separate worker; original game audio
+graph operations within update remain in the frame bracket.
+The hidden HUD renders its backing surface but does not present a desktop overlay.
+The native HUD, backend, batching and color/depth configuration must therefore
+be disclosed when comparing against SDL/RmlUI or Dawn variants.
+
+Startup/shader compilation is recorded separately. Receipts are written only
+after all measured frames, with per-frame CPU samples/draws, world/camera/time
+observations and configuration. Real asynchronous bgfx GPU timestamp-query
+intervals include their GPU frame IDs; unavailable queries use `-1`, never a
+fallback zero advertised as measured GPU time. Repeated GPU frame IDs must not
+be mistaken for independent GPU measurements. This host enables bgfx GPU
+profiling; comparisons must disclose that setting as well.
+
+#### Fresh comparison with the earlier bblitec implementations
+
+On 2026-10-07, fifteen balanced rounds of all five actual executables used
+180 warmup plus 1,200 measured frames, SEED 1337/radius 6, 1280x720, MSAA 1,
+fixed `1000/60` ms and hidden/no-input/no-vsync operation on a Xeon W-2235 /
+Quadro P620. These are fresh measurements, not reused historical averages.
+
+| Complete measured implementation path | Median run-average CPU frame | Median run P95 |
+|---|---:|---:|
+| Standard bblitec, SDL_GPU/D3D12 | 1.948 ms | 2.342 ms |
+| Previous native-layer experiment, SDL_GPU/D3D12 | 2.057 ms | 2.543 ms |
+| Previous native layer with stock Dawn/D3D12 | 4.345 ms | 5.133 ms |
+| Dawn-compatible executable with supplied bgfx/WebGPU DLL | 2.253 ms | 2.684 ms |
+| Handwritten LiteLayer with the native C++ host, bgfx/D3D11 | **4.551 ms** | **4.924 ms** |
+
+The native total-host CPU bracket is slower than standard bblitec by a mean
+paired **130.00%** (bootstrap 95% interval **123.79% to 134.49%**), beyond the
+5% practical threshold. It is slower than the previous native layer by 119.14%
+(110.94% to 126.13%) and the compatibility DLL by 96.49% (90.81% to 101.82%).
+Versus stock Dawn, +1.07% with an interval of -4.11% to +5.11% establishes
+neither a statistical difference nor a conclusive 5% practical result.
+
+The native core/application-update/render/submission bracket averages
+**0.740 ms**, while remaining platform/HUD/cycle-collection work accounts for
+**3.810 ms**, about 84% of its total. This does not individually attribute that
+cost to HUD. Its real GPU queries average **1.338 ms**; 17,969 unique GPU frame
+IDs remain after deduplicating 31 repeated IDs, with no unavailable samples.
+The bgfx render thread's CPU work is outside the application-thread QPC bracket.
+Do not compare this core-only figure with complete SDL/Dawn loop times and
+claim an isolated engine speedup. HUD implementations, collection boundaries,
+backend APIs and GPU profiling differ. Native startup, including runtime WGSL
+compilation, has a median 3,733.8 ms and is excluded from the steady-state table.
+
+The native executable is 7,280,640 bytes. With its baked atlas and original
+icon pack, its as-built inputs total 7,941,602 bytes, versus standard bblitec's
+10,567,137 bytes including adjacent DLLs/assets/shaders. System/installed VC
+runtime DLLs and debug/build outputs are excluded consistently. The runtime
+shader compiler is statically linked into this demo, not into `LiteLayer`.
+This is not a minimized or relocatable-installer measurement; the test
+application still references build-absolute asset paths.
+
+Scene-only captures have matching camera/397 mesh records/eight materials.
+The native scene is 98.995% RGB-exact against standard; 99.9925% of pixels are
+within three levels per channel, with mean absolute difference 0.008979 on
+the 0-255 scale. This is close rendering, not bit-exact parity. Full receipts,
+hashes, commands, payload accounting and the paired-bootstrap harness are in
+the investigation repository's `Experiments/Mincraft/pure-native/RESULTS.md`
+and ignored `artifacts/pure-native-comparison/matched-15-rounds-20261007`.
 
 ### Application-only native projection
 
