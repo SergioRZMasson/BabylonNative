@@ -44,6 +44,7 @@ jobs:
             throw "LLVM installation failed with exit code $($process.ExitCode)."
           }
           Join-Path $llvm "bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "LITE_LLVM_ROOT=$llvm" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Enforce style and build the native-only target
         shell: cmd
@@ -52,6 +53,6 @@ jobs:
           if not defined VSINSTALL exit /b 1
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
           if errorlevel 1 exit /b 1
-          cmake -S Core\LiteLayer -B build\lite-style -G Ninja -DCMAKE_BUILD_TYPE=Release -DBABYLON_LITE_ENABLE_STYLE_CHECKS=ON
+          cmake -S Core\LiteLayer -B build\lite-style -G Ninja -DCMAKE_BUILD_TYPE=Release -DBABYLON_LITE_ENABLE_STYLE_CHECKS=ON "-DLITE_CLANG=%LITE_LLVM_ROOT%\bin\clang.exe" "-DLITE_CLANG_FORMAT=%LITE_LLVM_ROOT%\bin\clang-format.exe"
           if errorlevel 1 exit /b 1
           cmake --build build\lite-style --target LiteLayer --parallel 3

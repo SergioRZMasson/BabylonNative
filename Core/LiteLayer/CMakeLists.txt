@@ -31,6 +31,13 @@ if(BABYLON_LITE_ENABLE_STYLE_CHECKS)
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
     find_program(LITE_CLANG_FORMAT NAMES clang-format-22 clang-format REQUIRED)
     find_program(LITE_CLANG NAMES clang-22 clang REQUIRED)
+    foreach(LITE_STYLE_TOOL IN ITEMS LITE_CLANG_FORMAT LITE_CLANG)
+        execute_process(COMMAND "${${LITE_STYLE_TOOL}}" --version
+            OUTPUT_VARIABLE LITE_STYLE_VERSION RESULT_VARIABLE LITE_STYLE_RESULT)
+        if(NOT LITE_STYLE_RESULT EQUAL 0 OR NOT LITE_STYLE_VERSION MATCHES "version 22\\.")
+            message(FATAL_ERROR "${LITE_STYLE_TOOL} must select LLVM 22; set it to the pinned tool's full path.")
+        endif()
+    endforeach()
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 endif()
 
