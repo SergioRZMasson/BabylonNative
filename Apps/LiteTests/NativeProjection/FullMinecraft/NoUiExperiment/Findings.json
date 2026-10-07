@@ -1,0 +1,138 @@
+{
+  "scope": "Temporary canonical-standard-C++ no-UI comparison; not a shipped HUD change or an SDL/RmlUI/bgfx backend implementation",
+  "canonicalEmission": "build/lite-c99/no-ui-comparison/Common/Emitted",
+  "canonicalCompleteBaseline": "build/lite-c99/no-ui-comparison/Common/Generated",
+  "userSourceIdentity": {
+    "actualCompiledCppFilesPerVariant": 26,
+    "generatedApplicationHeadersPerVariant": 1,
+    "byteDifferencesAcrossFourVariants": 0,
+    "nativeModeEmissionUsed": false,
+    "timedCppBodyEdits": [],
+    "nativeMainEntry": "main=MinecraftApplication only on canonical user-TU compiler commands; native host excluded",
+    "vendorHeaderOverride": "Original generated application.hpp remains byte-identical; replacement vendor headers precede original engine/PAL headers for C99 target only",
+    "profileTags": "Original user expressions retained; compatibility function is external binding bookkeeping",
+    "worldProbe": "No user-body injection or hardcoded local-variable observation"
+  },
+  "executables": {
+    "SDL": "build/lite-c99/no-ui-comparison/SDL/bblite_native.exe",
+    "StockDawn": "build/lite-c99/no-ui-comparison/StockDawn/bblite_native.exe",
+    "CompatibleBgfx": "build/lite-c99/no-ui-comparison/CompatibleBgfx/bblite_native.exe",
+    "C99Native": "build/lite-c99/no-ui-comparison/Native/LiteMinecraftNoUiNative.exe",
+    "stockAndProviderHostExeBytesIdentical": true,
+    "privateProviderDllCommitted": false
+  },
+  "configuration": {
+    "seed": 1337,
+    "radius": 6,
+    "viewport": [1280, 720],
+    "sampleCount": 1,
+    "simulationDeltaMs": 16.666666666666668,
+    "firstFrameZero": true,
+    "nativeBackend": "bgfx D3D11",
+    "standardSDLDriver": "direct3d12",
+    "stockAndCompatibleHostBackend": "DAWN; identical host exe, different deployed webgpu_dawn.dll",
+    "underlyingCompatibleProviderBackend": "Not inferred from host driver label",
+    "backendConfoundDisclosed": true
+  },
+  "noUi": {
+    "normalDemoDefaultChanged": false,
+    "nativeCompileFlag": "LITE_MINECRAFT_NO_UI=1; absent by default",
+    "baselineCompileFlag": "BBLITE_NO_UI_COMPARISON=1 on isolated original-standard runtime overlay",
+    "nativeHudBackingAndOverlayInitialization": "Compiled out",
+    "nativePresentHud": "Not called; accidental call throws and increments an experimental attempt counter",
+    "standardFrameUi": "Nine narrow guards remove on-screen layout, recording and composition from SDL/Dawn frame paths",
+    "standardMissedLayoutOrRecordCall": "Fails explicitly via isolated guard",
+    "offscreenAtlasCanvas": "Original source and real packed RGBA asset retained, ui:rml feature intentionally not removed",
+    "inputAndFileDialogs": "Retained",
+    "threeDHighlightMesh": "Retained",
+    "hiddenUiWork": false
+  },
+  "executedQualification": {
+    "allFourFrame180": "PASS: real GPU PNG and actual scene/camera/material/geometry observations",
+    "allFourFrame1380": "PASS: real GPU PNG and actual scene/camera/material/geometry observations",
+    "frame180MeshesAndDraws": 397,
+    "frame1380MeshesAndDraws": 403,
+    "materialCount": 8,
+    "nativeSceneCount": 1,
+    "nativeIdlePhysicalInputEvents": 0,
+    "nativeReplay240": "PASS: 37 scripted events, original standard audio prelude/synthesis, nonzero actual-device samples",
+    "tinyTwoFrameControlSmokes": "All four receipt/timing interfaces passed; not a performance comparison",
+    "crossBackendExactPixelParityClaim": false,
+    "frame180NativeVsSDLAndStockMeanAbsoluteRgbError": 0.016341145833333334,
+    "frame180NativeVsCompatibleMeanAbsoluteRgbError": 0.017196903935185186,
+    "frame1380NativeVsSDLAndStockMeanAbsoluteRgbError": 0.01922489872685185,
+    "frame1380NativeVsCompatibleMeanAbsoluteRgbError": 0.02412326388888889
+  },
+  "observationAndTiming": {
+    "nativeValidationOnly": "Actual C99 camera queries, native geometry factory input digest, material bindings, status-checked mesh handles and successful scene membership events; disabled for timed runs",
+    "privateWorldHashAndCount": "Unavailable/null, not fabricated",
+    "configurationSeedRadius": "Canonical staged TS configuration, not claimed as private-world introspection",
+    "standardRawReceipt": "BBLITE_NO_UI_RECEIPT=<fresh-absolute-path>; flushed before sorting existing benchmark samples",
+    "nativeRawReceipt": "--benchmark-output=<fresh-path> --warmup=180 --measure=1200",
+    "nativeCpuScope": "Canonical user update + public C99 render + bgfx submission/present + platform timer/audio polling + user-language GC, no GDI/RmlUI frame work",
+    "standardCpuScope": "Original backend benchmark bracket with UI frame work compiled out; SDL includes GC, Dawn excludes GC",
+    "formalNoUiComparison": {
+      "rounds": 16,
+      "processes": 64,
+      "warmupFrames": 180,
+      "measuredFrames": 1200,
+      "medianRunAverageMs": {
+        "SDL": 1.6295644584360223,
+        "StockDawn": 4.896494291713461,
+        "CompatibleBgfx": 1.7080992083624005,
+        "C99Native": 1.6715701666666667
+      },
+      "medianRunP95Ms": {
+        "SDL": 2.4587500020861626,
+        "StockDawn": 6.5107999965548515,
+        "CompatibleBgfx": 2.4523999989032745,
+        "C99Native": 3.34735
+      },
+      "nativeVsSDL": {
+        "meanPairedChangePercent": 2.358053896908785,
+        "bootstrap95Percent": [-0.8452283809748626, 5.7476191865599855],
+        "conclusion": "No statistically established mean difference; practical 5% conclusion inconclusive"
+      },
+      "nativeVsStockDawn": {
+        "meanPairedChangePercent": -66.19939787998949,
+        "bootstrap95Percent": [-68.39947977669578, -64.24541373417037]
+      },
+      "nativeVsCompatible": {
+        "meanPairedChangePercent": -2.060294312700651,
+        "bootstrap95Percent": [-4.894778471653822, 0.6327015479925202]
+      },
+      "nativeP95VsSDL": {
+        "meanPairedChangePercent": 36.62459800054199,
+        "bootstrap95Percent": [30.718888448714953, 42.46477514381866]
+      },
+      "evidence": "build/lite-c99/no-ui-comparison/Matched16/measurements.json",
+      "conclusion": "Average native path approximately matches SDL/provider and clearly beats stock Dawn; P95 remains worse than SDL/provider. Not an isolated engine-algorithm comparison."
+    },
+    "formalBenchmarkOwner": "Parent"
+  },
+  "preludeClassification": {
+    "standardCppContainsCompilerInlinedAudioRouting": true,
+    "classifiedAsApplicationLogic": false,
+    "bindingCopiedEngineAlgorithms": false,
+    "idleAudioPreludeReached": false,
+    "replayAudioPreludeReached": true,
+    "nativeTargetLegacyEnginePalObjectsLinked": [],
+    "coreOrPublicAbiEdited": false,
+    "standardCheckoutEdited": false
+  },
+  "persistentEvidence": [
+    "build/lite-c99/no-ui-comparison/source-byte-audit.json",
+    "build/lite-c99/no-ui-comparison/StandardSource/baseline-overlay.json",
+    "build/lite-c99/no-ui-comparison/deployment.json",
+    "build/lite-c99/no-ui-comparison/qualification-180.json",
+    "build/lite-c99/no-ui-comparison/qualification-1380.json",
+    "build/lite-c99/no-ui-comparison/Native/canonical-inputs.json",
+    "build/lite-c99/no-ui-comparison/Controls"
+  ],
+  "remaining": [
+    "Parent formal comparison is recorded above; no RmlUI/bgfx backend decision or implementation is made",
+    "Native D3D11 versus standard D3D12 remains an explicit backend confound",
+    "Unavailable private world state is qualified by canonical C++ identity, separate existing terrain/state validation and real scene/pixel observations",
+    "General repeated material-factory identity beyond this canonical workload remains outside the bounded binding profile"
+  ]
+}

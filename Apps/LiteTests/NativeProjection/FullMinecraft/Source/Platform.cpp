@@ -74,6 +74,9 @@ namespace
     bool s_hasPrevious{};
     std::filesystem::path s_dialogTestPath;
     std::weak_ptr<bbl::EngineState> s_inputEngine;
+#if defined(LITE_MINECRAFT_NO_UI)
+    uint64_t s_hudBackingRenders{};
+#endif
 
     double Clock()
     {
@@ -340,6 +343,12 @@ namespace bbl
 
     UiElementHandle ui_create_element(Engine&, const std::string& tag)
     {
+#if defined(LITE_MINECRAFT_NO_UI)
+        if (tag != "a" && tag != "input" && tag != "canvas")
+        {
+            throw std::runtime_error("Canonical no-UI source attempted on-screen DOM creation.");
+        }
+#endif
         Element element{};
         element.tag = tag;
         s_elements.push_back(std::move(element));
@@ -544,10 +553,12 @@ namespace LiteMinecraft
         s_window = window;
         s_interactive = interactive;
         s_clockStart = std::chrono::steady_clock::now();
+#if !defined(LITE_MINECRAFT_NO_UI)
         s_hud.resize(1280 * 720 * 4);
         s_overlay = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"",
             WS_POPUP, 0, 0, 1280, 720, window, nullptr, GetModuleHandleW(nullptr), nullptr);
+#endif
         if (interactive)
         {
             RAWINPUTDEVICE mouse{1, 2, 0, window};
@@ -799,6 +810,10 @@ namespace LiteMinecraft
 
     void PresentHUD()
     {
+#if defined(LITE_MINECRAFT_NO_UI)
+        ++s_hudBackingRenders;
+        throw std::runtime_error("No-UI timing path attempted a GDI HUD render.");
+#else
         BITMAPINFO info{};
         info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         info.bmiHeader.biWidth = 1280;
@@ -914,6 +929,16 @@ namespace LiteMinecraft
         SelectObject(dc, previous);
         DeleteObject(bitmap);
         DeleteDC(dc);
+#endif
+    }
+
+    uint64_t HudBackingRenders()
+    {
+#if defined(LITE_MINECRAFT_NO_UI)
+        return s_hudBackingRenders;
+#else
+        throw std::runtime_error("HUD-attempt counters are experimental no-UI only.");
+#endif
     }
 
     bool WritePNG(const std::filesystem::path& path, uint32_t width, uint32_t height,

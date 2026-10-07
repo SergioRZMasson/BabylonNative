@@ -426,6 +426,64 @@ qualification is exact. The final executable is 7,282,176 bytes, SHA256
 Receipts, fresh comparisons and hashes are in the investigation repository's
 ignored `artifacts/pure-native-comparison/rewrite-vs-bblitec-15-rounds`.
 
+#### Temporary identical-code comparison without UI
+
+`NativeProjection/FullMinecraft/NoUiExperiment` is a separate opt-in build,
+not a change to the normal demo. Its temporary input removes on-screen HUD,
+FPS/debug formatting, loading/error/underwater overlays and toast work while
+preserving logical block selection, all gameplay, controls, audio, save/load,
+atlas canvas/RGBA texture data and the 3D highlight.
+
+All four backends compile the **same 26 standard bblitec-produced C++ user files
+and generated `application.hpp`, byte-for-byte**, verified through actual
+compiler/dependency inputs. Native compatibility headers/linking and entry ABI
+glue are outside those source bodies; no native-only world-probe injection,
+renamed source entrypoint or removed profiling expression remains.
+Standard host guards remove on-screen RmlUI layout/record/composition; the
+native build never creates/renders a GDI backing surface. Texture preparation
+is retained even though it reaches the original `ui:rml` feature.
+
+Sixteen exactly position-balanced rounds, each 180 warmup + 1,200 measured
+frames, use the same SEED 1337/radius 6, 1280x720/MSAA 1/fixed-delta/no-input/
+no-vsync hidden-swapchain profile:
+
+| No-UI implementation | Median run-average CPU frame | Median run P95 |
+|---|---:|---:|
+| Standard bblitec / SDL_GPU / D3D12 | 1.630 ms | 2.459 ms |
+| Same user code / stock Dawn / D3D12 | 4.896 ms | 6.511 ms |
+| Same Dawn host / compatible bgfx WebGPU DLL | 1.708 ms | 2.452 ms |
+| Same user code / C99 LiteLayer / direct bgfx D3D11 | **1.672 ms** | **3.347 ms** |
+
+Native versus SDL mean paired change is +2.36%, CI [-0.85%, +5.75%]:
+no statistically established difference and no conclusive 5% practical result.
+Native is 66.20% faster than stock Dawn, CI [-68.40%, -64.25%].
+Versus the compatible provider, -2.06% with CI [-4.89%, +0.63%] lies within
+the predefined +/-5% practical band.
+
+**Tail latency remains worse than SDL/provider:** native paired P95 is
+36.62% higher than SDL (CI [+30.72%, +42.46%]) and 37.83% higher than the
+provider (CI [+31.00%, +44.80%]). This is not a blanket native-performance win.
+Native asynchronous GPU query average is about 1.650 ms. Removing CPU-heavy
+HUD work shifts waiting/backpressure into its Core/submission bracket;
+that bracket's roughly 1.670 ms is not a new algorithm-only cost.
+
+SDL/native brackets include GC; the Dawn reporter ends before GC. D3D11
+versus D3D12 and rendering/thread/driver behavior remain explicit differences.
+No old GC cost is assumed transferable to this standard emission.
+Compiler-inlined audio routing prelude is classified separately from user
+logic; it is shared, not rewritten, and is unreached in idle timing.
+Private world/chunk/hash observations remain null rather than being fabricated
+or injected into the timed user code. Actual 180/1,380-frame public
+camera/material/geometry/membership and GPU qualification shows 397/403
+mesh records/draws and eight materials; scene rendering is close, not RGB-exact
+across backends.
+
+Receipts/audits/captures are under `build/lite-c99/no-ui-comparison`, including
+`Matched16`, `source-byte-audit.json`, `qualification-180.json`,
+`qualification-1380.json` and `StandardSource/baseline-overlay.json`.
+The investigation report is `Experiments/Mincraft/pure-native/NO-UI-RESULTS.md`.
+No RmlUI/bgfx backend was implemented by this temporary comparison.
+
 ### Application-only native projection
 
 `Apps/LiteTests/NativeProjection` uses an existing built bblitec checkout through

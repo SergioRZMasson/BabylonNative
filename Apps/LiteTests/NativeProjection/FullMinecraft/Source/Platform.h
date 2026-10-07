@@ -15,6 +15,7 @@ namespace LiteMinecraft
     void SaveLoadReplay(uint32_t frame);
     void TickPlatform(double deltaMs);
     void PresentHUD();
+    uint64_t HudBackingRenders();
     uint64_t InputEvents();
     uint32_t FileDialogs();
     bool PlatformClosed();
