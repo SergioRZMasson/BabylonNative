@@ -347,6 +347,14 @@ hashes, commands, payload accounting and the paired-bootstrap harness are in
 the investigation repository's `Experiments/Mincraft/pure-native/RESULTS.md`
 and ignored `artifacts/pure-native-comparison/matched-15-rounds-20261007`.
 
+The subsequent [performance investigation](LitePerformanceInvestigation.md)
+attributes the gap principally to rebuilding the complete native HUD backing
+surface every frame, not cycle collection. Opt-in retained-HUD and same-frame
+material-grouping experiments, matched phase/thread measurements, independent
+confirmation and implementation-agent guidelines are recorded there.
+The experiments do not change the engine or host's default behavior, and
+retained-HUD average improvements do not establish better tail/display latency.
+
 ### Application-only native projection
 
 `Apps/LiteTests/NativeProjection` uses an existing built bblitec checkout through

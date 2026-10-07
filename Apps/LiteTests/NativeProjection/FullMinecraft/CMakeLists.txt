@@ -28,6 +28,7 @@ enable_testing()
 add_test(NAME LiteMinecraftUserTerrain169 COMMAND LiteMinecraftUserTerrain)
 
 option(LITE_MINECRAFT_BUILD_GAME "Build the complete C99-backed native application." OFF)
+option(LITE_MINECRAFT_PERF_TOOLS "Build isolated opt-in performance diagnostics." OFF)
 if(LITE_MINECRAFT_BUILD_GAME)
     if(NOT WIN32)
         message(FATAL_ERROR "Full native Minecraft currently uses the Win32 D3D11 host.")
@@ -70,13 +71,56 @@ if(LITE_MINECRAFT_BUILD_GAME)
         "${BBLITEC_SOURCE_DIR}" "${LITE_MINECRAFT_EMITTED_DIR}" "${PROJECTED_DIR}"
         COMMAND_ERROR_IS_FATAL ANY)
     file(GLOB_RECURSE PROJECTED_CPP "${PROJECTED_DIR}/*.cpp")
+    set(HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+    if(LITE_MINECRAFT_PERF_TOOLS)
+        if(NOT BABYLON_LITE_ENABLE_STYLE_CHECKS)
+            message(FATAL_ERROR "Diagnostic Core overlays require BABYLON_LITE_ENABLE_STYLE_CHECKS=ON.")
+        endif()
+        set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/PerfTools/prepare.py")
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        find_program(LITE_CLANG_FORMAT NAMES clang-format-22 clang-format
+            HINTS "C:/Program Files/LLVM/bin" REQUIRED)
+        find_program(LITE_CLANG NAMES clang-22 clang HINTS "C:/Program Files/LLVM/bin" REQUIRED)
+        set(PERF_OVERLAY "${CMAKE_CURRENT_BINARY_DIR}/PerfOverlay")
+        execute_process(COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/PerfTools/prepare.py" native
+            "${LITE_REPOSITORY}" "${BBLITEC_SOURCE_DIR}" "${PERF_OVERLAY}"
+            COMMAND_ERROR_IS_FATAL ANY)
+        set(HOST_SOURCE_DIR "${PERF_OVERLAY}/Host")
+        list(APPEND PROJECTED_CPP "${CMAKE_CURRENT_SOURCE_DIR}/PerfTools/Allocations.cpp"
+            "${PERF_OVERLAY}/Core/Source/Engine.cpp" "${PERF_OVERLAY}/Core/Source/Nodes.cpp"
+            "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp")
+        set_source_files_properties("${PERF_OVERLAY}/Core/Source/Engine.cpp"
+            "${PERF_OVERLAY}/Core/Source/Nodes.cpp" "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp"
+            PROPERTIES COMPILE_OPTIONS "/Zc:preprocessor" COMPILE_DEFINITIONS "BX_CONFIG_DEBUG=0")
+        execute_process(COMMAND "${LITE_CLANG_FORMAT}" -i
+            "${PERF_OVERLAY}/Core/Source/Engine.cpp" "${PERF_OVERLAY}/Core/Source/Nodes.cpp"
+            "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp" COMMAND_ERROR_IS_FATAL ANY)
+    endif()
     add_executable(LiteMinecraftNative ${PROJECTED_CPP}
-        "Source/C99Client.h" "Source/C99Client.cpp" "Source/Platform.h" "Source/Platform.cpp"
-        "Source/AudioTransport.cpp" "Source/NativeHost.cpp" "Source/AdapterCheck.cpp"
+        "${HOST_SOURCE_DIR}/C99Client.h" "${HOST_SOURCE_DIR}/C99Client.cpp"
+        "${HOST_SOURCE_DIR}/Platform.h" "${HOST_SOURCE_DIR}/Platform.cpp"
+        "${HOST_SOURCE_DIR}/AudioTransport.cpp" "${HOST_SOURCE_DIR}/NativeHost.cpp"
+        "${HOST_SOURCE_DIR}/AdapterCheck.cpp"
         "../../LitePlayground/Source/NativeAudio.cpp")
     target_include_directories(LiteMinecraftNative PRIVATE "Source"
         "${LITE_REPOSITORY}/Core/LiteLayer/Include"
         "${LITE_REPOSITORY}/Core/LiteShaderCompiler/Include")
+    if(LITE_MINECRAFT_PERF_TOOLS)
+        target_include_directories(LiteMinecraftNative BEFORE PRIVATE
+            "${PERF_OVERLAY}/Runtime" "${CMAKE_CURRENT_SOURCE_DIR}/PerfTools")
+        target_include_directories(LiteMinecraftNative PRIVATE
+            "${LITE_REPOSITORY}/Core/LiteLayer/Source"
+            "${LITE_BGFX_SOURCE_DIR}/bx/include" "${LITE_BGFX_SOURCE_DIR}/bimg/include")
+        add_custom_target(LiteMinecraftPerfStyleCheck
+            COMMAND "${Python3_EXECUTABLE}" "${LITE_REPOSITORY}/Core/LiteLayer/Tools/check_style.py"
+                --root "${PERF_OVERLAY}/Core"
+                --database "${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json"
+                --clang "${LITE_CLANG}" --clang-format "${LITE_CLANG_FORMAT}" VERBATIM)
+        add_dependencies(LiteMinecraftNative LiteMinecraftPerfStyleCheck)
+    endif()
     target_include_directories(LiteMinecraftNative SYSTEM PRIVATE
         "${BBLITEC_SOURCE_DIR}/native/include" "${LITE_BGFX_SOURCE_DIR}/bgfx/include"
         "${LITE_JSON_INCLUDE_DIR}")
