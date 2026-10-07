@@ -1,4 +1,5 @@
-#include "LiteInternal.h"
+#include "RuntimeInternal.h"
+#include <bx/os.h>
 #include <bx/cpu.h>
 
 struct L_Allocation
@@ -357,7 +358,13 @@ bl_Status l_record(bl_Runtime* r, size_t bytes, unsigned kind, int priority,
         {
             return L_FAIL(r, BL_OUT_OF_MEMORY, "Registry allocation failed");
         }
-        L_Slot* slots = (L_Slot*)l_alloc(r, n * sizeof(*slots));
+        size_t slotBytes;
+        if (!l_size(n, sizeof(L_Slot), &slotBytes))
+        {
+            l_free(r, p);
+            return L_FAIL(r, BL_OUT_OF_MEMORY, "Slot size overflow");
+        }
+        L_Slot* slots = (L_Slot*)l_alloc(r, slotBytes);
         if (!slots)
         {
             l_free(r, p);

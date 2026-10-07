@@ -194,6 +194,33 @@ live-view parity.
 
 Generated engine implementation/runtime must never be linked into `LiteLayer`.
 
+### Handwritten module boundaries
+
+The guideline-driven implementation separates allocator/typed-generation registry
+(`Runtime`), data-only transforms/cameras (`Nodes`), independent primitive arrays
+(`GeometryData`) and material declarations/live Float32 values (`ShaderMaterial`)
+from GPU mesh storage (`Geometry`), textures (`Texture`) and runtime shader
+reflection/packing/submission (`ShaderPipeline`). Audio uses its own POD header
+and injected primitives. Cleanup callbacks are registered by the creating feature;
+the runtime does not statically dispatch into every feature.
+
+`RenderOrder` rebuilds a scene-local material-ID hash table once per rendered frame,
+after callbacks. All live mesh members contribute opaque minimum order/earliest
+sequence, including invisible and empty geometry. Duplicate members retain their
+draw occurrences. Transparent depth-first sorting is unchanged. Scratch capacities
+grow geometrically, commit only after both allocations succeed, and are reused;
+no across-frame group cache or experimental switch is required.
+
+`LiteDataOnlyTests` exercises runtime/nodes/primitive arrays/material values without
+an engine, window or shader service. Its Release link map contains only those four
+LiteLayer translation units and bx support, not bgfx rendering or compiler/VM
+objects. Native randomized ordering, scratch-failure/10,000-frame allocation,
+live GPU callback-swap and index-tail clearing tests cover the rewritten paths.
+In-capacity geometry shrink clears removed indices even with empty explicit ranges,
+matching the original source's automatic degenerate-triangle tail.
+Malformed compiler-reflection string spans are rejected before lookup or
+dereference, and the compiler result is still released exactly once.
+
 ### Complete original Minecraft C++ application
 
 `NativeProjection/FullMinecraft` retains the original SEED 1337/radius-6 game
@@ -354,6 +381,50 @@ material-grouping experiments, matched phase/thread measurements, independent
 confirmation and implementation-agent guidelines are recorded there.
 The experiments do not change the engine or host's default behavior, and
 retained-HUD average improvements do not establish better tail/display latency.
+The later Core rewrite adopts frame-local aggregation by default; those published
+investigation numbers remain historical controls, not new rewrite measurements.
+
+#### Final guideline-driven rewrite versus standard bblitec
+
+A fresh fifteen-round, three-executable comparison used the final uninstrumented
+rewritten production executable, qualified standard bblitec and the frozen
+pre-rewrite native executable. It preserved the 180/1,200-frame, SEED 1337/radius 6,
+1280x720/MSAA 1/no-input/no-vsync profile. HUD/GC, shader service, host and backend
+defaults were unchanged; ambient `BBLITE_*` and `LITE_PERF_*` flags were cleared.
+Absolute times from older batches must not be mixed into this comparison.
+
+| Complete host path | Median run-average CPU frame | Median run P95 |
+|---|---:|---:|
+| Standard bblitec / SDL_GPU | 2.891 ms | 3.954 ms |
+| Native C++ before rewrite | 4.997 ms | 6.293 ms |
+| Native C++ with rewritten LiteLayer | **4.734 ms** | **6.166 ms** |
+
+**The rewritten complete native host is still slower than standard bblitec.**
+Its mean paired frame-time increase is **75.20%**, bootstrap 95% interval
+**[+62.06%, +86.20%]**. Its paired P95 increase versus standard is 63.62%,
+interval [+42.86%, +82.62%].
+
+Versus our own pre-rewrite native host, mean paired time decreases 5.29%,
+interval [-9.80%, -0.65%]. This is a modest statistically supported decrease,
+but not a conclusive improvement beyond the 5% practical threshold. Paired P95
+change is -5.28%, interval [-14.72%, +4.31%], so no tail improvement is proven.
+
+The comparable native main-thread Core/update/submission bracket improves from
+0.832 to 0.550 ms, mean paired -34.37% with interval [-37.23%, -31.51%].
+About 4.184 ms remains outside this bracket, principally the unchanged HUD
+rebuild identified by the earlier phase investigation. Native GPU averages
+are effectively unchanged at about 1.495 ms. The grouping-specific native
+controls also show about 89.7% less grouping time, but neither a Core-only
+figure nor a historical retained-HUD experiment establishes a faster shipping
+host than standard SDL.
+
+The public 98-function ABI and mandatory policies are unchanged. Independent
+13 integration and six final-game tests pass; final production scene/HUD pixels
+match the frozen native baseline, and 180/1,380-frame ordered state/uniform-byte
+qualification is exact. The final executable is 7,282,176 bytes, SHA256
+`FB82A05341952ECB6CF51B1D26AC8926DD662ECCCE8C079F8E66CFACCED8D7F7`.
+Receipts, fresh comparisons and hashes are in the investigation repository's
+ignored `artifacts/pure-native-comparison/rewrite-vs-bblitec-15-rounds`.
 
 ### Application-only native projection
 

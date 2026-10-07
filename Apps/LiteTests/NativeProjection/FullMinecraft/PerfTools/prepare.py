@@ -300,6 +300,72 @@ def nodes(text):
     return text
 
 
+def rewritten_engine(text):
+    text = '#include "PerfC.h"\n' + text
+    text = change(text, "    l_leaveDispatch(r);\n    bgfx::setViewMode",
+                  "    l_leaveDispatch(r);\n    int64_t checkpoint = lite_perf_tick();\n"
+                  "    bgfx::setViewMode")
+    text = change(text, "    L_TRY(l_collectDraws(r, s, &view, &count));",
+                  "    lite_perf_add(7, checkpoint);\n"
+                  "    lite_perf_count(16, s->memberCount);\n"
+                  "    L_TRY(l_collectDraws(r, s, &view, &count));\n"
+                  "    checkpoint = lite_perf_tick();")
+    text = change(text, "        l_sortDraws(s, count);",
+                  "        l_sortDraws(s, count);\n"
+                  "        lite_perf_add(10, checkpoint);\n"
+                  "        checkpoint = lite_perf_tick();")
+    text = change(text, "    return status;\n}\n\nstatic bl_Status render(",
+                  "    lite_perf_add(11, checkpoint);\n"
+                  "    return status;\n}\n\nstatic bl_Status render(")
+    text = change(text, "            status = l_drawMaterial(r, e, draws[i].material, draws[i].mesh, &view, &projection,",
+                  "            lite_perf_guard(&draws[i].mesh->node.record.id, sizeof(uint64_t));\n"
+                  "            lite_perf_guard(&draws[i].material->record.id, sizeof(uint64_t));\n"
+                  "            lite_perf_guard(&draws[i].mesh->node.world, sizeof(bl_Mat4));\n"
+                  "            lite_perf_guard(&draws[i].mesh->geometry.vertices, sizeof(size_t));\n"
+                  "            lite_perf_guard(&draws[i].mesh->geometry.indexCount, sizeof(size_t));\n"
+                  "            lite_perf_guard(&draws[i].order, sizeof(double));\n"
+                  "            lite_perf_guard(&draws[i].depth, sizeof(double));\n"
+                  "            lite_perf_guard(&draws[i].group, sizeof(size_t));\n"
+                  "            lite_perf_guard(&view, sizeof(view));\n"
+                  "            lite_perf_guard(&projection, sizeof(projection));\n"
+                  "            status = l_drawMaterial(r, e, draws[i].material, draws[i].mesh, &view, &projection,")
+    return text
+
+
+def rewritten_order(text):
+    text = '#include "PerfC.h"\n' + text
+    text = change(text, "    L_TRY(reserveDraws(r, s));",
+                  "    int64_t checkpoint = lite_perf_tick();\n"
+                  "    L_TRY(reserveDraws(r, s));")
+    text = change(text, "    L_Draw* draws = (L_Draw*)s->drawScratch;",
+                  "    lite_perf_add(9, checkpoint);\n"
+                  "    checkpoint = lite_perf_tick();\n"
+                  "    L_Draw* draws = (L_Draw*)s->drawScratch;")
+    text = change(text, "    for (size_t i = 0; i < count; ++i)",
+                  "    lite_perf_add(8, checkpoint);\n"
+                  "    checkpoint = lite_perf_tick();\n"
+                  "    for (size_t i = 0; i < count; ++i)")
+    text = change(text, "    *out = count;",
+                  "    lite_perf_add(9, checkpoint);\n    *out = count;")
+    return text
+
+
+def rewritten_shader_values(text):
+    text = '#include "PerfC.h"\n' + text
+    return change(text, "    return setUniform(h, n, v.data, v.count, true);",
+                  "    int64_t begin = lite_perf_tick();\n"
+                  "    bl_Status status = setUniform(h, n, v.data, v.count, true);\n"
+                  "    lite_perf_add(27, begin);\n    return status;")
+
+
+def rewritten_shader_pipeline(text):
+    text = '#include "PerfC.h"\n' + text
+    return change(text, "        bgfx::setUniform(u->handle, u->bytes, u->count);",
+                  "        lite_perf_count(25, u->byteCount);\n"
+                  "        lite_perf_guard(u->bytes, u->byteCount);\n"
+                  "        bgfx::setUniform(u->handle, u->bytes, u->count);")
+
+
 def shader(text):
     text = '#include "PerfC.h"\n' + text
     # Count bytes handed to bgfx, rather than pretending they are dynamic geometry uploads.
@@ -443,11 +509,13 @@ def main():
         (output / "Core/Source").mkdir(parents=True, exist_ok=True)
         shutil.copy2(native / "Core/LiteLayer/.clang-format", output / "Core/.clang-format")
         shutil.copy2(native / "Core/LiteLayer/.clang-tidy", output / "Core/.clang-tidy")
-        for name, transform in (("Engine.cpp", engine), ("Nodes.cpp", nodes),
-                                ("ShaderMaterial.cpp", shader)):
+        for name, transform in (("Engine.cpp", rewritten_engine), ("Nodes.cpp", nodes),
+                                ("ShaderMaterial.cpp", rewritten_shader_values),
+                                ("ShaderPipeline.cpp", rewritten_shader_pipeline),
+                                ("RenderOrder.cpp", rewritten_order)):
             save(native / "Core/LiteLayer/Source" / name, output / "Core/Source" / name, transform)
-        save(native / "Core/LiteLayer/Source/LiteInternal.h",
-             output / "Core/Source/LiteInternal.h")
+        for header in (native / "Core/LiteLayer/Source").glob("*.h"):
+            save(header, output / "Core/Source" / header.name)
         save(native / "Core/LiteLayer/Include/babylon_lite.h",
              output / "Core/Include/babylon_lite.h")
     elif mode == "sdl":

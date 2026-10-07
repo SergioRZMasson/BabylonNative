@@ -91,13 +91,19 @@ if(LITE_MINECRAFT_BUILD_GAME)
         set(HOST_SOURCE_DIR "${PERF_OVERLAY}/Host")
         list(APPEND PROJECTED_CPP "${CMAKE_CURRENT_SOURCE_DIR}/PerfTools/Allocations.cpp"
             "${PERF_OVERLAY}/Core/Source/Engine.cpp" "${PERF_OVERLAY}/Core/Source/Nodes.cpp"
-            "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp")
+            "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp"
+            "${PERF_OVERLAY}/Core/Source/ShaderPipeline.cpp"
+            "${PERF_OVERLAY}/Core/Source/RenderOrder.cpp")
         set_source_files_properties("${PERF_OVERLAY}/Core/Source/Engine.cpp"
             "${PERF_OVERLAY}/Core/Source/Nodes.cpp" "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp"
+            "${PERF_OVERLAY}/Core/Source/ShaderPipeline.cpp"
+            "${PERF_OVERLAY}/Core/Source/RenderOrder.cpp"
             PROPERTIES COMPILE_OPTIONS "/Zc:preprocessor" COMPILE_DEFINITIONS "BX_CONFIG_DEBUG=0")
         execute_process(COMMAND "${LITE_CLANG_FORMAT}" -i
             "${PERF_OVERLAY}/Core/Source/Engine.cpp" "${PERF_OVERLAY}/Core/Source/Nodes.cpp"
-            "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp" COMMAND_ERROR_IS_FATAL ANY)
+            "${PERF_OVERLAY}/Core/Source/ShaderMaterial.cpp"
+            "${PERF_OVERLAY}/Core/Source/ShaderPipeline.cpp"
+            "${PERF_OVERLAY}/Core/Source/RenderOrder.cpp" COMMAND_ERROR_IS_FATAL ANY)
     endif()
     add_executable(LiteMinecraftNative ${PROJECTED_CPP}
         "${HOST_SOURCE_DIR}/C99Client.h" "${HOST_SOURCE_DIR}/C99Client.cpp"

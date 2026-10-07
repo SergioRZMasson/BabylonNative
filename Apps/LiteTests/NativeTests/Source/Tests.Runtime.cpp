@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include <unordered_map>
+#include <vector>
 
 namespace
 {
@@ -123,4 +124,58 @@ TEST(LiteRuntime, DataOnlyRuntimeNeedsNoRendererStateServiceButEngineRequiresIt)
     native.isExternalBgfxInitialized = [](void*) { return false; };
     native.waitForSubmittedWork = [](void*) { return BL_OK; };
     EXPECT_EQ(bl_createEngine(runtime.runtime, &native, nullptr, &engine), BL_NOT_READY);
+}
+
+TEST(LiteRuntime, UTF8AndMisalignedUniformInputsLeaveBorrowedStateUnchanged)
+{
+    TestRuntime runtime;
+    ASSERT_EQ(runtime.status, BL_OK);
+    const uint8_t valid[]{0xf0, 0x9f, 0x98, 0x80};
+    const char* validName = reinterpret_cast<const char*>(valid);
+    bl_TransformNode node{};
+    ASSERT_EQ(bl_createTransformNode(runtime.runtime, {validName, sizeof(valid)}, nullptr, &node), BL_OK);
+    bl_String name{};
+    ASSERT_EQ(bl_getNodeName(node, &name), BL_OK);
+    const char* backing = name.data;
+    const std::vector<std::vector<uint8_t>> invalid{
+        {0xc0, 0xaf}, {0xed, 0xa0, 0x80}, {0xf4, 0x90, 0x80, 0x80}, {0xe2, 0x82}, {'a', 0, 'b'}};
+    for (const auto& bytes : invalid)
+    {
+        EXPECT_EQ(bl_setNodeName(node, {reinterpret_cast<const char*>(bytes.data()), bytes.size()}),
+            BL_INVALID_ARGUMENT);
+        ASSERT_EQ(bl_getNodeName(node, &name), BL_OK);
+        EXPECT_EQ(name.data, backing);
+        EXPECT_EQ(name.length, sizeof(valid));
+        EXPECT_EQ(std::memcmp(name.data, valid, sizeof(valid)), 0);
+    }
+    bl_Mat4 matrix{};
+    uint64_t first{}, second{};
+    ASSERT_EQ(bl_getNodeWorldMatrix(node, &matrix, &first), BL_OK);
+    ASSERT_EQ(bl_setNodePosition(node, {1, 2, 3}), BL_OK);
+    ASSERT_EQ(bl_setNodeScaling(node, {0, 0, 0}), BL_OK);
+    ASSERT_EQ(bl_setNodeRotation(node, {.2, .3, .4}), BL_OK);
+    ASSERT_EQ(bl_getNodeWorldMatrix(node, &matrix, &second), BL_OK);
+    EXPECT_EQ(second, first + 1);
+    ASSERT_EQ(bl_getNodeWorldMatrix(node, &matrix, &first), BL_OK);
+    EXPECT_EQ(first, second);
+    EXPECT_EQ(matrix.values[0], 0);
+    EXPECT_EQ(matrix.values[12], 1);
+    const bl_VertexSemantic attribute = BL_ATTRIBUTE_POSITION;
+    const bl_ShaderUniformDecl declaration = {{"value", 5}, BL_UNIFORM_F32, {}, false};
+    bl_ShaderMaterialOptions options{};
+    options.attributes = &attribute;
+    options.attributeCount = 1;
+    options.uniforms = &declaration;
+    options.uniformCount = 1;
+    options.vertexSource = {"vertex", 6};
+    options.fragmentSource = {"fragment", 8};
+    bl_ShaderMaterial material{};
+    ASSERT_EQ(bl_createShaderMaterial(runtime.runtime, &options, &material), BL_OK);
+    ASSERT_EQ(bl_setShaderFloat(material, {"value", 5}, 7), BL_OK);
+    bl_ShaderUniformView uniform{};
+    ASSERT_EQ(bl_getShaderUniform(material, {"value", 5}, &uniform), BL_OK);
+    alignas(double) char misaligned[sizeof(double) + 1]{};
+    const auto* numbers = reinterpret_cast<const double*>(misaligned + 1);
+    EXPECT_EQ(bl_setShaderUniform(material, {"value", 5}, {numbers, 1}), BL_INVALID_ARGUMENT);
+    EXPECT_EQ(uniform.values.data[0], 7);
 }

@@ -1,4 +1,4 @@
-#include "LiteInternal.h"
+#include "SceneInternal.h"
 
 bool l_vec(bl_Vec3 p)
 {
@@ -457,6 +457,10 @@ bl_Status bl_appendNodeChild(bl_SceneNode h, bl_SceneNode ch)
     }
     if (n->childCount == n->childCapacity)
     {
+        if (n->childCapacity > SIZE_MAX / 2)
+        {
+            return L_FAIL(h._runtime, BL_OUT_OF_MEMORY, "Child capacity overflow");
+        }
         size_t cap = n->childCapacity ? n->childCapacity * 2 : 4;
         size_t bytes;
         if (!l_size(cap, sizeof(bl_SceneNode), &bytes))

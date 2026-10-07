@@ -1,4 +1,4 @@
-#include "LiteInternal.h"
+#include "AudioInternal.h"
 
 static bl_Status contextInfo(bl_Runtime* r, L_Audio* a, bl_HostAudioInfo* out)
 {

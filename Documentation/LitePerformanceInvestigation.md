@@ -3,6 +3,12 @@
 Date: 2026-10-07. Investigation baseline: `babylon-lite-pure-native`,
 `7d9aadb02c63e9e4b08c2f4f4b6cc5122e7ed81f`.
 
+This report describes frozen pre-rewrite experiments and evidence. The later
+guideline-driven Core rewrite adopts current-frame aggregation; its independent
+standard-bblitec comparison is recorded in `BabylonLite.md`. Historical source
+snapshots and measured binaries remain preserved instead of being checked against
+mutable current Core files.
+
 This is a measured host/engine investigation, not an architecture rewrite.
 The qualified executable and handwritten Core sources remain unchanged.
 Experiments are opt-in, build-local source overlays. The investigation agent

@@ -1,38 +1,99 @@
-import importlib.util
+import hashlib
 import json
 import random
 import re
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import prepare
 
 
 NATIVE = Path(__file__).resolve().parents[5]
-COMPILER = Path(r"E:\Github\bblitec-native-babylon-layer")
 BUILD = NATIVE / "build/lite-c99/perf-deep-dive"
+FROZEN_INPUTS = BUILD / "HistoricalSources"
+BASELINE_COMMIT = "7d9aadb02c63e9e4b08c2f4f4b6cc5122e7ed81f"
+
+
+def frozen_input(record):
+    index = json.loads((FROZEN_INPUTS / "manifest.json").read_text())
+    if index["schemaVersion"] != 1 or index["nativeBaselineCommit"] != BASELINE_COMMIT:
+        raise ValueError("Unexpected historical source baseline.")
+    matches = [entry for entry in index["records"]
+               if entry["source"] == record["source"] and
+               entry["sourceSha256"] == record["sourceSha256"]]
+    if len(matches) != 1:
+        raise ValueError(f"Missing unique frozen input: {record['source']}")
+    snapshot = (FROZEN_INPUTS / matches[0]["snapshot"]).resolve()
+    if not snapshot.is_relative_to(FROZEN_INPUTS.resolve()):
+        raise ValueError("Historical source snapshot must remain inside its archive.")
+    content = snapshot.read_bytes()
+    if hashlib.sha256(content).hexdigest() != record["sourceSha256"]:
+        raise ValueError(f"Historical input hash changed: {snapshot}")
+    return content
 
 
 class OverlayTests(unittest.TestCase):
-    def test_all_recorded_sources_are_still_unchanged(self):
+    def test_all_recorded_frozen_sources_and_overlays_are_unchanged(self):
+        # Live Core/adapter files may evolve; this suite protects the measured historical inputs.
+        measured_files = json.loads((BUILD / "Matched15/manifest.json").read_text())["sourceFiles"]
         for manifest in (BUILD / "Native/PerfOverlay/overlay-manifest.json",
-                         BUILD / "SdlOverlay/overlay-manifest.json"):
+                         BUILD / "SdlOverlay/overlay-manifest.json",
+                         BUILD / "Validation/PerfOverlay/overlay-manifest.json"):
+            if str(manifest) in measured_files:
+                self.assertEqual(hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                                 measured_files[str(manifest)])
             records = json.loads(manifest.read_text())
             self.assertGreater(len(records), 5)
             for record in records:
-                self.assertEqual(prepare.hashlib.sha256(
-                    Path(record["source"]).read_bytes()).hexdigest(), record["sourceSha256"])
-                self.assertEqual(prepare.hashlib.sha256(
+                self.assertEqual(hashlib.sha256(
+                    frozen_input(record)).hexdigest(), record["sourceSha256"])
+                self.assertEqual(hashlib.sha256(
                     Path(record["overlay"]).read_bytes()).hexdigest(), record["overlaySha256"])
 
     def test_anchor_refusals_are_explicit(self):
         with self.assertRaisesRegex(ValueError, "Expected 1 anchors"):
             prepare.change("unrelated", "required", "replacement")
 
-    def test_qualified_gpu_profile_is_unchanged(self):
-        source = NATIVE / "Apps/LiteTests/NativeProjection/FullMinecraft/Source/NativeHost.cpp"
-        self.assertIn("init.profile = true;", source.read_text())
-        self.assertNotIn("LITE_PERF", source.read_text())
+    def test_historical_qualified_gpu_profile_is_unchanged(self):
+        records = json.loads((BUILD / "Native/PerfOverlay/overlay-manifest.json").read_text())
+        source = str(NATIVE / "Apps/LiteTests/NativeProjection/FullMinecraft/Source/NativeHost.cpp")
+        record = next(record for record in records if record["source"] == source)
+        text = frozen_input(record).decode("utf-8")
+        self.assertIn("init.profile = true;", text)
+        self.assertNotIn("LITE_PERF", text)
+
+    def test_frozen_measurement_binary_hashes_are_unchanged(self):
+        for suite in ("Matched15", "Renderer5"):
+            manifest = json.loads((BUILD / suite / "manifest.json").read_text())
+            for variant in manifest["variants"]:
+                self.assertEqual(hashlib.sha256(
+                    Path(variant["executable"]).read_bytes()).hexdigest(),
+                    manifest["binaryHashes"][variant["name"]])
+        validation = json.loads((BUILD / "validation-provenance.json").read_text())
+        self.assertEqual(hashlib.sha256(
+            (BUILD / "Validation/LiteMinecraftNative.exe").read_bytes()).hexdigest(),
+            validation["validationBinarySha256"])
+
+    def test_missing_historical_input_is_not_replaced_by_live_source(self):
+        with self.assertRaisesRegex(ValueError, "Missing unique frozen input"):
+            frozen_input({"source": str(Path(__file__)), "sourceSha256": "0" * 64})
+
+    def test_historical_input_never_reads_mutable_live_core(self):
+        records = json.loads((BUILD / "Native/PerfOverlay/overlay-manifest.json").read_text())
+        record = next(record for record in records
+                      if record["source"].endswith(r"\Core\LiteLayer\Source\Engine.cpp"))
+        live_source = Path(record["source"]).resolve()
+        original_read = Path.read_bytes
+
+        def guarded_read(path):
+            if path.resolve() == live_source:
+                raise AssertionError("Historical provenance must not read mutable live Core.")
+            return original_read(path)
+
+        with patch.object(Path, "read_bytes", guarded_read):
+            self.assertEqual(hashlib.sha256(
+                frozen_input(record)).hexdigest(), record["sourceSha256"])
 
     def test_core_overlays_keep_original_algorithm_default(self):
         text = (BUILD / "Native/PerfOverlay/Core/Source/Engine.cpp").read_text()

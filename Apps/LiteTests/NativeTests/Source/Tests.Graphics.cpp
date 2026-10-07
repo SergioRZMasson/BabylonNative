@@ -1,4 +1,5 @@
 #include "TestRuntime.h"
+#include "LiteInternal.h"
 #include <babylon_lite_shader_compiler.h>
 #include <bgfx/bgfx.h>
 
@@ -398,6 +399,279 @@ TEST_F(LiteNativeGraphics, RemovingOneSceneOwnerKeepsTheMeshLiveUntilTheLastOwne
     ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
     ASSERT_TRUE(Readback());
     EXPECT_NEAR(Center()[0], 13, 3);
+}
+
+TEST_F(LiteNativeGraphics, HiddenMinimumOrderAndCallbackSwapsReachCurrentDraws)
+{
+    CreateColoredBox();
+    ASSERT_FALSE(HasFatalFailure());
+    bl_ShaderMaterial green{};
+    const bl_VertexSemantic attributes[]{BL_ATTRIBUTE_POSITION};
+    const double tint[]{0, 1, 0};
+    const bl_ShaderUniformDecl uniforms[]{
+        {String("worldViewProjection"), BL_UNIFORM_MAT4, {}, true},
+        {String("tint"), BL_UNIFORM_VEC3, {tint, 3}, false}};
+    bl_ShaderMaterialOptions options{};
+    options.vertexSource = String(Vertex);
+    options.fragmentSource = String(Fragment);
+    options.attributes = attributes;
+    options.attributeCount = 1;
+    options.uniforms = uniforms;
+    options.uniformCount = 2;
+    ASSERT_EQ(bl_createShaderMaterial(runtime->runtime, &options, &green), BL_OK);
+    bl_Mesh second{}, hidden{};
+    ASSERT_EQ(bl_createBox(engine, nullptr, &second), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &hidden), BL_OK);
+    bl_MeshProperties properties{};
+    properties.material = green;
+    properties.renderOrder = {true, 0};
+    ASSERT_EQ(bl_setMeshProperties(second, &properties), BL_OK);
+    properties.material = material;
+    properties.renderOrder = {true, -10};
+    ASSERT_EQ(bl_setMeshProperties(hidden, &properties), BL_OK);
+    bl_SceneNode secondNode{}, hiddenNode{};
+    ASSERT_EQ(bl_meshNode(second, &secondNode), BL_OK);
+    ASSERT_EQ(bl_meshNode(hidden, &hiddenNode), BL_OK);
+    ASSERT_EQ(bl_setNodeVisible(hiddenNode, false), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, secondNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, hiddenNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, secondNode), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_GT(Center()[1], 220);
+    bl_EngineStats stats{};
+    ASSERT_EQ(bl_getEngineStats(engine, &stats), BL_OK);
+    EXPECT_EQ(stats.drawCallCount, 3u);
+    struct Mutation
+    {
+        bl_Mesh hidden;
+        bl_ShaderMaterial green;
+        bl_Status status{};
+    } mutation{hidden, green};
+    bl_CallbackToken token{};
+    ASSERT_EQ(bl_onBeforeRender(scene, [](void* user, double)
+    {
+        auto& state = *static_cast<Mutation*>(user);
+        bl_MeshProperties current{};
+        state.status = bl_getMeshProperties(state.hidden, &current);
+        if (state.status == BL_OK)
+        {
+            current.material = state.green;
+            state.status = bl_setMeshProperties(state.hidden, &current);
+        }
+    }, &mutation, &token), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(mutation.status, BL_OK);
+    EXPECT_GT(Center()[0], 220);
+    ASSERT_EQ(bl_removeSceneCallback(scene, token), BL_OK);
+    ASSERT_EQ(bl_removeFromScene(scene, hiddenNode), BL_OK);
+    EXPECT_EQ(bl_addToScene(scene, hiddenNode), BL_DISPOSED);
+    ASSERT_EQ(bl_removeFromScene(scene, secondNode), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    ASSERT_EQ(bl_getEngineStats(engine, &stats), BL_OK);
+    EXPECT_EQ(stats.drawCallCount, 1u);
+    EXPECT_GT(Center()[0], 220);
+}
+
+TEST_F(LiteNativeGraphics, GeometryFailuresPreserveCPUAndGPUIdentityAndPartialUpdatesStayGPUOnly)
+{
+    CreateColoredBox();
+    ASSERT_FALSE(HasFatalFailure());
+    L_Record* record{};
+    ASSERT_EQ(l_get(runtime->runtime, mesh._id, L_MESH, &record), BL_OK);
+    auto* native = reinterpret_cast<L_Mesh*>(record);
+    bl_GeometryData data{};
+    ASSERT_EQ(bl_createBoxData(runtime->runtime, nullptr, &data), BL_OK);
+    bl_MeshGeometry geometry{{data.positions, data.vertexCount * 3},
+        {data.normals, data.vertexCount * 3}, {data.indices, data.indexCount},
+        {data.uvs, data.vertexCount * 2}, {}, {}, {}};
+    const auto vertexBuffer = native->geometry.vertexBuffer.idx;
+    const auto indexBuffer = native->geometry.indexBuffer.idx;
+    const auto position = native->geometry.streams[0][0];
+    const auto minimum = native->geometry.minimum;
+    data.positions[0] += .25f;
+    const size_t one = 1;
+    ASSERT_EQ(bl_updateMeshPositions(engine, mesh, {data.positions, data.vertexCount * 3},
+        0, &one, 0), BL_OK);
+    EXPECT_EQ(native->geometry.streams[0][0], position);
+    EXPECT_EQ(native->geometry.minimum.x, minimum.x);
+    float uploaded{};
+    std::memcpy(&uploaded, native->geometry.gpuVertices, sizeof(uploaded));
+    EXPECT_EQ(uploaded, data.positions[0]);
+    struct Failure
+    {
+        int after;
+        bl_Allocator original;
+    } failure{-1, runtime->runtime->allocator};
+    auto& allocator = runtime->runtime->allocator;
+    allocator.userData = &failure;
+    allocator.allocate = [](void* user, size_t bytes, size_t alignment) -> void*
+    {
+        auto& state = *static_cast<Failure*>(user);
+        if (state.after >= 0 && state.after-- == 0) return nullptr;
+        return state.original.allocate(state.original.userData, bytes, alignment);
+    };
+    allocator.deallocate = [](void* user, void* memory, size_t bytes, size_t alignment)
+    {
+        auto& state = *static_cast<Failure*>(user);
+        state.original.deallocate(state.original.userData, memory, bytes, alignment);
+    };
+    for (int index = 0; index < 5; ++index)
+    {
+        failure.after = index;
+        EXPECT_EQ(bl_updateMeshGeometry(engine, mesh, &geometry), BL_OUT_OF_MEMORY);
+        EXPECT_EQ(native->geometry.vertexBuffer.idx, vertexBuffer);
+        EXPECT_EQ(native->geometry.indexBuffer.idx, indexBuffer);
+        EXPECT_EQ(native->geometry.streams[0][0], position);
+        std::memcpy(&uploaded, native->geometry.gpuVertices, sizeof(uploaded));
+        EXPECT_EQ(uploaded, data.positions[0]);
+    }
+    failure.after = -1;
+    ASSERT_EQ(bl_updateMeshGeometry(engine, mesh, &geometry), BL_OK);
+    EXPECT_EQ(native->geometry.streams[0][0], data.positions[0]);
+    EXPECT_EQ(native->geometry.vertexBuffer.idx, vertexBuffer);
+    EXPECT_EQ(native->geometry.indexBuffer.idx, indexBuffer);
+    allocator = failure.original;
+    ASSERT_EQ(bl_freeGeometryData(runtime->runtime, &data), BL_OK);
+}
+
+TEST_F(LiteNativeGraphics, CompilerPartialFailureReleasesExactlyOnceAndCanRetry)
+{
+    struct CompilerCalls
+    {
+        bl_ShaderCompilerService original;
+        size_t compiles{};
+        size_t releases{};
+        bool fail{true};
+    } calls{runtime->runtime->compiler};
+    runtime->runtime->compiler.userData = &calls;
+    runtime->runtime->compiler.compile = [](void* user, const bl_ShaderCompileRequest* request,
+        bl_ShaderCompileResult* result)
+    {
+        auto& state = *static_cast<CompilerCalls*>(user);
+        ++state.compiles;
+        const auto status = state.original.compile(state.original.userData, request, result);
+        return state.fail && status == BL_OK ? BL_SHADER_ERROR : status;
+    };
+    runtime->runtime->compiler.release = [](void* user, bl_ShaderCompileResult* result)
+    {
+        auto& state = *static_cast<CompilerCalls*>(user);
+        ++state.releases;
+        state.original.release(state.original.userData, result);
+    };
+    const bl_VertexSemantic attributes[]{BL_ATTRIBUTE_POSITION};
+    const bl_ShaderUniformDecl uniforms[]{
+        {String("worldViewProjection"), BL_UNIFORM_MAT4, {}, true},
+        {String("tint"), BL_UNIFORM_VEC3, {}, false}};
+    bl_ShaderMaterialOptions options{};
+    options.vertexSource = String(Vertex);
+    options.fragmentSource = String(Fragment);
+    options.attributes = attributes;
+    options.attributeCount = 1;
+    options.uniforms = uniforms;
+    options.uniformCount = 2;
+    ASSERT_EQ(bl_createShaderMaterial(runtime->runtime, &options, &material), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &mesh), BL_OK);
+    bl_MeshProperties properties{};
+    properties.material = material;
+    ASSERT_EQ(bl_setMeshProperties(mesh, &properties), BL_OK);
+    ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
+    EXPECT_EQ(bl_registerScene(scene), BL_SHADER_ERROR);
+    EXPECT_EQ(calls.compiles, 1u);
+    EXPECT_EQ(calls.releases, 1u);
+    calls.fail = false;
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    EXPECT_EQ(calls.compiles, 2u);
+    EXPECT_EQ(calls.releases, 2u);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_EQ(calls.compiles, 2u);
+    runtime->runtime->compiler = calls.original;
+}
+
+TEST_F(LiteNativeGraphics, ExplicitEmptyRangesStillClearRetiredIndexElements)
+{
+    CreateColoredBox();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    ASSERT_GT(Center()[0], 220);
+    bl_GeometryData data{};
+    ASSERT_EQ(bl_createBoxData(runtime->runtime, nullptr, &data), BL_OK);
+    bl_MeshGeometry geometry{{data.positions, data.vertexCount * 3},
+        {data.normals, data.vertexCount * 3}, {}, {data.uvs, data.vertexCount * 2}, {}, {}, {}};
+    bl_GeometryUpdateRanges ranges{};
+    bl_GeometryCapacityResult capacity{};
+    ASSERT_EQ(bl_updateMeshGeometryCapacity(engine, mesh, &geometry, nullptr, &ranges,
+        &capacity), BL_OK);
+    ASSERT_TRUE(capacity.stable);
+    std::vector<uint32_t> zeros(data.indexCount);
+    geometry.indices = {zeros.data(), zeros.size()};
+    ASSERT_EQ(bl_updateMeshGeometryCapacity(engine, mesh, &geometry, nullptr, &ranges,
+        &capacity), BL_OK);
+    ASSERT_TRUE(capacity.stable);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_NEAR(Center()[0], 13, 3);
+    EXPECT_NEAR(Center()[1], 26, 3);
+    ASSERT_EQ(bl_freeGeometryData(runtime->runtime, &data), BL_OK);
+}
+
+TEST_F(LiteNativeGraphics, InvalidReflectionStringsFailBeforeDereferenceAndReleaseTheResult)
+{
+    struct MalformedCompiler
+    {
+        bl_ShaderCompilerService original;
+        bl_ShaderCompileResult owned{};
+        std::vector<bl_ReflectedAttribute> attributes;
+        size_t releases{};
+    } compilerState{runtime->runtime->compiler};
+    runtime->runtime->compiler.userData = &compilerState;
+    runtime->runtime->compiler.compile = [](void* user, const bl_ShaderCompileRequest* request,
+        bl_ShaderCompileResult* result)
+    {
+        auto& state = *static_cast<MalformedCompiler*>(user);
+        const auto status = state.original.compile(state.original.userData, request, result);
+        state.owned = *result;
+        if (status == BL_OK && result->attributeCount)
+        {
+            state.attributes.assign(result->attributes, result->attributes + result->attributeCount);
+            state.attributes[0].name.data = nullptr;
+            result->attributes = state.attributes.data();
+        }
+        return status;
+    };
+    runtime->runtime->compiler.release = [](void* user, bl_ShaderCompileResult* result)
+    {
+        auto& state = *static_cast<MalformedCompiler*>(user);
+        ++state.releases;
+        state.original.release(state.original.userData, &state.owned);
+        *result = {};
+    };
+    const bl_VertexSemantic attribute = BL_ATTRIBUTE_POSITION;
+    const bl_ShaderUniformDecl uniforms[]{
+        {String("worldViewProjection"), BL_UNIFORM_MAT4, {}, true},
+        {String("tint"), BL_UNIFORM_VEC3, {}, false}};
+    bl_ShaderMaterialOptions options{};
+    options.attributes = &attribute;
+    options.attributeCount = 1;
+    options.uniforms = uniforms;
+    options.uniformCount = 2;
+    options.vertexSource = String(Vertex);
+    options.fragmentSource = String(Fragment);
+    ASSERT_EQ(bl_createShaderMaterial(runtime->runtime, &options, &material), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &mesh), BL_OK);
+    bl_MeshProperties properties{};
+    properties.material = material;
+    ASSERT_EQ(bl_setMeshProperties(mesh, &properties), BL_OK);
+    ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
+    const auto status = bl_registerScene(scene);
+    runtime->runtime->compiler = compilerState.original;
+    EXPECT_EQ(status, BL_SHADER_ERROR);
+    EXPECT_EQ(compilerState.releases, 1u);
 }
 
 TEST(LiteNativeOwnership, OwnedEngineCanBeDisposedAndRecreatedWithoutStaleCapabilityDetection)

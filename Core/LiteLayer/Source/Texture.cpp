@@ -3,11 +3,11 @@
 static void textureCleanup(bl_Runtime*, L_Record* p)
 {
     L_Texture* t = (L_Texture*)p;
-    if (bgfx::isValid(t->handle))
+    if (t->handleIndex != BL_INVALID_BGFX_HANDLE)
     {
-        bgfx::destroy(t->handle);
+        bgfx::destroy(bgfx::TextureHandle{t->handleIndex});
     }
-    t->handle.idx = BL_INVALID_BGFX_HANDLE;
+    t->handleIndex = BL_INVALID_BGFX_HANDLE;
     if (t->engine)
     {
         l_unpin(&t->engine->record);
@@ -89,16 +89,16 @@ bl_Status bl_createTexture2DFromPixels(bl_EngineContext h, bl_Bytes pixels, uint
         return L_FAIL(r, BL_UNSUPPORTED, "RGBA8 texture/sampler unsupported by backend");
     }
     L_NEW(r, L_TEXTURE, 10, textureCleanup, L_Texture, t);
-    t->handle.idx = BL_INVALID_BGFX_HANDLE;
-    t->handle =
+    bgfx::TextureHandle handle =
         bgfx::createTexture2D((uint16_t)w, (uint16_t)height, false, 1, bgfx::TextureFormat::RGBA8,
                               flags, bgfx::copy(pixels.data, (uint32_t)bytes));
-    if (!bgfx::isValid(t->handle))
+    if (!bgfx::isValid(handle))
     {
         t->record.disposed = true;
         return L_FAIL(r, BL_OUT_OF_MEMORY, "Texture GPU allocation failed");
     }
     t->engine = e;
+    t->handleIndex = handle.idx;
     l_pin(&e->record);
     t->info = {w, height, options.srgb};
     t->flags = flags;
@@ -126,8 +126,8 @@ bl_Status bl_updateTexture2DFromPixels(bl_EngineContext h, bl_Texture2D texture,
     {
         return BL_INVALID_ARGUMENT;
     }
-    bgfx::updateTexture2D(t->handle, 0, 0, (uint16_t)x, (uint16_t)y, (uint16_t)w, (uint16_t)height,
-                          bgfx::copy(pixels.data, (uint32_t)bytes));
+    bgfx::updateTexture2D(bgfx::TextureHandle{t->handleIndex}, 0, 0, (uint16_t)x, (uint16_t)y,
+                          (uint16_t)w, (uint16_t)height, bgfx::copy(pixels.data, (uint32_t)bytes));
     return BL_OK;
 }
 

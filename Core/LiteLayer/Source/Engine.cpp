@@ -1,5 +1,6 @@
 #include "LiteInternal.h"
 #include <bx/cpu.h>
+#include <bx/os.h>
 
 static L_Engine* engines;
 static L_Engine* ownedEngine;
@@ -195,7 +196,7 @@ bl_Status l_retire(L_Engine* e)
     return BL_OK;
 }
 
-static void unregisterScene(L_Scene* s)
+void l_unregisterScene(L_Scene* s)
 {
     if (!s->registered)
     {
@@ -223,7 +224,7 @@ static void unregisterScene(L_Scene* s)
 void l_sceneCleanup(bl_Runtime* r, L_Record* record)
 {
     L_Scene* s = (L_Scene*)record;
-    unregisterScene(s);
+    l_unregisterScene(s);
     l_enterDispatch(r);
     for (L_Callback* p = s->dispose; p; p = p->next)
     {
@@ -272,8 +273,11 @@ void l_sceneCleanup(bl_Runtime* r, L_Record* record)
     s->members = NULL;
     s->memberOwners = NULL;
     l_free(r, s->drawScratch);
+    l_free(r, s->groupScratch);
     s->drawScratch = NULL;
+    s->groupScratch = NULL;
     s->drawCapacity = 0;
+    s->groupCapacity = 0;
     l_unpin(&s->engine->record);
 }
 
@@ -849,7 +853,7 @@ bl_Status bl_unregisterScene(bl_SceneContext h)
     {
         return BL_BUSY;
     }
-    unregisterScene(s);
+    l_unregisterScene(s);
     return BL_OK;
 }
 
@@ -947,40 +951,6 @@ bl_Status bl_removeSceneCallback(bl_SceneContext h, bl_CallbackToken token)
     return BL_INVALID_ARGUMENT;
 }
 
-struct L_Draw
-{
-    L_Mesh* mesh;
-    L_Material* material;
-    double order;
-    double depth;
-    size_t sequence;
-    size_t group;
-    bool transparent;
-};
-
-static int drawCompare(const void* ap, const void* bp)
-{
-    const L_Draw* a = (const L_Draw*)ap;
-    const L_Draw* b = (const L_Draw*)bp;
-    if (a->transparent != b->transparent)
-    {
-        return a->transparent ? 1 : -1;
-    }
-    if (a->transparent && a->depth != b->depth)
-    {
-        return a->depth > b->depth ? -1 : 1;
-    }
-    if (a->order != b->order)
-    {
-        return a->order < b->order ? -1 : 1;
-    }
-    if (!a->transparent && a->group != b->group)
-    {
-        return a->group < b->group ? -1 : 1;
-    }
-    return a->sequence < b->sequence ? -1 : a->sequence != b->sequence ? 1 : 0;
-}
-
 static uint8_t colorByte(double d)
 {
     if (d < 0)
@@ -1045,103 +1015,13 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
             projection.values[i] = (float)projection.values[i];
         }
     }
-    if (s->memberCount > s->drawCapacity)
-    {
-        size_t bytes;
-        if (!l_size(s->memberCount, sizeof(L_Draw), &bytes))
-        {
-            return BL_OUT_OF_MEMORY;
-        }
-        void* p = l_alloc(r, bytes);
-        if (!p)
-        {
-            return BL_OUT_OF_MEMORY;
-        }
-        l_free(r, s->drawScratch);
-        s->drawScratch = p;
-        s->drawCapacity = s->memberCount;
-    }
-    L_Draw* draws = (L_Draw*)s->drawScratch;
     size_t count = 0;
+    L_TRY(l_collectDraws(r, s, &view, &count));
+    L_Draw* draws = (L_Draw*)s->drawScratch;
     bl_Status status = BL_OK;
-    for (size_t i = 0; i < s->memberCount; ++i)
+    if (count)
     {
-        L_Node* n = s->members[i];
-        if (n->record.disposed || !n->visible || n->record.kind != L_MESH)
-        {
-            continue;
-        }
-        bool owned = s->memberOwners[i];
-        for (size_t j = 0; !owned && j < s->memberCount; ++j)
-        {
-            if (s->members[j] == n && s->memberOwners[j])
-            {
-                owned = true;
-            }
-        }
-        if (!owned)
-        {
-            continue;
-        }
-        L_Mesh* m = (L_Mesh*)n;
-        if (!m->geometry.vertices || !m->geometry.indexCount || L_NULL(m->properties.material))
-        {
-            continue;
-        }
-        status = l_world(r, n);
-        if (status != BL_OK)
-        {
-            break;
-        }
-        L_Material* mat = (L_Material*)l_peek(r, m->properties.material._id);
-        double depth = view.values[2] * n->world.values[12] + view.values[6] * n->world.values[13] +
-                       view.values[10] * n->world.values[14] + view.values[14];
-        draws[count++] = {m,
-                          mat,
-                          m->properties.renderOrder.present ? m->properties.renderOrder.value
-                          : mat->blending                   ? 200.0
-                                                            : 100.0,
-                          depth,
-                          i,
-                          i,
-                          mat->blending};
-    }
-    for (size_t i = 0; i < count; ++i)
-    {
-        if (!draws[i].transparent)
-        {
-            double minimum = draws[i].order;
-            size_t group = draws[i].sequence;
-            for (size_t j = 0; j < s->memberCount; ++j)
-            {
-                L_Node* n = s->members[j];
-                if (n->record.disposed || n->record.kind != L_MESH)
-                {
-                    continue;
-                }
-                L_Mesh* mesh = (L_Mesh*)n;
-                if (mesh->properties.material._id != draws[i].material->record.id)
-                {
-                    continue;
-                }
-                double order =
-                    mesh->properties.renderOrder.present ? mesh->properties.renderOrder.value : 100;
-                if (order < minimum)
-                {
-                    minimum = order;
-                }
-                if (j < group)
-                {
-                    group = j;
-                }
-            }
-            draws[i].order = minimum;
-            draws[i].group = group;
-        }
-    }
-    if (status == BL_OK && count)
-    {
-        qsort(draws, count, sizeof(*draws), drawCompare);
+        l_sortDraws(s, count);
         bl_Vec3 position = {camera->world.values[12], camera->world.values[13],
                             camera->world.values[14]};
         for (size_t i = 0; i < count; ++i)
