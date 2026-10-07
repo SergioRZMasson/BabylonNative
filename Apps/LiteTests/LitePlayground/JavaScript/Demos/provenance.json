@@ -1,0 +1,10 @@
+{
+  "package": "@babylonjs/lite",
+  "version": "1.32.0",
+  "sourcePin": "2e064d88ec7422af946f8ec7f089ac6519f99295",
+  "demo": "Unmodified original Minecraft demo and all 24 Minecraft modules, loading-progress.ts and demo-asset-url.ts from the parent-isolated reference snapshot.",
+  "renderRadius": 6,
+  "engineImplementationIncluded": false,
+  "assets": "Kenney Voxel Pack, CC0; asset delivery and its original license must be provided separately.",
+  "license": "LICENSE"
+}

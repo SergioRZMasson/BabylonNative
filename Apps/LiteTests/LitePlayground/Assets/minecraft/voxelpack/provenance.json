@@ -1,0 +1,187 @@
+{
+  "source": "Original pinned demo Kenney Voxel Pack files",
+  "sourcePackage": "@babylonjs/lite 1.32.0 / original Minecraft demo snapshot",
+  "sourcePin": "2e064d88ec7422af946f8ec7f089ac6519f99295",
+  "author": "Kenney Vleugels",
+  "license": "CC0-1.0",
+  "licenseFile": "License.txt",
+  "website": "https://kenney.nl/assets/voxel-pack",
+  "files": [
+    {
+      "name": "brick_grey.png",
+      "sha256": "4b9a3d9e1f2fe7341520bb2ce81ad978d8c40fc34ead45fdc7605127a3acb32c"
+    },
+    {
+      "name": "brick_red.png",
+      "sha256": "12ea2e07af0fb20b6b4890738ccf9e45334f804f1896be7a4a77000eab5208d3"
+    },
+    {
+      "name": "cactus_inside.png",
+      "sha256": "08a9a04884da2943a3090e3e8752db348eeb79b7b2ed6534c416f34cbcdfb162"
+    },
+    {
+      "name": "cactus_side.png",
+      "sha256": "7f92ab8032a4fbaa3085852543535b38317474d108d27066553cc6245dbda12e"
+    },
+    {
+      "name": "cactus_top.png",
+      "sha256": "3962920fc8a25e39931e3e27b1c55676c7e3d4a8fc81ad25350972a6d6ff9706"
+    },
+    {
+      "name": "cotton_blue.png",
+      "sha256": "78eeb1faa9ca28706f68641cbc2812ff456e852447354e640027df9369ad843c"
+    },
+    {
+      "name": "cotton_green.png",
+      "sha256": "8cd6535c8ebc0b4de89804e3da2652a913df6fe809b309d1b26d9e02c1694025"
+    },
+    {
+      "name": "cotton_red.png",
+      "sha256": "c6e5cf8c8867f32a4f32bf1a0ce01ec390c9cb38531f1528d985335c7a9714d2"
+    },
+    {
+      "name": "cotton_tan.png",
+      "sha256": "b01823007f43136e812f95d4acae32a465f282583a9ffa7488577f94c0771c61"
+    },
+    {
+      "name": "dirt_grass.png",
+      "sha256": "4aff6bc1ec36f93de3702b75e67dc1b77fc74400087fbc8d03f4aec869a6171e"
+    },
+    {
+      "name": "dirt_sand.png",
+      "sha256": "3fe9e47132a5db26b9ddddf0c55f4dd9c106e8980b9a5d80fda958615a8b1634"
+    },
+    {
+      "name": "dirt_snow.png",
+      "sha256": "533d5fadff70274f93761eef9622a151d03ac1987b5fbe69e84fa9dfdf6108f2"
+    },
+    {
+      "name": "dirt.png",
+      "sha256": "fff7cf42c901e597cc8e212e070daf9e691032b49466d2e51ade930ad433fca1"
+    },
+    {
+      "name": "glass.png",
+      "sha256": "0d3a0dcacf34ea76985edac878537310eda164599c8715c3e8daf6647f9b22d7"
+    },
+    {
+      "name": "grass_top.png",
+      "sha256": "6e91371f300c74179fb164d1c731b174f58ce68670b63b4925734b13053bf01d"
+    },
+    {
+      "name": "gravel_stone.png",
+      "sha256": "7fd0fb9a67c5a460b6e4cee2e4082179b541457c154a65156de7d40297b862cd"
+    },
+    {
+      "name": "greysand.png",
+      "sha256": "60b8a772f76d0770e6e36e95ac6eec193a1dca91c7303f01b1eb3a7fba5a6267"
+    },
+    {
+      "name": "greystone_ruby.png",
+      "sha256": "dd38341f74f4c5baaf37d416aff07f5bebbcc4f4d860970b3e17495a2a86067a"
+    },
+    {
+      "name": "greystone.png",
+      "sha256": "af60d1ce96647777280f803321019431950543b7fffbf3c010b129b767d0825b"
+    },
+    {
+      "name": "ice.png",
+      "sha256": "6b276bff1230d6131dd49bc013b01c4b2fe247c27577b1121b6e04e633f7c358"
+    },
+    {
+      "name": "lava.png",
+      "sha256": "eb7a7a5d9e0448cf2f6aa00b6db145ed36d20d7d57ace1d50c9cd84bf9ce9cb0"
+    },
+    {
+      "name": "leaves_orange_transparent.png",
+      "sha256": "c73458ff3a5eb37d66e85e3c93f26514ecf56a2289da98294b81bab1ba934a32"
+    },
+    {
+      "name": "leaves_transparent.png",
+      "sha256": "8419d19e37ff752837e36cb4f41429726921e30056d03e1ac5ff4bbdf9fac80d"
+    },
+    {
+      "name": "leaves.png",
+      "sha256": "530f638a226195b0e3bb85220ced73436bb4ec8b6d477d8070b678abef38692b"
+    },
+    {
+      "name": "License.txt",
+      "sha256": "b095efc2547e48565fe5d084473c9c8e7f40a881032e1f37e0032120c6204fe5"
+    },
+    {
+      "name": "redsand.png",
+      "sha256": "f8f0c3b28b24107b0c5eaf4baf858b51a5ecc80da1b06bf8b4853a45c43f0f9a"
+    },
+    {
+      "name": "redstone_emerald.png",
+      "sha256": "bdaf4be1234a6ea3dad61bd5747bf1057aa9689642e4379fea709d6bb56ac645"
+    },
+    {
+      "name": "rock_moss.png",
+      "sha256": "ff2f29672ad62d85c16d51a580d66edec404b66c4882a2cb5997f906e202f8d5"
+    },
+    {
+      "name": "rock.png",
+      "sha256": "785db4b0e41fd306e9ea8f8f66eb0cba542f0981e6c23a5edebfd14309e139be"
+    },
+    {
+      "name": "sand.png",
+      "sha256": "0aee535d03a084d00fd6b80aaa7f09b644e677106caef65c227c4664a15ea14b"
+    },
+    {
+      "name": "snow.png",
+      "sha256": "9b863378ecc4f807a72120fcbbacdc26fbf9dcf11573769a0d2e3aff4d014200"
+    },
+    {
+      "name": "stone_coal.png",
+      "sha256": "ff9ad0efeb029df8567f7e388b5a8b8649eae27a5bc36142468c768fc07a028c"
+    },
+    {
+      "name": "stone_diamond.png",
+      "sha256": "150ce3e47cd87dceec1803218847b40b90c87d1d7f8d9335fa9478914c40de8c"
+    },
+    {
+      "name": "stone_gold.png",
+      "sha256": "f91e5b4d3200d98a280b6cae50d98b464b106759143f5e37c4467a3dd7f5fc63"
+    },
+    {
+      "name": "stone_iron.png",
+      "sha256": "6534e3ee65ca55e4cec274cd2d676e8f888ad4b44ed183ecda087a0358f927ee"
+    },
+    {
+      "name": "stone_silver.png",
+      "sha256": "4e53966ec9f15cf66a949d9e81451772136abdae8431ecef55c0f90140f2494a"
+    },
+    {
+      "name": "stone.png",
+      "sha256": "e53319b547c6172c72c299e21631fecf5434dc75c013b22538146badaf768d1f"
+    },
+    {
+      "name": "trunk_side.png",
+      "sha256": "3456fc479616c151cfd89cb1a3573aaf3f776ed8734ad52c3b9efdce1622be4f"
+    },
+    {
+      "name": "trunk_top.png",
+      "sha256": "e846c2b2f1c404f155264a1a50b8a9cfbeb8d6b3815afa01a43bb97b548a0323"
+    },
+    {
+      "name": "trunk_white_side.png",
+      "sha256": "85d63cd8f93dffd660e84d7a7a702a9412fbe18581ff3501343ce34910613237"
+    },
+    {
+      "name": "trunk_white_top.png",
+      "sha256": "f9cfff863c4bcfb2927bfb6bdc8f0da463bfbcd9939ecaec2aafbef285c2f17e"
+    },
+    {
+      "name": "water.png",
+      "sha256": "8bf6b51ea13652f1937c83fd0649dcd45a91dd246814886236ac0458f256eb4b"
+    },
+    {
+      "name": "wood_red.png",
+      "sha256": "1c9473f822776cf0fc25332326d0d10a246b7e6608176db419fd294bd12ac533"
+    },
+    {
+      "name": "wood.png",
+      "sha256": "034f0c8cf6ea6d42cae74eaf0665f10c9331baa79cc9d305190ee90880c4849e"
+    }
+  ]
+}

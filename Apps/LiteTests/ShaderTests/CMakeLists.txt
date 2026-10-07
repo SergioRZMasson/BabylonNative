@@ -1,0 +1,7 @@
+set(SOURCES "Source/Tests.ShaderCompiler.cpp")
+add_executable(LiteShaderCompilerTests ${SOURCES})
+warnings_as_errors(LiteShaderCompilerTests)
+target_link_libraries(LiteShaderCompilerTests PRIVATE LiteShaderCompiler gtest_main d3dcompiler dxguid)
+add_test(NAME LiteShaderCompilerTests COMMAND LiteShaderCompilerTests)
+set_property(TARGET LiteShaderCompilerTests PROPERTY FOLDER Apps)
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})

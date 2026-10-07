@@ -1,0 +1,19 @@
+#pragma once
+
+#include <babylon_lite.h>
+#include <napi/napi.h>
+
+namespace Babylon::Plugins::LiteJSBinding
+{
+    struct HostOptions
+    {
+        bl_Runtime* runtime{};
+        bl_NativeEngineOptions nativeEngine{};
+    };
+
+    // All calls, runtime disposal and binding disposal run on the JS/runtime
+    // creating thread. Host owns the runtime, window and injected services.
+    void Initialize(Napi::Env env, const HostOptions& options);
+    void Frame(Napi::Env env, double deltaMs);
+    void Dispose(Napi::Env env);
+}

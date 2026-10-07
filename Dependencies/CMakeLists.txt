@@ -236,7 +236,7 @@ endif()
 # --------------------------------------------------
 # googletest
 # --------------------------------------------------
-if(BABYLON_NATIVE_BUILD_APPS AND (WIN32 OR (APPLE AND NOT IOS AND NOT VISIONOS) OR (UNIX AND NOT ANDROID AND NOT APPLE)))
+if((BABYLON_NATIVE_BUILD_APPS OR BABYLON_NATIVE_BUILD_LITE_TESTS OR BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS) AND (WIN32 OR (APPLE AND NOT IOS AND NOT VISIONOS) OR (UNIX AND NOT ANDROID AND NOT APPLE)))
     if(WIN32)
         # For Windows: Prevent overriding the parent project's compiler/linker settings
         # Default build type for my test projects are /MDd (MultiThreaded DLL) but GTests default to /MTd (MultiTreaded)

@@ -62,3 +62,6 @@ if(BABYLON_NATIVE_PLUGIN_TESTUTILS)
     add_subdirectory(TestUtils)
 endif()
 
+if(BABYLON_NATIVE_PLUGIN_LITEJSBINDING)
+    add_subdirectory(LiteJSBinding)
+endif()

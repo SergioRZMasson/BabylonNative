@@ -1,0 +1,14 @@
+{
+  "name": "babylon-lite-native-test-applications",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node tools/build.mjs --verify"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "typescript": "5.9.3"
+  }
+}

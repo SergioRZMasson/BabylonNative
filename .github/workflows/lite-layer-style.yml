@@ -1,0 +1,57 @@
+name: LiteLayer Style
+
+on:
+  push:
+    paths:
+      - ".clang-format"
+      - "Core/LiteLayer/**"
+      - ".github/workflows/lite-layer-style.yml"
+  pull_request:
+    paths:
+      - ".clang-format"
+      - "Core/LiteLayer/**"
+      - ".github/workflows/lite-layer-style.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  style:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned LLVM tools
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "LLVM-22.1.0-win64.exe"
+          Invoke-WebRequest `
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.0/LLVM-22.1.0-win64.exe" `
+            -OutFile $installer
+          $expected = "B31D5F54942E017CB878E594529723DD629CC7B54C9BF7A331E2DC01E8EA5E75"
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $expected) {
+            throw "LLVM installer checksum mismatch."
+          }
+          $llvm = Join-Path $env:RUNNER_TEMP "LLVM-LiteLayer"
+          $process = Start-Process -FilePath $installer -ArgumentList "/S", "/D=$llvm" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "LLVM installation failed with exit code $($process.ExitCode)."
+          }
+          Join-Path $llvm "bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Enforce style and build the native-only target
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
+          if not defined VSINSTALL exit /b 1
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          cmake -S Core\LiteLayer -B build\lite-style -G Ninja -DCMAKE_BUILD_TYPE=Release -DBABYLON_LITE_ENABLE_STYLE_CHECKS=ON
+          if errorlevel 1 exit /b 1
+          cmake --build build\lite-style --target LiteLayer --parallel 3

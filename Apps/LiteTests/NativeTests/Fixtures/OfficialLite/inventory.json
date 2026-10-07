@@ -1,0 +1,389 @@
+{
+  "authority": "@babylonjs/lite 1.32.0 official JavaScript corresponding to original TypeScript",
+  "sourcePin": "2e064d88ec7422af946f8ec7f089ac6519f99295",
+  "byteOrder": "little-endian",
+  "generatedEngineUsed": false,
+  "fixtures": [
+    {
+      "name": "box-default",
+      "options": null,
+      "vertexCount": 24,
+      "indexCount": 36,
+      "streams": {
+        "positions": {
+          "file": "box-default-positions.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "cdd3a21b4f37c991056729050e01988225fbb8ccc9caac53e6c085343d211142"
+        },
+        "normals": {
+          "file": "box-default-normals.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "65ce9236a90e428329c9ee189284c0a54167f539a325293f1b401f835f0a3e27"
+        },
+        "uvs": {
+          "file": "box-default-uvs.bin",
+          "elements": 48,
+          "bytes": 192,
+          "sha256": "a44a8d5324fb0ed406c747b7fb86f9ce74b5063b841af5969deec5f12dedd30d"
+        },
+        "indices": {
+          "file": "box-default-indices.bin",
+          "elements": 36,
+          "bytes": 144,
+          "sha256": "15e4544087ac886e83ea2c6f84406b56b09370208d305b0ed3c2a2cae4bdf76b"
+        }
+      }
+    },
+    {
+      "name": "box-size",
+      "options": 2,
+      "vertexCount": 24,
+      "indexCount": 36,
+      "streams": {
+        "positions": {
+          "file": "box-size-positions.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "79d1a70c847c905608a41e7b69c783aadab34aae5cf5d42c1fc4f65dd9ef14d9"
+        },
+        "normals": {
+          "file": "box-size-normals.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "65ce9236a90e428329c9ee189284c0a54167f539a325293f1b401f835f0a3e27"
+        },
+        "uvs": {
+          "file": "box-size-uvs.bin",
+          "elements": 48,
+          "bytes": 192,
+          "sha256": "a44a8d5324fb0ed406c747b7fb86f9ce74b5063b841af5969deec5f12dedd30d"
+        },
+        "indices": {
+          "file": "box-size-indices.bin",
+          "elements": 36,
+          "bytes": 144,
+          "sha256": "15e4544087ac886e83ea2c6f84406b56b09370208d305b0ed3c2a2cae4bdf76b"
+        }
+      }
+    },
+    {
+      "name": "box-overrides",
+      "options": {
+        "size": 2,
+        "width": 3,
+        "height": 4,
+        "depth": 5
+      },
+      "vertexCount": 24,
+      "indexCount": 36,
+      "streams": {
+        "positions": {
+          "file": "box-overrides-positions.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "66773bcc2bd32c6c3a23a564f6b6cff9c562c8a9ddaeadeb2989d6f13bdcfaad"
+        },
+        "normals": {
+          "file": "box-overrides-normals.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "65ce9236a90e428329c9ee189284c0a54167f539a325293f1b401f835f0a3e27"
+        },
+        "uvs": {
+          "file": "box-overrides-uvs.bin",
+          "elements": 48,
+          "bytes": 192,
+          "sha256": "a44a8d5324fb0ed406c747b7fb86f9ce74b5063b841af5969deec5f12dedd30d"
+        },
+        "indices": {
+          "file": "box-overrides-indices.bin",
+          "elements": 36,
+          "bytes": 144,
+          "sha256": "15e4544087ac886e83ea2c6f84406b56b09370208d305b0ed3c2a2cae4bdf76b"
+        }
+      }
+    },
+    {
+      "name": "box-zero-width",
+      "options": {
+        "width": 0
+      },
+      "vertexCount": 24,
+      "indexCount": 36,
+      "streams": {
+        "positions": {
+          "file": "box-zero-width-positions.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "e4b62b1de4959aab3b343de109055dcfa9160d7df31f812ab7ebf99969233e63"
+        },
+        "normals": {
+          "file": "box-zero-width-normals.bin",
+          "elements": 72,
+          "bytes": 288,
+          "sha256": "65ce9236a90e428329c9ee189284c0a54167f539a325293f1b401f835f0a3e27"
+        },
+        "uvs": {
+          "file": "box-zero-width-uvs.bin",
+          "elements": 48,
+          "bytes": 192,
+          "sha256": "a44a8d5324fb0ed406c747b7fb86f9ce74b5063b841af5969deec5f12dedd30d"
+        },
+        "indices": {
+          "file": "box-zero-width-indices.bin",
+          "elements": 36,
+          "bytes": 144,
+          "sha256": "15e4544087ac886e83ea2c6f84406b56b09370208d305b0ed3c2a2cae4bdf76b"
+        }
+      }
+    },
+    {
+      "name": "sphere-default",
+      "options": null,
+      "vertexCount": 2415,
+      "indexCount": 13872,
+      "streams": {
+        "positions": {
+          "file": "sphere-default-positions.bin",
+          "elements": 7245,
+          "bytes": 28980,
+          "sha256": "b15607e1be0ab31a45ae06c854b41600c7f44bd688bc9c39e7379a33af1b25ac"
+        },
+        "normals": {
+          "file": "sphere-default-normals.bin",
+          "elements": 7245,
+          "bytes": 28980,
+          "sha256": "40d37530fe0aa712e5a8fa85cb7a5a5b96916b3a4960fd41125edd4caf6a78fe"
+        },
+        "uvs": {
+          "file": "sphere-default-uvs.bin",
+          "elements": 4830,
+          "bytes": 19320,
+          "sha256": "f25a99704ca918b56afbe11e4029c0644972b6a7a8a9177b63c15adb6450c3bc"
+        },
+        "indices": {
+          "file": "sphere-default-indices.bin",
+          "elements": 13872,
+          "bytes": 55488,
+          "sha256": "9490be4a6a57fe6006561bc55c4580f09e979ebbb6b7a6147b70444d031a18f4"
+        }
+      }
+    },
+    {
+      "name": "sphere-minimum",
+      "options": {
+        "segments": 0
+      },
+      "vertexCount": 66,
+      "indexCount": 300,
+      "streams": {
+        "positions": {
+          "file": "sphere-minimum-positions.bin",
+          "elements": 198,
+          "bytes": 792,
+          "sha256": "09e40d4e7a942cbc6c56951c28f361663d6ba8f6225bf31d78dc79a6eb49af97"
+        },
+        "normals": {
+          "file": "sphere-minimum-normals.bin",
+          "elements": 198,
+          "bytes": 792,
+          "sha256": "6e36abf153298bef0457e19edaf8778d27cf337481e695527786713301238136"
+        },
+        "uvs": {
+          "file": "sphere-minimum-uvs.bin",
+          "elements": 132,
+          "bytes": 528,
+          "sha256": "dfa3c8cb6b91a889fe234d19e5b03edff97123f1d351a9bf453dcdd029801eeb"
+        },
+        "indices": {
+          "file": "sphere-minimum-indices.bin",
+          "elements": 300,
+          "bytes": 1200,
+          "sha256": "cf8b3a62ee7761178510ceda3759c48525b110dd8f05b7c880a4b27424d809a4"
+        }
+      }
+    },
+    {
+      "name": "sphere-axes",
+      "options": {
+        "segments": 8,
+        "diameterX": 2,
+        "diameterY": 3,
+        "diameterZ": 4
+      },
+      "vertexCount": 231,
+      "indexCount": 1200,
+      "streams": {
+        "positions": {
+          "file": "sphere-axes-positions.bin",
+          "elements": 693,
+          "bytes": 2772,
+          "sha256": "e61dc64cc7646c7746a4f3ec47fa9778dd28ee306b087e389f26cd254fb56c84"
+        },
+        "normals": {
+          "file": "sphere-axes-normals.bin",
+          "elements": 693,
+          "bytes": 2772,
+          "sha256": "b9aea8a3234db8d7f5603c61eaa0d2583e69a3ff694957d3820ddca854e2f82f"
+        },
+        "uvs": {
+          "file": "sphere-axes-uvs.bin",
+          "elements": 462,
+          "bytes": 1848,
+          "sha256": "c435a390e479eb80cf1858faaaf8f480a498c278c4a3d1fffc74d8adec2746cc"
+        },
+        "indices": {
+          "file": "sphere-axes-indices.bin",
+          "elements": 1200,
+          "bytes": 4800,
+          "sha256": "d1aec749772aed01d286e650bfbcd27b6996bc7c18411506cb1a4137d805c5a2"
+        }
+      }
+    },
+    {
+      "name": "sphere-minecraft-sky",
+      "options": {
+        "segments": 16,
+        "diameter": 4000
+      },
+      "vertexCount": 703,
+      "indexCount": 3888,
+      "streams": {
+        "positions": {
+          "file": "sphere-minecraft-sky-positions.bin",
+          "elements": 2109,
+          "bytes": 8436,
+          "sha256": "b76b42a1eead9f8ad1832386806b77244279a22f8dc3bc837edb8d674c9f76b4"
+        },
+        "normals": {
+          "file": "sphere-minecraft-sky-normals.bin",
+          "elements": 2109,
+          "bytes": 8436,
+          "sha256": "a9c6eb831b618dc479797ec1ec283dba9ceb7ab878796a2cc4c7632ec4e9aa91"
+        },
+        "uvs": {
+          "file": "sphere-minecraft-sky-uvs.bin",
+          "elements": 1406,
+          "bytes": 5624,
+          "sha256": "c9e9774aa08bdd34b94566fce92f78ca0db0ac78b79c0f04cf8c4aa48369d984"
+        },
+        "indices": {
+          "file": "sphere-minecraft-sky-indices.bin",
+          "elements": 3888,
+          "bytes": 15552,
+          "sha256": "0fb4173cf2408ba9c4fa93a20d308864845c68b8651c56db8475bd2da38e4a5e"
+        }
+      }
+    },
+    {
+      "name": "audio-linear-0-1",
+      "shape": "linear",
+      "from": 0,
+      "to": 1,
+      "stream": {
+        "file": "audio-linear-0-1.bin",
+        "elements": 2,
+        "bytes": 8,
+        "sha256": "22b6f43bd8d27738d3213f29e96b62d01d9d6c0ab4f9732aaae803186f51eab7"
+      }
+    },
+    {
+      "name": "audio-linear-1-0",
+      "shape": "linear",
+      "from": 1,
+      "to": 0,
+      "stream": {
+        "file": "audio-linear-1-0.bin",
+        "elements": 2,
+        "bytes": 8,
+        "sha256": "434b26042aff3fb844a4c4c6be0d81a079b0ce84cfb8190679024404e5dc4822"
+      }
+    },
+    {
+      "name": "audio-linear-0.4-0.4",
+      "shape": "linear",
+      "from": 0.4,
+      "to": 0.4,
+      "stream": {
+        "file": "audio-linear-0.4-0.4.bin",
+        "elements": 2,
+        "bytes": 8,
+        "sha256": "0ea2e44eb59cae4a5344b2707553e2939b2dec9615034926fe51b0860b043564"
+      }
+    },
+    {
+      "name": "audio-exponential-0-1",
+      "shape": "exponential",
+      "from": 0,
+      "to": 1,
+      "stream": {
+        "file": "audio-exponential-0-1.bin",
+        "elements": 100,
+        "bytes": 400,
+        "sha256": "b34f396b4aab910eef7a43f1446db0641ffb4170610c20b4f002defa4fbec59d"
+      }
+    },
+    {
+      "name": "audio-exponential-1-0",
+      "shape": "exponential",
+      "from": 1,
+      "to": 0,
+      "stream": {
+        "file": "audio-exponential-1-0.bin",
+        "elements": 100,
+        "bytes": 400,
+        "sha256": "dc8cabd62ec97b11756443a6a2821db0b7018c61036bf41dcff7de91c54dec7c"
+      }
+    },
+    {
+      "name": "audio-exponential-0.4-0.4",
+      "shape": "exponential",
+      "from": 0.4,
+      "to": 0.4,
+      "stream": {
+        "file": "audio-exponential-0.4-0.4.bin",
+        "elements": 100,
+        "bytes": 400,
+        "sha256": "a9e212261dd153d0b2e54167af03beb830b5a779e8d5529c18aff21fa33fd461"
+      }
+    },
+    {
+      "name": "audio-logarithmic-0-1",
+      "shape": "logarithmic",
+      "from": 0,
+      "to": 1,
+      "stream": {
+        "file": "audio-logarithmic-0-1.bin",
+        "elements": 100,
+        "bytes": 400,
+        "sha256": "8e3a3855eda81a0073eeba285c7bbf4a25448a4b55535d30e9bb3ab1c03cf94a"
+      }
+    },
+    {
+      "name": "audio-logarithmic-1-0",
+      "shape": "logarithmic",
+      "from": 1,
+      "to": 0,
+      "stream": {
+        "file": "audio-logarithmic-1-0.bin",
+        "elements": 100,
+        "bytes": 400,
+        "sha256": "fd78cacb9c9c87d9c7200c74c1c074468dae81a2776e309f746f3b134ef9b97a"
+      }
+    },
+    {
+      "name": "audio-logarithmic-0.4-0.4",
+      "shape": "logarithmic",
+      "from": 0.4,
+      "to": 0.4,
+      "stream": {
+        "file": "audio-logarithmic-0.4-0.4.bin",
+        "elements": 100,
+        "bytes": 400,
+        "sha256": "a9e212261dd153d0b2e54167af03beb830b5a779e8d5529c18aff21fa33fd461"
+      }
+    }
+  ]
+}

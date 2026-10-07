@@ -1,0 +1,13 @@
+BasedOnStyle: InheritParentConfig
+IndentWidth: 4
+UseTab: Never
+IndentExternBlock: NoIndent
+ColumnLimit: 100
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortEnumsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+InsertBraces: true
+SeparateDefinitionBlocks: Always

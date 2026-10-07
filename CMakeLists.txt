@@ -117,6 +117,11 @@ set(CMAKE_REQUIRED_QUIET TRUE)
 option(BABYLON_NATIVE_BUILD_APPS "Build Babylon Native apps." ${PROJECT_IS_TOP_LEVEL})
 option(BABYLON_NATIVE_INSTALL "Include the install target." ${PROJECT_IS_TOP_LEVEL})
 option(BABYLON_DEBUG_TRACE "Enable debug trace." OFF)
+option(BABYLON_NATIVE_BUILD_LITE_LAYER "Build the isolated C99 Babylon Lite native library." OFF)
+option(BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER "Build the separate runtime WGSL shader compiler service." OFF)
+option(BABYLON_NATIVE_BUILD_LITE_TESTS "Build the Babylon Lite native contract tests." OFF)
+option(BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS "Build the independent runtime shader compiler tests." OFF)
+option(BABYLON_NATIVE_BUILD_LITE_PLAYGROUND "Build the Babylon Lite JavaScript host." OFF)
 
 # WARNING: This is experimental. Only use it if you can ensure that your application will properly handle thread affinity.
 option(BABYLON_NATIVE_CHECK_THREAD_AFFINITY "Checks thread safety in the graphics device calls. It can be removed if hosting application ensures thread coherence." ON)
@@ -139,6 +144,19 @@ option(BABYLON_NATIVE_PLUGIN_SHADERCACHE "Include Babylon Native Plugin ShaderCa
 option(BABYLON_NATIVE_PLUGIN_SHADERCOMPILER "Include Babylon Native Plugin ShaderCompiler." ON)
 option(BABYLON_NATIVE_PLUGIN_SHADERTOOL "Include Babylon Native Plugin ShaderTool." ON)
 option(BABYLON_NATIVE_PLUGIN_TESTUTILS "Include Babylon Native Plugin TestUtils." ON)
+option(BABYLON_NATIVE_PLUGIN_LITEJSBINDING "Include the thin Babylon Lite C99 NAPI binding." OFF)
+
+if((BABYLON_NATIVE_PLUGIN_LITEJSBINDING OR BABYLON_NATIVE_BUILD_LITE_TESTS OR BABYLON_NATIVE_BUILD_LITE_PLAYGROUND)
+    AND NOT BABYLON_NATIVE_BUILD_LITE_LAYER)
+    message(FATAL_ERROR "Lite bindings and test applications require BABYLON_NATIVE_BUILD_LITE_LAYER=ON.")
+endif()
+
+if(BABYLON_NATIVE_BUILD_LITE_PLAYGROUND AND NOT BABYLON_NATIVE_PLUGIN_LITEJSBINDING)
+    message(FATAL_ERROR "LitePlayground requires BABYLON_NATIVE_PLUGIN_LITEJSBINDING=ON.")
+endif()
+if(BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS AND NOT BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER)
+    message(FATAL_ERROR "Lite shader tests require BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER=ON.")
+endif()
 
 # Polyfills
 option(BABYLON_NATIVE_POLYFILL_CANVAS "Include Babylon Native Polyfill Canvas." ON)
@@ -423,6 +441,11 @@ endif()
 
 if(BABYLON_NATIVE_BUILD_APPS)
     add_subdirectory(Apps)
+endif()
+
+if(BABYLON_NATIVE_BUILD_LITE_TESTS OR BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS OR BABYLON_NATIVE_BUILD_LITE_PLAYGROUND)
+    enable_testing()
+    add_subdirectory(Apps/LiteTests)
 endif()
 
 # no install for glslang compiled for shaderc

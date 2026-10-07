@@ -1,0 +1,6 @@
+InheritParentConfig: false
+Checks: '-*,readability-braces-around-statements,readability-isolate-declaration'
+WarningsAsErrors: 'readability-braces-around-statements,readability-isolate-declaration'
+HeaderFilterRegex: '.*[\\/]Core[\\/]LiteLayer[\\/].*'
+CheckOptions:
+  readability-braces-around-statements.ShortStatementLines: 0
