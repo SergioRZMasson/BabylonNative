@@ -753,11 +753,14 @@ The host uses installed, hashed Segoe UI/Consolas/Symbol faces without committin
 or redistributing private font binaries. Pristine RmlUI/FreeType rasterization
 differs from the compiler host's Windows font engine. Restored crosshair
 composition also intentionally differs from the stripped reference rendering.
-**No RGB-exact full-UI parity or performance win is claimed.** This app does not
+**No RGB-exact full-UI parity is claimed.** The fresh performance results below
+do not establish an isolated engine speedup or solved tail latency. This app does not
 establish general arbitrary colored-source difference, all browser CSS or
-complete demonstration-corpus coverage. General multi-context shadow readiness
-belongs to the separately qualified, pin-preserving dependency-cache correction,
-not an inference from this app's one shadow-producing context.
+complete demonstration-corpus coverage. The final source-transitive builds
+include the separately qualified, pin-preserving renderer-scoped shadow-cache
+correction. Each build's `RmlUiBoxShadowPatch.json` is independently checked by
+the app source audit; general multi-context shadow qualification remains the
+Core test's evidence, not an inference from this app's one shadow-producing context.
 
 Configure in the same Visual Studio developer command process, with the
 exact-pin source-cache paths and qualified shader-library paths described in
@@ -780,10 +783,11 @@ ctest --test-dir build\lite-c99\rmlui-minecraft\NativeRelease --output-on-failur
 .\build\lite-c99\rmlui-minecraft\NativeRelease\LiteMinecraftRmlUiNative.exe
 ```
 
-Nine Release tests and the same nine Debug tests qualify translation/tools,
+Ten Release tests and the same ten Debug tests qualify translation/tools,
 1000 unchanged retained UI frames with native click/text/border/scale/font/DPI
 mutation, original 180/1380-frame 397/403-mesh idle runs, the explicitly separate
-37-event Win32 replay, real save/load dialogs and nonzero device audio,
+37-event Win32 replay, real save/load dialogs and nonzero device audio, original
+toast timer expiry through frame 500 and numerical exact-ease/reversal/coalescing,
 resize/DPI, and the source underwater overlay over the actual GPU scene.
 The underwater case is explicitly a **UI-only opacity override**, not evidence
 that the player entered water; it is forbidden in benchmark mode. Captures,
@@ -791,6 +795,45 @@ receipts and stronger DOM/control guards are kept in unique build-local
 `Cases` directories. The Debug source graph has symbols/unoptimized code and
 assertions, but uses Release CRT/iterator ABI to match the imported qualified
 shader service; it is not a Debug Tint qualification.
+
+The full original idle UI has an exact retained-resource plateau at frames
+480 and 1380: 325 geometry compilations, 25 texture creations, 1,298,760 uploaded
+bytes, 53 live geometries, 25 live textures and 34 C99 elements. These are actual
+backend counters, not a claim about every RmlUI/driver heap allocation.
+
+The parent independently reran all ten Release and ten Debug tests and verified
+every measured binary/source/qualification fingerprint. A subsequent sixteen
+balanced four-variant comparison used the original UI, common standard C++
+files, 180 warmup + 1,200 measured frames, SEED 1337/radius 6, 1280x720/MSAA 1,
+fixed simulation delta and hidden real swapchains with no input/vsync/pacing:
+
+| Full original-UI implementation | Median run-average CPU frame | Median run P95 |
+|---|---:|---:|
+| Standard bblitec / SDL_GPU / D3D12 | 2.676 ms | 3.571 ms |
+| Stock Dawn / D3D12 | 5.445 ms | 7.393 ms |
+| Same Dawn host / compatible bgfx WebGPU provider | 2.824 ms | 3.651 ms |
+| Native LiteLayer + RmlUI / bgfx D3D11 | **1.751 ms** | **3.292 ms** |
+
+Native mean paired frame time is 21.06% lower than SDL, bootstrap 95% interval
+[-35.68%, -2.75%]. This excludes zero but does **not** robustly establish a
+benefit greater than the 5% practical threshold. It is 64.09% lower than stock
+Dawn ([-70.24%, -56.04%]) and 27.65% lower than the compatible provider
+([-41.04%, -12.48%]).
+
+**Run variability is substantial and no P95 win versus SDL/provider is proven.**
+Native paired P95 versus SDL has interval [-8.73%, +105.14%], despite its lower
+median in the table. All runs were retained; none was silently excluded.
+Shared-workstation load, driver queues and D3D11 versus D3D12 remain unresolved
+confounds, alongside glyph-renderer and collection timing-boundary differences.
+
+Measured native RmlUI update/layout averages 0.0158 ms and draw recording
+0.0673 ms. UI geometry/texture/upload counters change **zero** times during
+all sixteen measured native windows. The Core/update/3D bracket is 0.4721 ms;
+presenter/handoff is 1.1989 ms, including about 1.1920 ms waiting for render.
+Whole-process execution is 1.9141 ms/frame and GPU queries average 1.7247 ms.
+Do not add overlapping spans or call a short enqueue timer whole-engine CPU.
+The frozen detailed evidence is `build/lite-c99/rmlui-minecraft/Matched16`;
+the investigation report is `Experiments/Mincraft/pure-native/RMLUI-RESULTS.md`.
 
 `Tools/audit.py` checks actual Ninja compiler/header dependencies, unchanged
 source bytes, source-transitive Core/UI objects, PE imports and font/binary
