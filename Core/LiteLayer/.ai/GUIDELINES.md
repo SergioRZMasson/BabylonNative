@@ -39,21 +39,42 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
 
 - Use POD/standard-layout records, enums, explicit pointer/count spans, opaque
   typed identities and small free-function helpers.
-- No STL: no `std::` containers, strings, smart pointers, function wrappers,
+- No STL in engine algorithms: no `std::` containers, strings, smart pointers, function wrappers,
   streams, algorithms, threading, exceptions or other STL machinery in Core.
-- No application-defined classes, constructors/destructors, member methods,
+  The narrow RmlUI interface exception below is the only UI-related exception.
+- No application-defined engine classes, constructors/destructors, member methods,
   inheritance, virtual dispatch, Pimpl or RAII engine/object hierarchies.
   Private use of bgfx/bx's own API types and necessary stack temporaries is
   allowed; do not memset an unconstructed nontrivial C++ object.
-- Only **bgfx and bx** are direct third-party dependencies. Standard C headers,
+- **bgfx and bx**, plus optional **RmlUI for UI support**, are the approved
+  direct third-party dependencies. Standard C headers,
   libc and basic C++ language facilities are allowed. The pinned bx headers
   require C++20; that does not justify a modern C++ framework.
 - No NAPI/JS VM, SDL, WebGPU/Dawn renderer, Windows platform calls, image/audio
   codec library, cgltf, Tint, glslang or SPIRV-Cross inside LiteLayer.
   bgfx's own transitive dependencies do not permit direct Core use of them.
-- Runtime shader compilation, native windows/input/HUD/files/image decoding,
+- Runtime shader compilation, native windows/input/files/image decoding,
   audio output and user-language containers/GC stay in **separate** components.
   Host services cross a narrow C-compatible callback/data boundary.
+- User-approved change (2026-10-07): RmlUI and its bgfx backend live **inside
+  LiteLayer**, rather than a separate UI target. Keep UI as an explicit,
+  optional feature with isolated implementation files. A data-only consumer
+  must not initialize UI/graphics or pull UI objects into its link graph.
+- RmlUI's mandatory C++ interface implementations may use the inheritance,
+  overrides, methods and third-party STL-shaped parameters required by those
+  interfaces. This exception is limited to private RmlUI adapter files, not
+  engine data/algorithms. Keep native UI state and helper algorithms C-style
+  where practical; do not use this exception to introduce an engine hierarchy.
+- RmlUI is the layout/style/text system. Its backend records/uploads UI through
+  **bgfx**, with bgfx as the single GPU renderer/presenter. No SDL_Renderer,
+  GDI backing overlay or WebGPU renderer inside Core. SDL/window input remains
+  a host concern.
+- The public UI boundary stays in the single `babylon_lite.h`: C99 records,
+  handles, statuses and callbacks only. No RmlUI/STL/virtual types leak into
+  public declarations. Additive UI declarations require contract review.
+- Declare/pin/configure RmlUI using BabylonNative's existing FetchContent and
+  Dependencies conventions. Do not vendor its implementation or reuse private
+  dependency binaries as a substitute for a reproducible source dependency.
 - LiteLayer owns transforms, scene membership, draw ordering, material values,
   shader-interface construction, GPU resources/retirement and engine audio
   routing. Do not move those algorithms into JS, NAPI or host callbacks.
@@ -65,9 +86,10 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
   extensibility framework, unnecessary templates, hidden global service locator
   or speculative configuration surface.
 
-The CMake target's direct dependency guard must continue to accept only
-`bgfx;bx`. The separate shader compiler must not become a transitive LiteLayer
-link requirement.
+The CMake target's direct dependency guard accepts bgfx/bx and only the explicit
+RmlUI feature targets when UI is enabled. The separate shader compiler must not
+become a transitive LiteLayer link requirement. Native UI rendering may invoke
+the existing injected runtime shader service without linking that compiler.
 
 ## 3. Code style and readability
 
@@ -177,9 +199,10 @@ Do not disable the checks or bypass them with formatting-off markers.
 
 ## 7. Performance rules based on measurements
 
-The current investigation identifies **HUD rebuilding outside Core** as the
-largest complete-host bottleneck. Do not claim a Core rewrite fixes that cost,
-move the HUD into Core, or remove required work to make Core look faster.
+The investigation identified full-frame GDI HUD rebuilding in the host as the
+largest complete-host bottleneck. The approved RmlUI feature now replaces that
+path with retained UI and a bgfx backend inside LiteLayer. Do not recreate the
+GDI full-surface rebuild there or remove required UI to make results look faster.
 
 For Core implementation:
 
@@ -223,9 +246,15 @@ For measurements and interaction with host agents:
   Deeper queues can trade latency/capture alignment for submission throughput.
 - Do not remove user GC: its measured idle cost is tiny, and idle traces do
   not establish arbitrary reference-cycle safety.
-- Retained HUD, worker decoding, shader-cache/backend stripping and native
-  presentation changes belong to their respective **outside-Core** owners.
+- Retained UI/layout/backend work belongs to LiteLayer's isolated RmlUI feature;
+  host input, worker decoding, shader-cache/backend stripping and native
+  presentation changes belong to their respective outside-Core owners.
   Hidden/fixed-size parity is not general interactive invalidation evidence.
+- Retain compiled UI geometry/textures and backing resources. Update only
+  correctly invalidated content, preserving viewport/DPI/fonts/icons/style/
+  text/visibility changes, clipping, transforms, alpha and composition order.
+  Test F3/selection/toasts/save/load, resize/DPI and texture lifetime. Rendering
+  UI every frame must not entail creating/rebuilding all CPU/GPU resources.
 
 ## 8. Test-driven implementation and rewrite workflow
 
