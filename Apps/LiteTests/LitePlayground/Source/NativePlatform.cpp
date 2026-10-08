@@ -1,4 +1,5 @@
 #include "NativePlatform.h"
+#include "UiCss.h"
 #include <wincodec.h>
 #include <wrl/client.h>
 #include <commdlg.h>
@@ -82,6 +83,20 @@ namespace LitePlayground
                     return "ArrowUp";
                 case VK_DOWN:
                     return "ArrowDown";
+                case VK_LEFT:
+                    return "ArrowLeft";
+                case VK_RIGHT:
+                    return "ArrowRight";
+                case VK_BACK:
+                    return "Backspace";
+                case VK_RETURN:
+                    return "Enter";
+                case VK_DELETE:
+                    return "Delete";
+                case VK_HOME:
+                    return "Home";
+                case VK_END:
+                    return "End";
                 default:
                     return "";
             }
@@ -121,6 +136,9 @@ namespace LitePlayground
             bool shift{};
             bool control{};
             bool repeat{};
+            int x{};
+            int y{};
+            std::string text;
         };
 
         HWND window{};
@@ -133,6 +151,7 @@ namespace LitePlayground
         bool controlDown{};
         bool shiftDown{};
         uint32_t fileDialogsCompleted{};
+        uint32_t fileSelectionsCompleted{};
         std::wstring dialogTestPath;
         size_t assetFailures{};
         std::filesystem::path assets;
@@ -141,6 +160,16 @@ namespace LitePlayground
         std::vector<uint8_t> hudPixels;
         ComPtr<IWICImagingFactory> imaging;
         bool ownsComInitialization{};
+        bool retainedUi{};
+        bool boundedInput{};
+        bool headless{};
+        bool scriptedInput{};
+        bool eventOverflow{};
+        std::atomic<uint32_t> pendingWidth{};
+        std::atomic<uint32_t> pendingHeight{};
+        std::atomic<uint32_t> pendingDpi{96};
+        std::atomic<bool> viewportDirty{};
+        std::map<uint32_t, UiCss::OpacityTransition> transitions;
 
         static UINT_PTR CALLBACK TestFileDialog(HWND window, UINT message, WPARAM, LPARAM data)
         {
@@ -178,6 +207,11 @@ namespace LitePlayground
         void Push(Event event)
         {
             std::lock_guard lock(eventsMutex);
+            if (events.size() >= 1024)
+            {
+                eventOverflow = true;
+                return;
+            }
             events.push_back(std::move(event));
         }
 
@@ -380,22 +414,37 @@ namespace LitePlayground
         }
     };
 
-    NativePlatform::NativePlatform(HWND window, uint32_t width, uint32_t height)
+    NativePlatform::NativePlatform(HWND window, uint32_t width, uint32_t height, bool retainedUi,
+                                   bool boundedInput, bool headless)
         : m_impl(std::make_unique<Impl>())
     {
         m_impl->window = window;
         m_impl->width = width;
         m_impl->height = height;
-        m_impl->overlay = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, L"STATIC", L"Babylon Lite native DOM HUD",
-            WS_POPUP | (IsWindowVisible(window) ? WS_VISIBLE : 0), 0, 0, static_cast<int>(width), static_cast<int>(height),
-            window, nullptr, GetModuleHandleW(nullptr), nullptr);
+        m_impl->retainedUi = retainedUi;
+        m_impl->boundedInput = boundedInput;
+        m_impl->headless = headless;
+        if (!retainedUi)
+        {
+            m_impl->overlay =
+                CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, L"STATIC",
+                                L"Babylon Lite native DOM HUD",
+                                WS_POPUP | (IsWindowVisible(window) ? WS_VISIBLE : 0), 0, 0,
+                                static_cast<int>(width), static_cast<int>(height), window, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+        }
     }
 
     NativePlatform::~NativePlatform()
     {
-        ClipCursor(nullptr);
+        if (!m_impl->boundedInput && !m_impl->headless && m_impl->locked)
+        {
+            ClipCursor(nullptr);
+        }
         if (m_impl->overlay)
+        {
             DestroyWindow(m_impl->overlay);
+        }
     }
 
     void NativePlatform::Initialize(Napi::Env env, const std::filesystem::path& assets)
@@ -407,28 +456,119 @@ namespace LitePlayground
             throw Napi::Error::New(env, "Native platform COM initialization failed.");
         }
         m_impl->assets = assets;
-        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_impl->imaging))))
+        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(&m_impl->imaging))))
         {
             throw Napi::Error::New(env, "WIC initialization failed.");
         }
         auto api = Napi::Object::New(env);
         api.Set("width", static_cast<double>(m_impl->width));
         api.Set("height", static_cast<double>(m_impl->height));
+        api.Set("retainedUi", m_impl->retainedUi);
+        for (const bool translate : {false, true})
+        {
+            api.Set(
+                translate ? "translateCss" : "parseCss",
+                Napi::Function::New(
+                    env, [translate](const Napi::CallbackInfo& info) -> Napi::Value {
+                        try
+                        {
+                            const auto text = info[0].As<Napi::String>().Utf8Value();
+                            const auto declarations =
+                                translate ? UiCss::Translate(text) : UiCss::Parse(text);
+                            auto result = Napi::Array::New(info.Env(), declarations.size());
+                            uint32_t index{};
+                            for (const auto& declaration : declarations)
+                            {
+                                auto value = Napi::Object::New(info.Env());
+                                value.Set("name", declaration.name);
+                                value.Set("value", declaration.value);
+                                result.Set(index++, value);
+                            }
+                            return result;
+                        }
+                        catch (const std::exception& error)
+                        {
+                            Napi::Error::New(info.Env(), error.what()).ThrowAsJavaScriptException();
+                            return info.Env().Undefined();
+                        }
+                    }));
+        }
+        api.Set(
+            "systemFonts", Napi::Function::New(env, [](const Napi::CallbackInfo& info) {
+                wchar_t windows[MAX_PATH]{};
+                if (!GetWindowsDirectoryW(windows, MAX_PATH))
+                {
+                    throw Napi::Error::New(info.Env(), "Cannot locate installed system fonts.");
+                }
+                auto result = Napi::Array::New(info.Env(), 5);
+                const std::array<const wchar_t*, 5> files{L"segoeui.ttf", L"seguisb.ttf",
+                                                          L"consola.ttf", L"consolab.ttf",
+                                                          L"seguisym.ttf"};
+                const std::array<const char*, 5> families{"Segoe UI", "Segoe UI", "Consolas",
+                                                          "Consolas", "Segoe UI Symbol"};
+                const std::array<uint32_t, 5> weights{400, 600, 400, 700, 400};
+                for (uint32_t index = 0; index < files.size(); ++index)
+                {
+                    auto record = Napi::Array::New(info.Env(), 4);
+                    record.Set(
+                        uint32_t{0},
+                        Utf8((std::filesystem::path(windows) / L"Fonts" / files[index]).wstring()));
+                    record.Set(uint32_t{1}, families[index]);
+                    record.Set(uint32_t{2}, weights[index]);
+                    record.Set(uint32_t{3}, index == 4);
+                    result.Set(index, record);
+                }
+                return result;
+            }));
+        api.Set("cssOpacity",
+                Napi::Function::New(env, [this](const Napi::CallbackInfo& info) -> Napi::Value {
+                    auto& transition =
+                        m_impl->transitions[info[0].As<Napi::Number>().Uint32Value()];
+                    transition.configuredDuration = info[2].As<Napi::Number>().DoubleValue();
+                    const auto alpha = info[1].As<Napi::Number>().DoubleValue();
+                    if (!std::isfinite(alpha) || !std::isfinite(transition.configuredDuration))
+                    {
+                        throw Napi::RangeError::New(info.Env(), "Invalid CSS opacity or duration.");
+                    }
+                    if (UiCss::SetOpacityTarget(transition, alpha))
+                    {
+                        return Napi::Number::New(info.Env(), transition.value);
+                    }
+                    return info.Env().Null();
+                }));
+        api.Set("cssAdvance", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
+                    auto result = Napi::Array::New(info.Env());
+                    uint32_t index{};
+                    const double seconds = info[0].As<Napi::Number>().DoubleValue();
+                    for (auto& [id, transition] : m_impl->transitions)
+                    {
+                        if (UiCss::AdvanceOpacity(transition, seconds))
+                        {
+                            auto record = Napi::Array::New(info.Env(), 2);
+                            record.Set(uint32_t{0}, id);
+                            record.Set(uint32_t{1}, transition.value);
+                            result.Set(index++, record);
+                        }
+                    }
+                    return result;
+                }));
         api.Set("read", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
-            try
-            {
-                const auto bytes = ReadFile(m_impl->Resolve(info[0].As<Napi::String>().Utf8Value()));
-                auto result = Napi::Uint8Array::New(info.Env(), bytes.size());
-                std::memcpy(result.Data(), bytes.data(), bytes.size());
-                return Napi::Value(result);
-            }
-            catch (const std::exception& error)
-            {
-                ++m_impl->assetFailures;
-                Napi::Error::New(info.Env(), error.what()).ThrowAsJavaScriptException();
-                return info.Env().Undefined();
-            }
-        }));
+                    try
+                    {
+                        const auto bytes =
+                            ReadFile(m_impl->Resolve(info[0].As<Napi::String>().Utf8Value()));
+                        auto result = Napi::Uint8Array::New(info.Env(), bytes.size());
+                        std::memcpy(result.Data(), bytes.data(), bytes.size());
+                        return Napi::Value(result);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        ++m_impl->assetFailures;
+                        Napi::Error::New(info.Env(), error.what()).ThrowAsJavaScriptException();
+                        return info.Env().Undefined();
+                    }
+                }));
         api.Set("decodeImage", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) { return m_impl->Decode(info.Env(), info[0].As<Napi::Uint8Array>()); }));
         api.Set("encode", Napi::Function::New(env, [](const Napi::CallbackInfo& info) {
             const auto text = info[0].As<Napi::String>().Utf8Value();
@@ -449,73 +589,138 @@ namespace LitePlayground
                 throw Napi::Error::New(info.Env(), "Native save file write failed.");
         }));
         api.Set("pickFile", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
-            const bool save = info[0].As<Napi::Boolean>().Value();
-            const bool wasLocked = m_impl->locked.exchange(false);
-            ClipCursor(nullptr);
-            std::array<wchar_t, 32768> path{};
-            const auto suggested = Wide(info[1].As<Napi::String>().Utf8Value());
-            std::copy(suggested.begin(), suggested.end(), path.begin());
-            if (!m_impl->dialogTestPath.empty())
-            {
-                std::copy(m_impl->dialogTestPath.begin(), m_impl->dialogTestPath.end(), path.begin());
-            }
-            OPENFILENAMEW dialog{};
-            dialog.lStructSize = sizeof(dialog);
-            dialog.hwndOwner = m_impl->window;
-            dialog.lpstrFile = path.data();
-            dialog.nMaxFile = static_cast<DWORD>(path.size());
-            dialog.lpstrFilter = L"Voxel world JSON\0*.json\0All files\0*.*\0";
-            dialog.lpstrDefExt = L"json";
-            dialog.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-            if (!m_impl->dialogTestPath.empty())
-            {
-                dialog.Flags |= OFN_ENABLEHOOK;
-                dialog.lpfnHook = Impl::TestFileDialog;
-                dialog.lCustData = reinterpret_cast<LPARAM>(m_impl.get());
-            }
-            const bool selected = save ? GetSaveFileNameW(&dialog) != FALSE : GetOpenFileNameW(&dialog) != FALSE;
-            if (selected)
-            {
-                ++m_impl->fileDialogsCompleted;
-            }
-            if (wasLocked)
-            {
-                RECT rectangle{};
-                GetClientRect(m_impl->window, &rectangle);
-                MapWindowPoints(m_impl->window, nullptr, reinterpret_cast<POINT*>(&rectangle), 2);
-                ClipCursor(&rectangle);
-                m_impl->locked = true;
-            }
-            return Napi::String::New(info.Env(), selected ? Utf8(path.data()) : "");
-        }));
+                    const bool save = info[0].As<Napi::Boolean>().Value();
+                    if (m_impl->headless)
+                    {
+                        if (m_impl->dialogTestPath.empty())
+                        {
+                            throw Napi::Error::New(info.Env(), "Headless file picking requires an explicit scripted test path.");
+                        }
+                        ++m_impl->fileSelectionsCompleted;
+                        return Napi::String::New(info.Env(), Utf8(m_impl->dialogTestPath));
+                    }
+                    const bool wasLocked = m_impl->locked.exchange(false);
+                    if (!m_impl->boundedInput && !m_impl->headless && wasLocked)
+                    {
+                        ClipCursor(nullptr);
+                    }
+                    std::array<wchar_t, 32768> path{};
+                    const auto suggested = Wide(info[1].As<Napi::String>().Utf8Value());
+                    std::copy(suggested.begin(), suggested.end(), path.begin());
+                    if (!m_impl->dialogTestPath.empty())
+                    {
+                        std::copy(m_impl->dialogTestPath.begin(), m_impl->dialogTestPath.end(),
+                                  path.begin());
+                    }
+                    OPENFILENAMEW dialog{};
+                    dialog.lStructSize = sizeof(dialog);
+                    dialog.hwndOwner = m_impl->window;
+                    dialog.lpstrFile = path.data();
+                    dialog.nMaxFile = static_cast<DWORD>(path.size());
+                    dialog.lpstrFilter = L"Voxel world JSON\0*.json\0All files\0*.*\0";
+                    dialog.lpstrDefExt = L"json";
+                    dialog.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR |
+                                   (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+                    if (!m_impl->dialogTestPath.empty())
+                    {
+                        dialog.Flags |= OFN_ENABLEHOOK;
+                        dialog.lpfnHook = Impl::TestFileDialog;
+                        dialog.lCustData = reinterpret_cast<LPARAM>(m_impl.get());
+                    }
+                    const bool selected = save ? GetSaveFileNameW(&dialog) != FALSE
+                                               : GetOpenFileNameW(&dialog) != FALSE;
+                    if (selected)
+                    {
+                        ++m_impl->fileDialogsCompleted;
+                        ++m_impl->fileSelectionsCompleted;
+                    }
+                    if (wasLocked)
+                    {
+                        if (!m_impl->boundedInput && !m_impl->headless)
+                        {
+                            RECT rectangle{};
+                            GetClientRect(m_impl->window, &rectangle);
+                            MapWindowPoints(m_impl->window, nullptr,
+                                            reinterpret_cast<POINT*>(&rectangle), 2);
+                            ClipCursor(&rectangle);
+                        }
+                        m_impl->locked = true;
+                    }
+                    return Napi::String::New(info.Env(), selected ? Utf8(path.data()) : "");
+                }));
         api.Set("pointerLock", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
-            m_impl->locked = info[0].As<Napi::Boolean>().Value();
-            if (m_impl->locked)
-            {
-                RECT rectangle{};
-                GetClientRect(m_impl->window, &rectangle);
-                MapWindowPoints(m_impl->window, nullptr, reinterpret_cast<POINT*>(&rectangle), 2);
-                ClipCursor(&rectangle);
-                RAWINPUTDEVICE device{0x01, 0x02, RIDEV_INPUTSINK, m_impl->window};
-                RegisterRawInputDevices(&device, 1, sizeof(device));
-                while (ShowCursor(FALSE) >= 0)
-                {
-                }
-            }
-            else
-            {
-                ClipCursor(nullptr);
-                while (ShowCursor(TRUE) < 0)
-                {
-                }
-            }
-        }));
-        api.Set("hud", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) { m_impl->Paint(info[0].As<Napi::Array>()); }));
+                    m_impl->locked = info[0].As<Napi::Boolean>().Value();
+                    if (m_impl->boundedInput || m_impl->headless)
+                    {
+                        return;
+                    }
+                    if (m_impl->locked)
+                    {
+                        RECT rectangle{};
+                        GetClientRect(m_impl->window, &rectangle);
+                        MapWindowPoints(m_impl->window, nullptr,
+                                        reinterpret_cast<POINT*>(&rectangle), 2);
+                        ClipCursor(&rectangle);
+                        RAWINPUTDEVICE device{0x01, 0x02, RIDEV_INPUTSINK, m_impl->window};
+                        RegisterRawInputDevices(&device, 1, sizeof(device));
+                        while (ShowCursor(FALSE) >= 0)
+                        {
+                        }
+                    }
+                    else
+                    {
+                        ClipCursor(nullptr);
+                        while (ShowCursor(TRUE) < 0)
+                        {
+                        }
+                    }
+                }));
+        api.Set("hud", Napi::Function::New(env, [this](const Napi::CallbackInfo& info) {
+                    if (m_impl->retainedUi)
+                    {
+                        throw Napi::Error::New(info.Env(),
+                                               "GDI HUD is forbidden in retained-UI mode.");
+                    }
+                    m_impl->Paint(info[0].As<Napi::Array>());
+                }));
         env.Global().Set("_litePlatform", api);
     }
 
     bool NativePlatform::Message(UINT message, WPARAM wParam, LPARAM lParam)
     {
+        if (message == WM_SIZE || message == WM_DPICHANGED)
+        {
+            if (m_impl->boundedInput && !m_impl->scriptedInput)
+            {
+                return false;
+            }
+            if (message == WM_SIZE && wParam != SIZE_MINIMIZED && LOWORD(lParam) && HIWORD(lParam))
+            {
+                m_impl->pendingWidth = LOWORD(lParam);
+                m_impl->pendingHeight = HIWORD(lParam);
+                m_impl->viewportDirty = true;
+            }
+            else if (message == WM_DPICHANGED)
+            {
+                m_impl->pendingDpi = HIWORD(wParam);
+                m_impl->viewportDirty = true;
+                if (lParam)
+                {
+                    const auto& rectangle = *reinterpret_cast<const RECT*>(lParam);
+                    SetWindowPos(m_impl->window, nullptr, rectangle.left, rectangle.top,
+                                 rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+            }
+        }
+        const bool inputMessage = message == WM_INPUT || message == WM_KEYDOWN || message == WM_KEYUP ||
+            message == WM_CHAR || message == WM_MOUSEMOVE || message == WM_MOUSELEAVE ||
+            message == WM_LBUTTONDOWN || message == WM_LBUTTONUP || message == WM_RBUTTONDOWN ||
+            message == WM_RBUTTONUP || message == WM_MOUSEWHEEL || message == WM_KILLFOCUS;
+        if (inputMessage && m_impl->boundedInput && !m_impl->scriptedInput)
+        {
+            return message != WM_INPUT;
+        }
         if (message == WM_SETCURSOR && m_impl->locked)
         {
             SetCursor(nullptr);
@@ -525,9 +730,7 @@ namespace LitePlayground
         {
             m_impl->Push({"pointerunlock"});
         }
-        if (message == WM_INPUT || message == WM_KEYDOWN || message == WM_KEYUP ||
-            message == WM_LBUTTONDOWN || message == WM_LBUTTONUP || message == WM_RBUTTONDOWN ||
-            message == WM_RBUTTONUP || message == WM_MOUSEWHEEL)
+        if (inputMessage)
         {
             ++m_impl->nativeInputEvents;
         }
@@ -569,8 +772,8 @@ namespace LitePlayground
             event.type = message == WM_KEYDOWN ? "keydown" : "keyup";
             event.key = Key(static_cast<UINT>(wParam));
             event.code = Code(static_cast<UINT>(wParam));
-            event.shift = m_impl->shiftDown || (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-            event.control = m_impl->controlDown || (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            event.shift = m_impl->shiftDown || (!m_impl->boundedInput && (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+            event.control = m_impl->controlDown || (!m_impl->boundedInput && (GetKeyState(VK_CONTROL) & 0x8000) != 0);
             event.repeat = (lParam & (1 << 30)) != 0;
             m_impl->Push(std::move(event));
         }
@@ -579,6 +782,8 @@ namespace LitePlayground
             Impl::Event event;
             event.type = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN ? "mousedown" : "mouseup";
             event.button = message == WM_RBUTTONDOWN || message == WM_RBUTTONUP ? 2 : 0;
+            event.x = GET_X_LPARAM(lParam);
+            event.y = GET_Y_LPARAM(lParam);
             m_impl->Push(event);
             if (message == WM_LBUTTONUP)
             {
@@ -593,6 +798,26 @@ namespace LitePlayground
             event.deltaY = -GET_WHEEL_DELTA_WPARAM(wParam);
             m_impl->Push(std::move(event));
         }
+        if (message == WM_MOUSEMOVE && !m_impl->locked)
+        {
+            Impl::Event event;
+            event.type = "mousemove";
+            event.x = GET_X_LPARAM(lParam);
+            event.y = GET_Y_LPARAM(lParam);
+            m_impl->Push(std::move(event));
+        }
+        if (message == WM_CHAR)
+        {
+            if (wParam < 32 || wParam == 127)
+            {
+                return false;
+            }
+            const wchar_t value[] = {static_cast<wchar_t>(wParam), 0};
+            Impl::Event event;
+            event.type = "text";
+            event.text = Utf8(value);
+            m_impl->Push(std::move(event));
+        }
         return false;
     }
 
@@ -602,6 +827,10 @@ namespace LitePlayground
         {
             std::lock_guard lock(m_impl->eventsMutex);
             events.swap(m_impl->events);
+            if (m_impl->eventOverflow)
+            {
+                throw Napi::Error::New(env, "Native input queue exceeded its 1024-event bound.");
+            }
         }
 
         const auto dispatch = env.Global().Get("_platformDispatch");
@@ -621,6 +850,9 @@ namespace LitePlayground
             data.Set("shiftKey", event.shift);
             data.Set("metaKey", false);
             data.Set("repeat", event.repeat);
+            data.Set("clientX", event.x);
+            data.Set("clientY", event.y);
+            data.Set("text", event.text);
             dispatch.As<Napi::Function>().Call({data});
         }
     }
@@ -630,9 +862,12 @@ namespace LitePlayground
         m_impl->imaging.Reset();
         if (m_impl->locked.exchange(false))
         {
+            if (!m_impl->boundedInput && !m_impl->headless)
+            {
             ClipCursor(nullptr);
             while (ShowCursor(TRUE) < 0)
             {
+            }
             }
         }
         if (m_impl->ownsComInitialization)
@@ -645,13 +880,21 @@ namespace LitePlayground
     void NativePlatform::Replay(Napi::Env env, uint32_t frame)
     {
         if (frame == 1)
+        {
             m_impl->Push({"click"});
+        }
         if (frame == 2)
+        {
             m_impl->Push({"keydown", "F3", "F3"});
+        }
         if (frame == 3)
+        {
             m_impl->Push({"keydown", "w", "KeyW"});
+        }
         if (frame == 80)
+        {
             m_impl->Push({"keyup", "w", "KeyW"});
+        }
         if (frame >= 30 && frame < 60)
         {
             Impl::Event event;
@@ -660,21 +903,28 @@ namespace LitePlayground
             m_impl->Push(event);
         }
         if (frame == 90)
+        {
             m_impl->Push({"mousedown", "", "", 0});
+        }
         if (frame == 120)
+        {
             m_impl->Push({"keydown", "2", "Digit2"});
+        }
         if (frame == 150)
+        {
             m_impl->Push({"mousedown", "", "", 2});
+        }
         DispatchEvents(env);
     }
 
     void NativePlatform::QueueWindowReplay(uint32_t frame)
     {
-        const auto key = [&](UINT code, bool down) { PostMessageW(m_impl->window, down ? WM_KEYDOWN : WM_KEYUP, code, 0); };
+        m_impl->scriptedInput = true;
+        const auto key = [&](UINT code, bool down) { SendMessageW(m_impl->window, down ? WM_KEYDOWN : WM_KEYUP, code, 0); };
         if (frame == 1)
         {
-            PostMessageW(m_impl->window, WM_LBUTTONDOWN, 0, MAKELPARAM(640, 360));
-            PostMessageW(m_impl->window, WM_LBUTTONUP, 0, MAKELPARAM(640, 360));
+            SendMessageW(m_impl->window, WM_LBUTTONDOWN, 0, MAKELPARAM(640, 360));
+            SendMessageW(m_impl->window, WM_LBUTTONUP, 0, MAKELPARAM(640, 360));
         }
         if (frame == 2)
             key(VK_F3, true);
@@ -691,17 +941,17 @@ namespace LitePlayground
         if (frame == 80)
             key('W', false);
         if (frame == 90)
-            PostMessageW(m_impl->window, WM_LBUTTONDOWN, 0, MAKELPARAM(640, 360));
+            SendMessageW(m_impl->window, WM_LBUTTONDOWN, 0, MAKELPARAM(640, 360));
         if (frame == 91)
-            PostMessageW(m_impl->window, WM_LBUTTONUP, 0, MAKELPARAM(640, 360));
+            SendMessageW(m_impl->window, WM_LBUTTONUP, 0, MAKELPARAM(640, 360));
         if (frame == 120)
             key('2', true);
         if (frame == 150)
-            PostMessageW(m_impl->window, WM_RBUTTONDOWN, 0, MAKELPARAM(640, 360));
+            SendMessageW(m_impl->window, WM_RBUTTONDOWN, 0, MAKELPARAM(640, 360));
         if (frame == 151)
-            PostMessageW(m_impl->window, WM_RBUTTONUP, 0, MAKELPARAM(640, 360));
+            SendMessageW(m_impl->window, WM_RBUTTONUP, 0, MAKELPARAM(640, 360));
         if (frame == 165)
-            PostMessageW(m_impl->window, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
+            SendMessageW(m_impl->window, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0);
         if (!m_impl->dialogTestPath.empty() && (frame == 185 || frame == 215))
         {
             key(VK_CONTROL, true);
@@ -709,6 +959,7 @@ namespace LitePlayground
             key(frame == 185 ? 'S' : 'O', false);
             key(VK_CONTROL, false);
         }
+        m_impl->scriptedInput = false;
     }
 
     void NativePlatform::ConfigureFileDialogTest(const std::filesystem::path& path)
@@ -716,10 +967,48 @@ namespace LitePlayground
         m_impl->dialogTestPath = std::filesystem::absolute(path).wstring();
     }
 
+    void NativePlatform::QueueUiValidation(uint32_t frame)
+    {
+        if (frame != 100 && frame != 160)
+        {
+            return;
+        }
+        m_impl->scriptedInput = true;
+        const uint32_t dpi = frame == 100 ? 120 : 96;
+        const uint32_t width = frame == 100 ? 1024 : 1280;
+        const uint32_t height = frame == 100 ? 576 : 720;
+        RECT bounds{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
+        AdjustWindowRect(&bounds, static_cast<DWORD>(GetWindowLongPtrW(m_impl->window, GWL_STYLE)), FALSE);
+        SetWindowPos(m_impl->window, nullptr, 0, 0, bounds.right - bounds.left,
+                     bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        SendMessageW(m_impl->window, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), 0);
+        m_impl->scriptedInput = false;
+    }
+
+    NativeViewport NativePlatform::TakeViewport()
+    {
+        NativeViewport viewport{};
+        viewport.changed = m_impl->viewportDirty.exchange(false);
+        if (viewport.changed)
+        {
+            RECT client{};
+            GetClientRect(m_impl->window, &client);
+            viewport.width = static_cast<uint32_t>(client.right);
+            viewport.height = static_cast<uint32_t>(client.bottom);
+            viewport.density = m_impl->pendingDpi / 96.0;
+        }
+        return viewport;
+    }
+
     bool NativePlatform::Closed() const { return m_impl->closed; }
     size_t NativePlatform::AssetFailures() const { return m_impl->assetFailures; }
     uint64_t NativePlatform::NativeInputEvents() const { return m_impl->nativeInputEvents; }
     uint32_t NativePlatform::FileDialogsCompleted() const { return m_impl->fileDialogsCompleted; }
+
+    uint32_t NativePlatform::FileSelectionsCompleted() const
+    {
+        return m_impl->fileSelectionsCompleted;
+    }
 
     bool NativePlatform::CaptureHUD(const std::filesystem::path& path) const
     {

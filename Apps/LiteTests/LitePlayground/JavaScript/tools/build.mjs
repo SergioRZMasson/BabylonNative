@@ -9,7 +9,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "..", "..", "..", "..");
 const adapter = path.join(repo, "Plugins", "LiteJSBinding", "JavaScript");
 const demos = path.join(root, "Demos");
-const output = path.join(root, "dist");
+const outputArgument = process.argv.find(value => value.startsWith("--output="));
+const output = outputArgument ? path.resolve(outputArgument.slice(9)) : path.join(root, "dist");
 await mkdir(output, { recursive: true });
 
 const nativePlugin = {
@@ -61,6 +62,7 @@ const entries = [
     ["contract-tests.native", path.join(root, "Tests", "contract-tests.ts")],
     ["minecraft-shaders.native", path.join(root, "Tests", "minecraft-shaders.ts")],
     ["callback-throw.native", path.join(root, "Tests", "callback-throw.ts")],
+    ["ui-contract.native", path.join(root, "Tests", "ui-contract.ts")],
     ["platform.native", path.join(root, "Platform", "platform.js")],
 ];
 const bundles = {};

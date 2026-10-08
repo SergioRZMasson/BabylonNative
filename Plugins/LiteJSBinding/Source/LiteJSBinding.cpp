@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <deque>
 #include <functional>
@@ -28,7 +29,9 @@ namespace Babylon::Plugins::LiteJSBinding
             Material,
             Texture,
             AudioEngine,
-            SoundSource
+            SoundSource,
+            UiContext,
+            UiElement
         };
 
         struct Token
@@ -36,9 +39,11 @@ namespace Babylon::Plugins::LiteJSBinding
             Kind kind;
             bl_SceneNode identity;
             bl_SceneNode nodeIdentity{};
+            uint64_t uiContextId{};
         };
 
         struct State;
+        void SurfaceCallback(State& state, Napi::Env env);
 
         struct BeforeCallback
         {
@@ -46,6 +51,7 @@ namespace Babylon::Plugins::LiteJSBinding
             Napi::FunctionReference function;
             bl_SceneContext scene;
             bl_CallbackToken token{};
+            bool disposeCallback{};
         };
 
         struct StartCallback
@@ -55,6 +61,22 @@ namespace Babylon::Plugins::LiteJSBinding
             bool completed{};
             bool settled{};
             bl_Status status{BL_NOT_READY};
+        };
+
+        struct UiCallback
+        {
+            State* owner{};
+            Napi::FunctionReference function;
+            bl_UiElement element{};
+            bl_UiListenerToken token{};
+            bool removed{};
+            uint64_t identity{};
+            uint64_t contextId{};
+        };
+
+        struct UiListenerIdentity
+        {
+            uint64_t identity{};
         };
 
         struct State
@@ -70,18 +92,25 @@ namespace Babylon::Plugins::LiteJSBinding
             std::vector<bl_EngineContext> engines;
             std::vector<std::unique_ptr<BeforeCallback>> callbacks;
             std::vector<std::unique_ptr<StartCallback>> starts;
+            std::vector<bl_UiContext> uiContexts;
+            std::vector<std::unique_ptr<UiCallback>> uiCallbacks;
+            std::unordered_set<const UiListenerIdentity*> knownUiListeners;
+            uint64_t nextUiListener{1};
             std::map<std::pair<uint64_t, std::string>, Napi::Reference<Napi::Float32Array>> uniformViews;
             std::map<uint64_t, std::shared_ptr<AudioBinding>> audioBindings;
             std::map<uint64_t, std::vector<Napi::ObjectReference>> audioSources;
             Napi::Error callbackError;
             bool callbackCaptureFailed{};
+            bool restoringJsException{};
             uint32_t createdTokens{};
             bool inNativeFrame{};
+            uint32_t uiCallDepth{};
+            FrameTimings frameTimings{};
             std::vector<Token> finalized;
 
             void DrainFinalized(Napi::Env env)
             {
-                if (inNativeFrame || disposed || !options.runtime)
+                if (inNativeFrame || uiCallDepth || disposed || !options.runtime)
                 {
                     return;
                 }
@@ -138,6 +167,7 @@ namespace Babylon::Plugins::LiteJSBinding
                         Check(env, status);
                     }
                 }
+                SurfaceCallback(*this, env);
             }
 
             void Prune()
@@ -173,14 +203,16 @@ namespace Babylon::Plugins::LiteJSBinding
                 }
                 bl_Error error{};
                 std::string message = "Babylon Lite status " + std::to_string(status);
-                if (options.runtime && bl_getLastError(options.runtime, &error) == BL_OK && error.message.length)
+                const bool nativeError = options.runtime &&
+                    bl_getLastError(options.runtime, &error) == BL_OK && error.status == status;
+                if (nativeError && error.message.length)
                 {
                     message.append(": ").append(error.message.data, error.message.length);
                 }
                 auto exception = Napi::Error::New(env, message);
                 exception.Set("status", static_cast<double>(status));
-                exception.Set("code", static_cast<double>(error.sourceErrorCode));
-                if (error.operation.length)
+                exception.Set("code", nativeError ? static_cast<double>(error.sourceErrorCode) : 0.0);
+                if (nativeError && error.operation.length)
                 {
                     exception.Set("operation", Napi::String::New(env, error.operation.data, error.operation.length));
                 }
@@ -269,7 +301,8 @@ namespace Babylon::Plugins::LiteJSBinding
                     if (const auto state = owner.lock())
                     {
                         state->knownTokens.erase(value);
-                        if (!state->disposed && state->options.runtime)
+                        if (!state->disposed && state->options.runtime &&
+                            value->kind != Kind::UiContext && value->kind != Kind::UiElement)
                         {
                             try
                             {
@@ -319,23 +352,45 @@ namespace Babylon::Plugins::LiteJSBinding
 
         void Bind(Napi::Object api, const std::shared_ptr<State>& state, const char* name, Function function)
         {
-            api.Set(name, Napi::Function::New(api.Env(), [state, function = std::move(function)](const Napi::CallbackInfo& info) {
+            api.Set(name, Napi::Function::New(api.Env(), [state, name, function = std::move(function)](const Napi::CallbackInfo& info) {
                 try
                 {
                     if (state->disposed)
                     {
-                        throw Napi::Error::New(info.Env(), "Babylon Lite binding has been disposed.");
+                        state->Check(info.Env(), BL_DISPOSED);
                     }
                     state->DrainFinalized(info.Env());
                     return function(*state, info);
                 }
                 catch (const Napi::Error& error)
                 {
+                    if (state->restoringJsException)
+                    {
+                        state->restoringJsException = false;
+                    }
+                    else
+                    {
+                        if (error.Get("operation").IsUndefined())
+                        {
+                            error.Set("operation", name);
+                        }
+                        const auto kind = error.Get("name").As<Napi::String>().Utf8Value();
+                        if (error.Get("status").IsUndefined() &&
+                            (kind == "TypeError" || kind == "RangeError"))
+                        {
+                            error.Set("status", static_cast<double>(BL_INVALID_ARGUMENT));
+                            error.Set("code", 0.0);
+                        }
+                    }
                     error.ThrowAsJavaScriptException();
                 }
                 catch (const std::exception& error)
                 {
-                    Napi::Error::New(info.Env(), error.what()).ThrowAsJavaScriptException();
+                    auto exception = Napi::Error::New(info.Env(), error.what());
+                    exception.Set("operation", name);
+                    exception.Set("status", static_cast<double>(BL_HOST_ERROR));
+                    exception.Set("code", 0.0);
+                    exception.ThrowAsJavaScriptException();
                 }
                 return info.Env().Undefined(); }, name));
         }
@@ -687,11 +742,19 @@ namespace Babylon::Plugins::LiteJSBinding
             {
                 return;
             }
+            const auto begin = std::chrono::steady_clock::now();
             try
             {
                 try
                 {
-                    callback.function.Call({Napi::Number::New(callback.function.Env(), deltaMs)});
+                    if (callback.disposeCallback)
+                    {
+                        callback.function.Call({});
+                    }
+                    else
+                    {
+                        callback.function.Call({Napi::Number::New(callback.function.Env(), deltaMs)});
+                    }
                     if (callback.function.Env().IsExceptionPending())
                     {
                         state.callbackError = callback.function.Env().GetAndClearPendingException();
@@ -712,6 +775,8 @@ namespace Babylon::Plugins::LiteJSBinding
             {
                 state.callbackCaptureFailed = true;
             }
+            state.frameTimings.userCallbacksMs += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - begin).count();
         }
 
         void FirstFrame(void* userData, bl_Status status) noexcept
@@ -719,6 +784,728 @@ namespace Babylon::Plugins::LiteJSBinding
             auto& callback = *static_cast<StartCallback*>(userData);
             callback.completed = true;
             callback.status = status;
+        }
+
+        void SceneDisposed(void* userData) noexcept
+        {
+            BeforeRender(userData, 0);
+        }
+
+        void UiEvent(void* userData, const bl_UiEvent* event) noexcept
+        {
+            auto& callback = *static_cast<UiCallback*>(userData);
+            auto& state = *callback.owner;
+            if (callback.removed || !state.callbackError.IsEmpty() || state.callbackCaptureFailed)
+            {
+                return;
+            }
+            try
+            {
+                try
+                {
+                    auto env = callback.function.Env();
+                    auto value = Napi::Object::New(env);
+                    value.Set("kind", static_cast<double>(event->kind));
+                    const auto currentTarget = state.Wrap(env, event->currentTarget, Kind::UiElement);
+                    state.Get(currentTarget).uiContextId = callback.contextId;
+                    value.Set("currentTarget", currentTarget);
+                    const auto target = state.Wrap(env, event->target, Kind::UiElement);
+                    if (!target.IsNull())
+                    {
+                        state.Get(target).uiContextId = callback.contextId;
+                    }
+                    value.Set("target", target);
+                    value.Set("x", event->position.x);
+                    value.Set("y", event->position.y);
+                    value.Set("button", event->button);
+                    value.Set("key", static_cast<double>(event->key));
+                    value.Set("modifiers", event->modifiers);
+                    value.Set("value",
+                              Napi::String::New(env, event->value.data ? event->value.data : "",
+                                                event->value.length));
+                    callback.function.Call({value});
+                    if (env.IsExceptionPending())
+                    {
+                        state.callbackError = env.GetAndClearPendingException();
+                    }
+                }
+                catch (const Napi::Error& error)
+                {
+                    auto env = callback.function.Env();
+                    state.callbackError =
+                        env.IsExceptionPending() ? env.GetAndClearPendingException() : error;
+                }
+                catch (const std::exception& error)
+                {
+                    state.callbackError = Napi::Error::New(callback.function.Env(), error.what());
+                }
+            }
+            catch (...)
+            {
+                state.callbackCaptureFailed = true;
+            }
+        }
+
+        void SurfaceCallback(State& state, Napi::Env env)
+        {
+            if (!state.callbackError.IsEmpty())
+            {
+                auto error = std::move(state.callbackError);
+                state.callbackError = {};
+                state.restoringJsException = true;
+                throw error;
+            }
+            if (state.callbackCaptureFailed)
+            {
+                state.callbackCaptureFailed = false;
+                throw Napi::Error::New(env, "Failed to retain a JavaScript callback exception.");
+            }
+        }
+
+        void SettleStarts(State& state, Napi::Env env)
+        {
+            if (state.inNativeFrame || state.uiCallDepth)
+            {
+                return;
+            }
+            for (auto& callback : state.starts)
+            {
+                if (!callback->completed || callback->settled)
+                {
+                    continue;
+                }
+                callback->settled = true;
+                if (!state.callbackError.IsEmpty())
+                {
+                    callback->deferred.Reject(state.callbackError.Value());
+                }
+                else if (callback->status == BL_OK && !state.callbackCaptureFailed)
+                {
+                    callback->deferred.Resolve(env.Undefined());
+                }
+                else
+                {
+                    const auto status = state.callbackCaptureFailed ? BL_HOST_ERROR : callback->status;
+                    auto error = Napi::Error::New(env, "Engine first frame failed or was cancelled.");
+                    error.Set("status", static_cast<double>(status));
+                    error.Set("code", 0.0);
+                    error.Set("operation", "startEngine");
+                    callback->deferred.Reject(error.Value());
+                }
+            }
+            std::erase_if(state.starts, [](const auto& callback) { return callback->settled; });
+        }
+
+        uint32_t UiUint(Napi::Value value)
+        {
+            if (!value.IsNumber())
+            {
+                throw Napi::TypeError::New(value.Env(), "UI count must be an unsigned integer.");
+            }
+            const double number = value.As<Napi::Number>().DoubleValue();
+            if (!std::isfinite(number) || number < 0 || number > UINT32_MAX ||
+                std::floor(number) != number)
+            {
+                throw Napi::RangeError::New(value.Env(), "UI count is outside the uint32 range.");
+            }
+            return static_cast<uint32_t>(number);
+        }
+
+        bl_Bytes UiBytes(Napi::Value value)
+        {
+            if (!value.IsTypedArray() ||
+                (value.As<Napi::TypedArray>().TypedArrayType() != napi_uint8_array &&
+                 value.As<Napi::TypedArray>().TypedArrayType() != napi_uint8_clamped_array))
+            {
+                throw Napi::TypeError::New(value.Env(),
+                                           "UI bytes require a Uint8Array or Uint8ClampedArray.");
+            }
+            auto array = value.As<Napi::Uint8Array>();
+            return {array.Data(), array.ByteLength()};
+        }
+
+        void BindUi(Napi::Object api, const std::shared_ptr<State>& state)
+        {
+            Bind(api, state, "createUiContext",
+                 [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                     const auto source = i[1].As<Napi::Object>();
+                     bl_UiContextOptions options{};
+                     options.target = s.options.nativeEngine.target;
+                     const auto first = UiUint(source.Get("firstViewId"));
+                     const auto count = UiUint(source.Get("viewCount"));
+                     if (first > UINT16_MAX || count > UINT16_MAX)
+                     {
+                         throw Napi::RangeError::New(i.Env(), "UI view range exceeds uint16.");
+                     }
+                     options.target.firstViewId = static_cast<uint16_t>(first);
+                     options.target.viewCount = static_cast<uint16_t>(count);
+                     options.densityRatio =
+                         source.Get("densityRatio").As<Napi::Number>().DoubleValue();
+                     bl_UiContext context{};
+                     s.Check(i.Env(),
+                             bl_createUiContext(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine),
+                                                &options, &context));
+                     s.uiContexts.push_back(context);
+                     return s.Wrap(i.Env(), context, Kind::UiContext);
+                 });
+            Bind(api, state, "disposeUiContext", [](State& s, const Napi::CallbackInfo& i) {
+                const auto context = s.HandleOf<bl_UiContext>(i[0], Kind::UiContext);
+                s.Check(i.Env(), bl_disposeUiContext(context));
+                std::erase_if(s.uiCallbacks, [context](const auto& callback) {
+                    return callback->contextId == context._id;
+                });
+                std::erase_if(s.uiContexts,
+                              [context](const auto& value) { return value._id == context._id; });
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiViewport", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_setUiViewport(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext),
+                                                  UiUint(i[1]), UiUint(i[2]),
+                                                  i[3].As<Napi::Number>().DoubleValue()));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getUiRoot", [](State& s, const Napi::CallbackInfo& i) {
+                bl_UiElement element{};
+                const auto context = s.HandleOf<bl_UiContext>(i[0], Kind::UiContext);
+                s.Check(i.Env(), bl_getUiRoot(context, &element));
+                const auto result = s.Wrap(i.Env(), element, Kind::UiElement);
+                s.Get(result).uiContextId = context._id;
+                return result;
+            });
+            Bind(api, state, "createUiElement", [](State& s, const Napi::CallbackInfo& i) {
+                bl_UiElement element{};
+                const auto tag = i[1].As<Napi::String>().Utf8Value();
+                const auto context = s.HandleOf<bl_UiContext>(i[0], Kind::UiContext);
+                s.Check(i.Env(), bl_createUiElement(context, String(tag), &element));
+                const auto result = s.Wrap(i.Env(), element, Kind::UiElement);
+                s.Get(result).uiContextId = context._id;
+                return result;
+            });
+            Bind(api, state, "appendUiChild", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_appendUiChild(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                                  s.HandleOf<bl_UiElement>(i[1], Kind::UiElement)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "removeUiChild", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_removeUiChild(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                                  s.HandleOf<bl_UiElement>(i[1], Kind::UiElement)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "disposeUiElement", [](State& s, const Napi::CallbackInfo& i) {
+                const auto element = s.HandleOf<bl_UiElement>(i[0], Kind::UiElement);
+                s.Check(i.Env(), bl_disposeUiElement(element));
+                std::erase_if(s.uiCallbacks, [element](const auto& callback) {
+                    return callback->element._id == element._id;
+                });
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiProperty", [](State& s, const Napi::CallbackInfo& i) {
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                const auto value = i[2].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(), bl_setUiProperty(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                                  String(name), String(value)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "removeUiProperty", [](State& s, const Napi::CallbackInfo& i) {
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(),
+                        bl_removeUiProperty(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                            String(name)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiAttribute", [](State& s, const Napi::CallbackInfo& i) {
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                const auto value = i[2].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(), bl_setUiAttribute(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                                   String(name), String(value)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiText", [](State& s, const Napi::CallbackInfo& i) {
+                const auto text = i[1].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(), bl_setUiText(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                              String(text)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiMarkup", [](State& s, const Napi::CallbackInfo& i) {
+                const auto text = i[1].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(), bl_setUiMarkup(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                                String(text)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "loadUiFont", [](State& s, const Napi::CallbackInfo& i) {
+                const auto family = i[2].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(), bl_loadUiFont(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext),
+                                               UiBytes(i[1]), String(family), UiUint(i[3]),
+                                               i[4].As<Napi::Boolean>().Value(),
+                                               i[5].As<Napi::Boolean>().Value()));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "registerUiImage", [](State& s, const Napi::CallbackInfo& i) {
+                const auto source = i[1].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(), bl_registerUiImage(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext),
+                                                    String(source), UiBytes(i[2]), UiUint(i[3]),
+                                                    UiUint(i[4])));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "unregisterUiImage", [](State& s, const Napi::CallbackInfo& i) {
+                const auto source = i[1].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(),
+                        bl_unregisterUiImage(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext),
+                                             String(source)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiImageSampling", [](State& s, const Napi::CallbackInfo& i) {
+                const auto source = i[1].As<Napi::String>().Utf8Value();
+                s.Check(i.Env(),
+                        bl_setUiImageSampling(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext),
+                                              String(source), i[2].As<Napi::Boolean>().Value()));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setUiWhiteDifference", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(),
+                        bl_setUiWhiteDifference(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext),
+                                                i[1].As<Napi::Boolean>().Value()));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "updateUi", [](State& s, const Napi::CallbackInfo& i) {
+                const auto context = s.HandleOf<bl_UiContext>(i[0], Kind::UiContext);
+                const auto seconds = i[1].As<Napi::Number>().DoubleValue();
+                ++s.uiCallDepth;
+                const auto status = bl_updateUi(context, seconds);
+                --s.uiCallDepth;
+                SettleStarts(s, i.Env());
+                SurfaceCallback(s, i.Env());
+                s.Check(i.Env(), status);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "renderUi", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_renderUi(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getUiStats", [](State& s, const Napi::CallbackInfo& i) {
+                bl_UiStats stats{};
+                s.Check(i.Env(),
+                        bl_getUiStats(s.HandleOf<bl_UiContext>(i[0], Kind::UiContext), &stats));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("geometryCompileCount", static_cast<double>(stats.geometryCompileCount));
+                result.Set("geometryReleaseCount", static_cast<double>(stats.geometryReleaseCount));
+                result.Set("textureCreateCount", static_cast<double>(stats.textureCreateCount));
+                result.Set("textureReleaseCount", static_cast<double>(stats.textureReleaseCount));
+                result.Set("drawCount", static_cast<double>(stats.drawCount));
+                result.Set("uploadedBytes", static_cast<double>(stats.uploadedBytes));
+                result.Set("liveGeometryCount", static_cast<double>(stats.liveGeometryCount));
+                result.Set("liveTextureCount", static_cast<double>(stats.liveTextureCount));
+                result.Set("liveElementCount", static_cast<double>(stats.liveElementCount));
+                return result;
+            });
+            Bind(api, state, "processUiInput", [](State& s, const Napi::CallbackInfo& i) {
+                const auto source = i[1].As<Napi::Object>();
+                bl_UiInput input{};
+                input.kind = static_cast<bl_UiInputKind>(UiUint(source.Get("kind")));
+                input.x = source.Get("x").As<Napi::Number>().DoubleValue();
+                input.y = source.Get("y").As<Napi::Number>().DoubleValue();
+                input.button = UiUint(source.Get("button"));
+                input.key = static_cast<bl_UiKey>(UiUint(source.Get("key")));
+                input.modifiers = UiUint(source.Get("modifiers"));
+                const auto text = source.Get("text").As<Napi::String>().Utf8Value();
+                input.text = String(text);
+                bool consumed{};
+                const auto context = s.HandleOf<bl_UiContext>(i[0], Kind::UiContext);
+                ++s.uiCallDepth;
+                const auto status = bl_processUiInput(context, &input, &consumed);
+                --s.uiCallDepth;
+                SettleStarts(s, i.Env());
+                SurfaceCallback(s, i.Env());
+                s.Check(i.Env(), status);
+                return Napi::Boolean::New(i.Env(), consumed);
+            });
+            Bind(api, state, "addUiEventListener", [](State& s, const Napi::CallbackInfo& i) {
+                if (s.uiCallbacks.size() >= 4096 || !s.nextUiListener)
+                {
+                    throw Napi::RangeError::New(i.Env(),
+                                                "UI active listener budget (4096) exceeded.");
+                }
+                auto callback = std::make_unique<UiCallback>();
+                callback->owner = &s;
+                callback->element = s.HandleOf<bl_UiElement>(i[0], Kind::UiElement);
+                callback->contextId = s.Get(i[0]).uiContextId;
+                callback->identity = s.nextUiListener++;
+                callback->function = Napi::Persistent(i[2].As<Napi::Function>());
+                auto* pointer = callback.get();
+                s.uiCallbacks.push_back(std::move(callback));
+                const auto status = bl_addUiEventListener(pointer->element,
+                                                          static_cast<bl_UiEventKind>(UiUint(i[1])),
+                                                          UiEvent, pointer, &pointer->token);
+                if (status != BL_OK)
+                {
+                    s.uiCallbacks.pop_back();
+                    s.Check(i.Env(), status);
+                }
+                auto result = Napi::Object::New(i.Env());
+                auto identity = std::make_unique<UiListenerIdentity>();
+                identity->identity = pointer->identity;
+                const auto owner = s.self;
+                auto external = Napi::External<UiListenerIdentity>::New(
+                    i.Env(), identity.get(), [owner](Napi::Env, UiListenerIdentity* value) {
+                        if (const auto state = owner.lock())
+                        {
+                            state->knownUiListeners.erase(value);
+                        }
+                        delete value;
+                    });
+                s.knownUiListeners.insert(identity.release());
+                result.Set("_listener", external);
+                return result;
+            });
+            Bind(api, state, "removeUiEventListener", [](State& s, const Napi::CallbackInfo& i) {
+                const auto field = i[1].As<Napi::Object>().Get("_listener");
+                if (!field.IsExternal())
+                {
+                    throw Napi::TypeError::New(i.Env(), "Expected a UI listener token.");
+                }
+                auto* identity = field.As<Napi::External<UiListenerIdentity>>().Data();
+                if (!s.knownUiListeners.contains(identity))
+                {
+                    throw Napi::TypeError::New(i.Env(),
+                                               "UI listener token belongs to another binding.");
+                }
+                const auto found = std::find_if(s.uiCallbacks.begin(), s.uiCallbacks.end(),
+                                                [identity](const auto& entry) {
+                                                    return entry->identity == identity->identity;
+                                                });
+                if (found == s.uiCallbacks.end())
+                {
+                    throw Napi::TypeError::New(i.Env(), "Unknown or removed UI listener token.");
+                }
+                auto* callback = found->get();
+                s.Check(i.Env(),
+                        bl_removeUiEventListener(s.HandleOf<bl_UiElement>(i[0], Kind::UiElement),
+                                                 callback->token));
+                s.uiCallbacks.erase(found);
+                return i.Env().Undefined();
+            });
+        }
+
+        bl_MeshGeometry MeshGeometry(Napi::Value value)
+        {
+            const auto source = value.As<Napi::Object>();
+            return {F32(source.Get("positions")), F32(source.Get("normals")),
+                    U32(source.Get("indices")),   F32(source.Get("uvs")),
+                    F32(source.Get("uvs2")),      F32(source.Get("tangents")),
+                    F32(source.Get("colors"))};
+        }
+
+        bl_RampOptions Ramp(Napi::Value value)
+        {
+            const auto source = Options(value);
+            bl_RampOptions options{};
+            options.duration = Optional(source, "duration");
+            if (source.Has("shape"))
+            {
+                const std::map<std::string, bl_AudioRampShape> shapes{
+                    {"linear", BL_AUDIO_RAMP_LINEAR},
+                    {"none", BL_AUDIO_RAMP_NONE},
+                    {"exponential", BL_AUDIO_RAMP_EXPONENTIAL},
+                    {"logarithmic", BL_AUDIO_RAMP_LOGARITHMIC}};
+                options.shape = shapes.at(source.Get("shape").As<Napi::String>().Utf8Value());
+            }
+            return options;
+        }
+
+        Napi::Object SceneCallbackIdentity(Napi::Env env, Napi::Value scene, bl_CallbackToken token)
+        {
+            auto result = Napi::Object::New(env);
+            result.Set("_scene", scene);
+            result.Set("_callback", std::to_string(token.value));
+            return result;
+        }
+
+        void BindExtras(Napi::Object api, const std::shared_ptr<State>& state)
+        {
+            Bind(api, state, "createSphere", [](State& s, const Napi::CallbackInfo& i) {
+                const auto options = SphereOptions(i[1]);
+                bl_Mesh mesh{};
+                s.Check(i.Env(), bl_createSphere(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine),
+                                                 &options, &mesh));
+                return s.Wrap(i.Env(), mesh, Kind::Mesh);
+            });
+            Bind(api, state, "getNodeRotationQuaternion",
+                 [](State& s, const Napi::CallbackInfo& i) {
+                     bl_Quat value{};
+                     s.Check(i.Env(), bl_getNodeRotationQuaternion(s.NodeOf(i[0]), &value));
+                     auto result = Vector(i.Env(), {value.x, value.y, value.z});
+                     result.Set("w", value.w);
+                     return result;
+                 });
+            Bind(api, state, "setNodeRotationQuaternion",
+                 [](State& s, const Napi::CallbackInfo& i) {
+                     const auto source = i[1].As<Napi::Object>();
+                     const auto xyz = Vector(source);
+                     s.Check(i.Env(), bl_setNodeRotationQuaternion(
+                                          s.NodeOf(i[0]),
+                                          {xyz.x, xyz.y, xyz.z,
+                                           source.Get("w").As<Napi::Number>().DoubleValue()}));
+                     return i.Env().Undefined();
+                 });
+            Bind(api, state, "setShaderMatrix", [](State& s, const Napi::CallbackInfo& i) {
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                const auto values = Numbers(i[2]);
+                if (values.size() != 16)
+                {
+                    throw Napi::RangeError::New(i.Env(), "A matrix requires exactly 16 numbers.");
+                }
+                bl_Mat4 matrix{};
+                std::copy(values.begin(), values.end(), matrix.values);
+                const auto material = s.HandleOf<bl_ShaderMaterial>(i[0], Kind::Material);
+                s.Check(i.Env(), bl_setShaderMatrix(material, String(name), &matrix));
+                s.RefreshUniform(material, name);
+                return i.Env().Undefined();
+            });
+            for (const bool matrix : {false, true})
+            {
+                Bind(api, state, matrix ? "setShaderMatrixF32" : "setShaderUniformF32",
+                     [matrix](State& s, const Napi::CallbackInfo& i) {
+                         const auto name = i[1].As<Napi::String>().Utf8Value();
+                         const auto material = s.HandleOf<bl_ShaderMaterial>(i[0], Kind::Material);
+                         const auto values = F32(i[2]);
+                         s.Check(i.Env(),
+                                 matrix ? bl_setShaderMatrixF32(material, String(name), values)
+                                        : bl_setShaderUniformF32(material, String(name), values));
+                         s.RefreshUniform(material, name);
+                         return i.Env().Undefined();
+                     });
+            }
+            Bind(api, state, "getShaderTexture", [](State& s, const Napi::CallbackInfo& i) {
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                bl_Texture2D texture{};
+                s.Check(i.Env(),
+                        bl_getShaderTexture(s.HandleOf<bl_ShaderMaterial>(i[0], Kind::Material),
+                                            String(name), &texture));
+                return s.Wrap(i.Env(), texture, Kind::Texture);
+            });
+            Bind(api, state, "getTexture2DInfo", [](State& s, const Napi::CallbackInfo& i) {
+                bl_Texture2DInfo info{};
+                s.Check(i.Env(),
+                        bl_getTexture2DInfo(s.HandleOf<bl_Texture2D>(i[0], Kind::Texture), &info));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("width", info.width);
+                result.Set("height", info.height);
+                result.Set("srgb", info.srgb);
+                return result;
+            });
+            Bind(api, state, "updateTexture2DFromPixels",
+                 [](State& s, const Napi::CallbackInfo& i) {
+                     const auto texture = s.HandleOf<bl_Texture2D>(i[1], Kind::Texture);
+                     bl_Texture2DInfo info{};
+                     s.Check(i.Env(), bl_getTexture2DInfo(texture, &info));
+                     s.Check(i.Env(), bl_updateTexture2DFromPixels(
+                                          s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), texture,
+                                          Bytes(i[2]), i[3].IsUndefined() ? 0 : UiUint(i[3]),
+                                          i[4].IsUndefined() ? 0 : UiUint(i[4]),
+                                          i[5].IsUndefined() ? info.width : UiUint(i[5]),
+                                          i[6].IsUndefined() ? info.height : UiUint(i[6])));
+                     return i.Env().Undefined();
+                 });
+            for (const bool resize : {false, true})
+            {
+                Bind(api, state, resize ? "resizeMeshGeometry" : "updateMeshGeometry",
+                     [resize](State& s, const Napi::CallbackInfo& i) {
+                         const auto geometry = MeshGeometry(i[2]);
+                         const auto engine = s.HandleOf<bl_EngineContext>(i[0], Kind::Engine);
+                         const auto mesh = s.HandleOf<bl_Mesh>(i[1], Kind::Mesh);
+                         s.Check(i.Env(), resize ? bl_resizeMeshGeometry(engine, mesh, &geometry)
+                                                 : bl_updateMeshGeometry(engine, mesh, &geometry));
+                         return i.Env().Undefined();
+                     });
+            }
+            Bind(api, state, "updateMeshGeometryCapacity",
+                 [](State& s, const Napi::CallbackInfo& i) {
+                     const auto geometry = MeshGeometry(i[2]);
+                     const bl_OptionalNumber factor{
+                         i[3].IsNumber(),
+                         i[3].IsNumber() ? i[3].As<Napi::Number>().DoubleValue() : 0};
+                     std::vector<bl_GeometryRange> vertices;
+                     std::vector<bl_GeometryRange> indices;
+                     bl_GeometryUpdateRanges ranges{};
+                     if (!i[4].IsUndefined() && !i[4].IsNull())
+                     {
+                         const auto source = i[4].As<Napi::Object>();
+                         const auto copy = [](Napi::Value value,
+                                              std::vector<bl_GeometryRange>& result) {
+                             const auto array = value.As<Napi::Array>();
+                             if (array.Length() > 4096)
+                             {
+                                 throw Napi::RangeError::New(value.Env(),
+                                                             "Geometry range budget exceeded.");
+                             }
+                             for (uint32_t index = 0; index < array.Length(); ++index)
+                             {
+                                 const auto range = array.Get(index).As<Napi::Object>();
+                                 result.push_back(
+                                     {UiUint(range.Get("offset")), UiUint(range.Get("count"))});
+                             }
+                         };
+                         copy(source.Get("vertices"), vertices);
+                         copy(source.Get("indices"), indices);
+                         ranges = {vertices.data(), vertices.size(), indices.data(),
+                                   indices.size()};
+                     }
+                     bl_GeometryCapacityResult capacity{};
+                     s.Check(i.Env(), bl_updateMeshGeometryCapacity(
+                                          s.HandleOf<bl_EngineContext>(i[0], Kind::Engine),
+                                          s.HandleOf<bl_Mesh>(i[1], Kind::Mesh), &geometry, &factor,
+                                          i[4].IsUndefined() || i[4].IsNull() ? nullptr : &ranges,
+                                          &capacity));
+                     auto result = Napi::Object::New(i.Env());
+                     result.Set("stable", capacity.stable);
+                     result.Set("vertexCapacity", static_cast<double>(capacity.vertexCapacity));
+                     result.Set("indexCapacity", static_cast<double>(capacity.indexCapacity));
+                     return result;
+                 });
+            using UpdateAttribute =
+                bl_Status (*)(bl_EngineContext, bl_Mesh, bl_F32Span, size_t, const size_t*, size_t);
+            const std::pair<const char*, UpdateAttribute> attributes[]{
+                {"updateMeshPositions", bl_updateMeshPositions},
+                {"updateMeshNormals", bl_updateMeshNormals},
+                {"updateMeshColors", bl_updateMeshColors},
+                {"updateMeshUvs", bl_updateMeshUvs},
+                {"updateMeshUv2", bl_updateMeshUv2},
+                {"updateMeshTangents", bl_updateMeshTangents}};
+            for (const auto& [name, update] : attributes)
+            {
+                Bind(api, state, name, [update](State& s, const Napi::CallbackInfo& i) {
+                    const size_t count = i[4].IsUndefined() ? 0 : UiUint(i[4]);
+                    s.Check(i.Env(), update(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine),
+                                            s.HandleOf<bl_Mesh>(i[1], Kind::Mesh), F32(i[2]),
+                                            i[3].IsUndefined() ? 0 : UiUint(i[3]),
+                                            i[4].IsUndefined() ? nullptr : &count,
+                                            i[5].IsUndefined() ? 0 : UiUint(i[5])));
+                    return i.Env().Undefined();
+                });
+            }
+            using EngineOperation = bl_Status (*)(bl_EngineContext);
+            const std::pair<const char*, EngineOperation> engines[]{
+                {"stopEngine", bl_stopEngine},
+                {"invalidateRenderBundles", bl_invalidateRenderBundles},
+                {"waitForGpuIdle", bl_waitForGpuIdle},
+                {"waitForGpuResourceRetirements", bl_waitForGpuResourceRetirements}};
+            for (const auto& [name, operation] : engines)
+            {
+                Bind(api, state, name, [operation](State& s, const Napi::CallbackInfo& i) {
+                    const auto status = operation(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine));
+                    SettleStarts(s, i.Env());
+                    SurfaceCallback(s, i.Env());
+                    s.Check(i.Env(), status);
+                    return i.Env().Undefined();
+                });
+            }
+            Bind(api, state, "renderFrame", [](State& s, const Napi::CallbackInfo& i) {
+                const auto status = bl_renderFrame(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine),
+                                                   i[1].As<Napi::Number>().DoubleValue());
+                SurfaceCallback(s, i.Env());
+                s.Check(i.Env(), status);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "unregisterScene", [](State& s, const Napi::CallbackInfo& i) {
+                const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                s.Check(i.Env(), bl_unregisterScene(scene));
+                s.registeredScenes.erase(scene._id);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "disposeScene", [](State& s, const Napi::CallbackInfo& i) {
+                const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                const auto status = bl_disposeScene(scene);
+                if (status == BL_OK)
+                {
+                    s.registeredScenes.erase(scene._id);
+                    std::erase_if(s.callbacks, [scene](const auto& value) {
+                        return value->scene._id == scene._id;
+                    });
+                }
+                SurfaceCallback(s, i.Env());
+                s.Check(i.Env(), status);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "onSceneDispose", [](State& s, const Napi::CallbackInfo& i) {
+                auto callback = std::make_unique<BeforeCallback>();
+                callback->owner = &s;
+                callback->scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                callback->function = Napi::Persistent(i[1].As<Napi::Function>());
+                callback->disposeCallback = true;
+                auto* pointer = callback.get();
+                s.callbacks.push_back(std::move(callback));
+                const auto status =
+                    bl_onSceneDispose(pointer->scene, SceneDisposed, pointer, &pointer->token);
+                if (status != BL_OK)
+                {
+                    s.callbacks.pop_back();
+                    s.Check(i.Env(), status);
+                }
+                return SceneCallbackIdentity(i.Env(), i[0], pointer->token);
+            });
+            Bind(api, state, "removeSceneCallback", [](State& s, const Napi::CallbackInfo& i) {
+                const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                const auto identity =
+                    i[1].As<Napi::Object>().Get("_callback").As<Napi::String>().Utf8Value();
+                const auto found = std::find_if(
+                    s.callbacks.begin(), s.callbacks.end(), [scene, &identity](const auto& value) {
+                        return value->scene._id == scene._id &&
+                               std::to_string(value->token.value) == identity;
+                    });
+                if (found == s.callbacks.end())
+                {
+                    throw Napi::TypeError::New(i.Env(),
+                                               "Unknown or retired native scene callback.");
+                }
+                s.Check(i.Env(), bl_removeSceneCallback(scene, (*found)->token));
+                s.callbacks.erase(found);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getAudioEngineInfo", [](State& s, const Napi::CallbackInfo& i) {
+                bl_AudioEngineInfo info{};
+                s.Check(i.Env(), bl_getAudioEngineInfo(
+                                     s.HandleOf<bl_AudioEngine>(i[0], Kind::AudioEngine), &info));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("volume", info.volume);
+                result.Set("currentTime", info.context.currentTime);
+                result.Set("sampleRate", info.context.sampleRate);
+                result.Set("state", static_cast<double>(info.context.state));
+                result.Set("offline", info.context.offline);
+                result.Set("audibleOutputAvailable", info.context.audibleOutputAvailable);
+                return result;
+            });
+            Bind(api, state, "getMasterVolume", [](State& s, const Napi::CallbackInfo& i) {
+                double volume{};
+                s.Check(i.Env(), bl_getMasterVolume(
+                                     s.HandleOf<bl_AudioEngine>(i[0], Kind::AudioEngine), &volume));
+                return Napi::Number::New(i.Env(), volume);
+            });
+            Bind(api, state, "setMasterVolume", [](State& s, const Napi::CallbackInfo& i) {
+                const auto options = Ramp(i[2]);
+                s.Check(i.Env(),
+                        bl_setMasterVolume(s.HandleOf<bl_AudioEngine>(i[0], Kind::AudioEngine),
+                                           i[1].As<Napi::Number>().DoubleValue(), &options));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setSoundSourceVolume", [](State& s, const Napi::CallbackInfo& i) {
+                const auto options = Ramp(i[2]);
+                s.Check(i.Env(), bl_setSoundSourceVolume(
+                                     s.HandleOf<bl_AudioInputSource>(i[0], Kind::SoundSource),
+                                     i[1].As<Napi::Number>().DoubleValue(), &options));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "audioUserGesture", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(),
+                        bl_audioUserGesture(s.HandleOf<bl_AudioEngine>(i[0], Kind::AudioEngine)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getHostServices", [](State& s, const Napi::CallbackInfo& i) {
+                const bl_IOService* io{};
+                s.Check(i.Env(), bl_getIOService(s.options.runtime, &io));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("coreIO", io != nullptr);
+                return result;
+            });
         }
     }
 
@@ -730,6 +1517,25 @@ namespace Babylon::Plugins::LiteJSBinding
         auto api = Napi::Object::New(env);
         api.Set("_owner", Napi::External<std::shared_ptr<State>>::New(env, new std::shared_ptr<State>(state),
                               [](Napi::Env, std::shared_ptr<State>* owner) { delete owner; }));
+        BindUi(api, state);
+        BindExtras(api, state);
+        Bind(api, state, "disposeEngine", [](State& s, const Napi::CallbackInfo& i) {
+            const auto engine = s.HandleOf<bl_EngineContext>(i[0], Kind::Engine);
+            s.Check(i.Env(), bl_disposeEngine(engine));
+            SettleStarts(s, i.Env());
+            std::erase_if(s.engines, [engine](const auto& value) { return value._id == engine._id; });
+            s.engineObjects.erase(engine._id);
+            SurfaceCallback(s, i.Env());
+            return i.Env().Undefined();
+        });
+        Bind(api, state, "resizeEngine", [](State& s, const Napi::CallbackInfo& i) {
+            auto target = s.options.nativeEngine.target;
+            target.width = UiUint(i[1]);
+            target.height = UiUint(i[2]);
+            s.Check(i.Env(), bl_setNativeTarget(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), &target));
+            s.options.nativeEngine.target = target;
+            return i.Env().Undefined();
+        });
 
         Bind(api, state, "createEngine", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
             const auto source = Options(i[1]);
@@ -745,6 +1551,7 @@ namespace Babylon::Plugins::LiteJSBinding
             }
             bl_EngineContext engine{};
             s.Check(i.Env(), bl_createEngine(s.options.runtime, &native, &options, &engine));
+            s.options.nativeEngine.target = native.target;
             s.engines.push_back(engine);
             auto value = s.Wrap(i.Env(), engine, Kind::Engine).As<Napi::Object>();
             s.engineObjects.insert_or_assign(engine._id, Napi::Persistent(value));
@@ -876,21 +1683,38 @@ namespace Babylon::Plugins::LiteJSBinding
             callback->owner = &s;
             callback->scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
             callback->function = Napi::Persistent(i[1].As<Napi::Function>());
-            s.Check(i.Env(), bl_onBeforeRender(callback->scene, BeforeRender, callback.get(), &callback->token));
+            auto* pointer = callback.get();
             s.callbacks.push_back(std::move(callback));
-            return i.Env().Undefined();
+            const auto status = bl_onBeforeRender(pointer->scene, BeforeRender, pointer, &pointer->token);
+            if (status != BL_OK)
+            {
+                s.callbacks.pop_back();
+                s.Check(i.Env(), status);
+            }
+            return SceneCallbackIdentity(i.Env(), i[0], pointer->token);
         });
         Bind(api, state, "startEngine", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
             auto callback = std::make_unique<StartCallback>(StartCallback{&s, Napi::Promise::Deferred::New(i.Env()), false});
             const auto promise = callback->deferred.Promise();
-            const auto status = bl_startEngine(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), FirstFrame, callback.get());
+            const auto engine = s.HandleOf<bl_EngineContext>(i[0], Kind::Engine);
+            auto* pointer = callback.get();
+            s.starts.push_back(std::move(callback));
+            const auto status = bl_startEngine(engine, FirstFrame, pointer);
             if (status != BL_OK)
             {
-                callback->deferred.Reject(Napi::Error::New(i.Env(), "startEngine failed (status " + std::to_string(status) + ").").Value());
-            }
-            else
-            {
-                s.starts.push_back(std::move(callback));
+                try
+                {
+                    s.Check(i.Env(), status);
+                }
+                catch (const Napi::Error& error)
+                {
+                    if (error.Get("operation").IsUndefined())
+                    {
+                        error.Set("operation", "startEngine");
+                    }
+                    pointer->deferred.Reject(error.Value());
+                }
+                s.starts.pop_back();
             }
             return promise;
         });
@@ -1134,6 +1958,11 @@ namespace Babylon::Plugins::LiteJSBinding
     void Frame(Napi::Env env, double deltaMs)
     {
         const auto state = GetState(env);
+        if (state->disposed)
+        {
+            state->Check(env, BL_DISPOSED);
+        }
+        state->frameTimings = {};
         state->DrainFinalized(env);
         const double monotonicTimeMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now().time_since_epoch())
@@ -1145,30 +1974,12 @@ namespace Babylon::Plugins::LiteJSBinding
         for (const auto engine : state->engines)
         {
             state->inNativeFrame = true;
+            const auto begin = std::chrono::steady_clock::now();
             const auto status = bl_frame(engine, deltaMs);
+            state->frameTimings.nativeFrameIncludingCallbacksMs +=
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
             state->inNativeFrame = false;
-            for (auto& callback : state->starts)
-            {
-                if (!callback->completed || callback->settled)
-                {
-                    continue;
-                }
-                callback->settled = true;
-                if (!state->callbackError.IsEmpty())
-                {
-                    callback->deferred.Reject(state->callbackError.Value());
-                }
-                else if (callback->status == BL_OK && !state->callbackCaptureFailed)
-                {
-                    callback->deferred.Resolve(env.Undefined());
-                }
-                else
-                {
-                    callback->deferred.Reject(Napi::Error::New(env,
-                        "Engine first frame failed or was cancelled (status " + std::to_string(callback->status) + ").")
-                            .Value());
-                }
-            }
+            SettleStarts(*state, env);
             if (!state->callbackError.IsEmpty())
             {
                 auto error = std::move(state->callbackError);
@@ -1191,6 +2002,9 @@ namespace Babylon::Plugins::LiteJSBinding
     void Dispose(Napi::Env env)
     {
         const auto state = GetState(env);
+        SettleStarts(*state, env);
+        auto callbackError = std::move(state->callbackError);
+        const bool captureFailed = state->callbackCaptureFailed;
         state->disposed = true;
         state->options.runtime = nullptr;
         state->objects.clear();
@@ -1199,6 +2013,8 @@ namespace Babylon::Plugins::LiteJSBinding
         state->registeredScenes.clear();
         state->callbacks.clear();
         state->starts.clear();
+        state->uiContexts.clear();
+        state->uiCallbacks.clear();
         state->uniformViews.clear();
         for (auto& [id, binding] : state->audioBindings)
         {
@@ -1208,7 +2024,21 @@ namespace Babylon::Plugins::LiteJSBinding
         state->audioSources.clear();
         state->callbackError = {};
         state->knownTokens.clear();
+        state->knownUiListeners.clear();
         state->engines.clear();
         state->finalized.clear();
+        if (!callbackError.IsEmpty())
+        {
+            throw callbackError;
+        }
+        if (captureFailed)
+        {
+            throw Napi::Error::New(env, "Failed to retain a JavaScript callback exception during teardown.");
+        }
+    }
+
+    FrameTimings GetFrameTimings(Napi::Env env)
+    {
+        return GetState(env)->frameTimings;
     }
 }

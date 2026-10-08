@@ -2,6 +2,7 @@ import {
     createAudioEngineAsync, createBoxData, createFreeCamera, createShaderMaterial,
     createSphereData, createTransformNode, getShaderUniform, setShaderFloat,
     setShaderVector3,
+    setShaderMatrix, setShaderMatrixF32, setShaderUniformF32,
 } from "babylon-lite";
 
 declare const _liteTestsDone: (success: boolean, detail: string) => void;
@@ -48,6 +49,8 @@ async function main(): Promise<void> {
     child.scaling.x = child.scaling.y = child.scaling.z = 0;
     check(child.scaling.z === 0, "zero scaling was discarded");
     const camera = createFreeCamera({ x: 1, y: 2, z: 3 }, { x: 0, y: 0, z: 0 });
+    camera.rotationQuaternion = { x: 0, y: 0, z: 0, w: 1 };
+    check(camera.rotationQuaternion.w === 1, "Quaternion did not reach native node state");
     camera.nearPlane = 0.1;
     camera.target.x = 4;
     check(camera.nearPlane === 0.1 && camera.target.x === 4, "camera properties did not reach native state");
@@ -62,7 +65,8 @@ async function main(): Promise<void> {
         vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
         fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
         attributes: ["position"],
-        uniforms: [{ name: "amount", type: "f32" }, { name: "tint", type: "vec3<f32>" }],
+        uniforms: [{ name: "amount", type: "f32" }, { name: "tint", type: "vec3<f32>" },
+            { name: "matrix", type: "mat4x4<f32>" }],
     });
     setShaderFloat(material, "amount", 0.7);
     setShaderVector3(material, "tint", [0.1, 0.2, 0.3]);
@@ -72,6 +76,16 @@ async function main(): Promise<void> {
     check(tint === getShaderUniform(material, "tint"), "uniform backing identity was not stable");
     setShaderVector3(material, "tint", [0.4, 0.5, 0.6]);
     check(Math.abs(tint[2] - 0.6) < 1e-7, "native setter did not update the existing JS backing view");
+    setShaderUniformF32(material, "tint", new Float32Array([0.7, 0.8, 0.9]));
+    check(Math.abs(tint[2] - 0.9) < 1e-7, "F32 native setter did not refresh client backing");
+    const matrix = new Float64Array(16);
+    matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1;
+    setShaderMatrix(material, "matrix", matrix);
+    check(getShaderUniform(material, "matrix")[15] === 1, "F64 matrix was not marshalled");
+    const matrix32 = new Float32Array(matrix);
+    matrix32[12] = 9;
+    setShaderMatrixF32(material, "matrix", matrix32);
+    check(getShaderUniform(material, "matrix")[12] === 9, "F32 matrix was not forwarded");
     let audioUnavailable = false;
     try { await createAudioEngineAsync(); }
     catch (error) { audioUnavailable = (error as { status: number }).status === 16; }

@@ -1,5 +1,7 @@
 // Native Win32 browser-platform services for demo/user code only. No engine code.
+import { retainedUi } from "./native-ui.js";
 const host = globalThis._litePlatform;
+let ui;
 const nativeImages = new Map();
 const timers = new Map();
 const animation = new Map();
@@ -11,9 +13,11 @@ class EventTarget {
     addEventListener(type, callback) {
         if (!this.listeners.has(type)) this.listeners.set(type, []);
         this.listeners.get(type).push(callback);
+        ui?.changed(this);
     }
     removeEventListener(type, callback) {
         this.listeners.set(type, (this.listeners.get(type) ?? []).filter(value => value !== callback));
+        ui?.changed(this);
     }
     dispatchEvent(event) {
         event.target ??= this;
@@ -28,12 +32,11 @@ class Style {
     constructor() { this.values = {}; }
     set cssText(text) {
         this.values = {};
-        for (const declaration of text.split(";")) {
-            const split = declaration.indexOf(":");
-            if (split > 0) this.values[declaration.slice(0, split).trim().replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = declaration.slice(split + 1).trim();
+        for (const declaration of host.parseCss(String(text))) {
+            this.values[declaration.name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = declaration.value;
         }
     }
-    get cssText() { return Object.entries(this.values).map(([key, value]) => `${key}:${value}`).join(";"); }
+    get cssText() { return Object.entries(this.values).map(([key, value]) => `${key.replace(/[A-Z]/g, letter => "-" + letter.toLowerCase())}:${value}`).join(";"); }
 }
 
 class Element extends EventTarget {
@@ -43,20 +46,53 @@ class Element extends EventTarget {
         this.children = [];
         this.dataset = {};
         this.parentNode = null;
-        this.textContent = "";
+        this._textContent = "";
+        this._attributes = {};
         this.style = new Proxy(new Style(), {
             get(target, key) { return key in target ? target[key] : target.values[key] ?? ""; },
-            set(target, key, value) { if (key === "cssText") target.cssText = value; else target.values[key] = String(value); return true; },
+            set: (target, key, value) => {
+                const before = target.cssText;
+                if (key === "cssText") target.cssText = value; else target.values[key] = String(value);
+                if (before !== target.cssText) ui?.changed(this);
+                return true;
+            },
         });
     }
-    appendChild(child) { child.remove(); child.parentNode = this; this.children.push(child); return child; }
+    get textContent() { return this._textContent; }
+    set textContent(value) {
+        value = String(value);
+        const hadMarkup = this._markup !== undefined;
+        this._markup = undefined;
+        if (this._textContent !== value || hadMarkup) {
+            for (const child of this.children) child.parentNode = null;
+            this.children = [];
+            this._textContent = value;
+            ui?.changed(this);
+        }
+    }
+    setAttribute(name, value) { this._attributes[name] = String(value); ui?.changed(this); }
+    getAttribute(name) { return this._attributes[name] ?? null; }
+    get value() { return this._attributes.value ?? ""; }
+    set value(value) { this.setAttribute("value", value); }
+    appendChild(child) { child.remove(); child.parentNode = this; this.children.push(child); ui?.changed(child); return child; }
     remove() {
         if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
         this.parentNode = null;
+        ui?.changed(this);
     }
-    set innerHTML(value) { this.textContent = String(value).replace(/<[^>]*>/g, ""); }
-    get innerHTML() { return this.textContent; }
-    getBoundingClientRect() { return { left: 0, top: 0, width: this.width ?? host.width, height: this.height ?? host.height }; }
+    set innerHTML(value) {
+        value = String(value);
+        this.textContent = value.replace(/<[^>]*>/g, "");
+        this._markup = value;
+        ui?.changed(this);
+    }
+    get innerHTML() { return this._markup ?? this.textContent; }
+    getBoundingClientRect() {
+        if (host.retainedUi && this.tagName !== "CANVAS") {
+            throw new Error("The C99 UI contract does not expose element bounds; no browser-layout estimate is substituted.");
+        }
+        return { left: 0, top: 0, width: this.width ?? host.width, height: this.height ?? host.height };
+    }
     requestPointerLock() {
         host.pointerLock(true);
         document.pointerLockElement = this;
@@ -189,7 +225,11 @@ canvas.width = host.width;
 canvas.height = host.height;
 canvas.id = "renderCanvas";
 document.body.appendChild(canvas);
-document.getElementById = id => id === "renderCanvas" ? canvas : null;
+ui = retainedUi(host, document, canvas);
+document.getElementById = id => {
+    const find = element => element.id === id ? element : element.children.map(find).find(Boolean);
+    return find(document.body) ?? null;
+};
 document.pointerLockElement = null;
 document.exitPointerLock = () => { host.pointerLock(false); document.pointerLockElement = null; document.dispatchEvent({ type: "pointerlockchange" }); };
 const windowEvents = new EventTarget();
@@ -208,6 +248,7 @@ globalThis.Response = NativeResponse;
 globalThis.ReadableStream = NativeStream;
 globalThis.DOMException = class extends Error { constructor(message, name) { super(message); this.name = name; } };
 globalThis.performance = { now: () => clock };
+globalThis._platformNow = () => clock;
 globalThis.setTimeout = (callback, delay = 0) => { const id = nextTask++; timers.set(id, { callback, at: clock + delay }); return id; };
 globalThis.clearTimeout = id => timers.delete(id);
 globalThis.requestAnimationFrame = callback => { const id = nextTask++; animation.set(id, callback); return id; };
@@ -298,6 +339,7 @@ function drawDOM() {
 
 globalThis._platformDispatch = event => {
     if (event.type === "pointerunlock") { document.exitPointerLock(); return; }
+    if (globalThis._platformUiInput?.(event)) return;
     if (event.type === "mousemove") document.dispatchEvent(event);
     else if (["click", "mousedown", "mouseup", "contextmenu"].includes(event.type)) canvas.dispatchEvent(event);
     else windowEvents.dispatchEvent(event);
@@ -308,7 +350,7 @@ globalThis._platformTick = deltaMs => {
     const frames = [...animation.values()];
     animation.clear();
     for (const callback of frames) callback(clock);
-    drawDOM();
+    if (!ui) drawDOM();
     if (canvas.dataset.error) throw new Error(canvas.dataset.error);
     return canvas.dataset.ready === "true";
 };

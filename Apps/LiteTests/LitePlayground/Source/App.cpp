@@ -116,10 +116,19 @@ int main(int argc, char** argv)
 {
     Diagnostics::Initialize();
     const std::string mode = argc > 1 ? argv[1] : "contract";
-    if (mode == "minecraft" || mode == "minecraft-development")
+    if (mode == "minecraft" || mode == "minecraft-development" || mode == "ui-contract")
     {
 #if defined(HAS_LITE_SHADER_COMPILER)
-        return RunMinecraft(argc, argv);
+        try
+        {
+            return RunMinecraft(argc, argv);
+        }
+        catch (const std::exception& error)
+        {
+            Diagnostics::DumpFailure("LITE HOST CONFIGURATION", nullptr, 0, 0, "%s", error.what());
+            Diagnostics::SetExitCode(2);
+            return 2;
+        }
 #else
         Diagnostics::DumpFailure("LITE HOST CONFIGURATION", nullptr, 0, 0, "Full Minecraft requires LiteShaderCompiler.");
         Diagnostics::SetExitCode(2);
@@ -303,7 +312,16 @@ int main(int argc, char** argv)
                 nativeRuntime = nullptr;
                 if (bindingInitialized)
                 {
-                    Babylon::Plugins::LiteJSBinding::Dispose(env);
+                    try
+                    {
+                        Babylon::Plugins::LiteJSBinding::Dispose(env);
+                    }
+                    catch (const Napi::Error& error)
+                    {
+                        Diagnostics::DumpFailure("LITE TEARDOWN CALLBACK", nullptr, 0, 0, "%s",
+                                                Napi::GetErrorString(error).c_str());
+                        exitCode = 1;
+                    }
                     bindingInitialized = false;
                 }
             }

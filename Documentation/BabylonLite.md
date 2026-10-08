@@ -385,6 +385,88 @@ projected application tests. The complete bblitec corpus remains unfinished. The
 application projection is described below. Passing the scoped Minecraft workload
 does not establish coverage of all 1814 package exports.
 
+### Original JavaScript with retained native UI
+
+With `BABYLON_LITE_ENABLE_UI=ON`, `LitePlayground minecraft` now uses the
+published Core C99 RmlUI/bgfx implementation, **not** the GDI HUD described in
+the historical host qualification above. `--legacy-gdi-ui` explicitly selects
+the regression path; UI OFF retains that path. Original Minecraft sources,
+all 24 modules, shaders and assets are unchanged. Application-only bundling
+continues to reject engine implementation inputs.
+
+The JS creating thread initializes bgfx and performs every C99 engine/UI call.
+Its engine is BORROWED: `bl_frame`, UI update/render in crosshair/HUD/underwater
+order, then **one** host `bgfx::frame`. Disjoint view ranges are engine 0–31,
+white-difference crosshair 32–63, HUD 64–159 and underwater 160–255.
+Window/message ownership remains on the OS thread. Submitted-work retirement
+uses actual GPU readback synchronization, not an assumed number of frames.
+Bounded runs reject physical/raw input; native-window replay is explicitly
+marked scripted. Hidden runs do not capture the desktop mouse or change focus.
+
+`LiteJSBinding` marshals all 24 UI functions with typed, generation-protected
+opaque identities, copied byte spans and native status/source diagnostics.
+Native contexts own attached/detached elements, so collecting a JS parent
+wrapper does not detach its subtree. Listener identities avoid JS-number
+pointer/uint64 truncation and stale-token aliasing. Original callback exceptions
+are restored only **after** the C callback returns. `nativeUi` and `nativeExtras`
+are explicitly native embedding extensions. Static routing reaches all current
+122 C99 functions: 120 in the binding and two runtime-lifecycle functions in
+the host. This is not semantic coverage of 1814 upstream exports.
+
+The outside-Core `UiCss` frontend adapts browser CSS to Rml values, including
+RGBA percentages, DPI-scaled units, fonts, images, borders, gradients, shadows
+and the exact opacity `ease` curve/coalescing/reversal. RmlUI performs layout,
+clipping, retained effects and rendering. Installed Segoe UI/Consolas fonts
+are loaded through copied C99 font bytes; no licensed fonts are committed.
+FreeType glyph rasterization differs from the historical Windows/GDI renderer.
+The narrow DOM host is not a complete browser: it supports one engine,
+plain text/explicit RML markup, native click/change/textbox transport and the
+documented CSS subset. Other font stacks, transitions and background shorthands
+fail explicitly. Colored-source difference and unsupported Core features
+retain native errors; there are no approximate filter chains or PBR claims.
+Non-canvas element bounds are not exposed by this C99 contract; the DOM host
+throws rather than estimating browser layout. Clipboard/IME/full browser DOM
+and asynchronous event-handler semantics are not claimed.
+
+New builds/evidence belong under `build\lite-c99\js-rmlui`:
+
+```powershell
+cmake --build build\lite-c99\js-rmlui\Release --target LitePlayground LiteJavaScriptCssTests --parallel 3
+ctest --test-dir build\lite-c99\js-rmlui\Release -R Lite --output-on-failure
+cmake --build build\lite-c99\js-rmlui\Release --target LiteJavaScriptUiHostStyleCheck
+```
+
+`LiteJavaScriptUiContract` covers forced-GC parent retention, copied image
+inputs, stale/wrong-type identities, native callback reentry/exception identity,
+generic DOM click and textbox/change/value transport. `LiteMinecraftUiInvalidation`
+uses original controls/save/load/audio plus explicitly **validation-only**
+resize/synthetic DPI, forced GC, underwater visibility and toast expiry.
+Headless save/open automation supplies a declared test path without showing a
+desktop dialog; the separate visible native-input test still exercises real
+Win32 dialogs. Receipts distinguish file selections from completed dialogs.
+`LiteMinecraftCombinedGpu1380` captures combined 3D/native UI at 180/1380 with
+fixed simulation steps. These overrides are rejected by the timing selector.
+
+`--benchmark-output=<file> --warmup=180 --measure=1200 --headless` writes
+`lite-js-rmlui-frames-v1` raw samples after the run, with no measured captures,
+hashing, file output or physical input. It separates API/complete-host wall
+spans, nested user callbacks, UI update/render, presentation, Windows process/
+thread execution counters and deduplicated real GPU queries. Missing queries
+are null; 64-bit timestamps are decimal strings. Callback spans include native
+setters; subtracting them is **not** total engine-algorithm CPU. GC remains
+normal V8 behavior, included but not separately instrumented. This JS host
+retains source-default MSAA 4; the published C++ comparison used MSAA 1.
+No JS performance conclusion follows from that C++ comparison.
+`JavaScript\tools\audit-js-rmlui.py` records exact binary/config/source hashes,
+checks the unedited 27-file source slice and qualifies resource/query receipts.
+Parent validation subsequently ran a fresh 15-round, five-path comparison at
+matching **MSAA4**: original JavaScript averages 1.544 ms/frame, native C++
+1.521 ms and SDL/bblitec 2.767 ms (medians of run averages). The JS/native C++
+paired mean interval [+0.73%, +3.96%] is within the practical 5% band, but JS
+whole-process execution is higher and its VM/DLL footprint is substantially
+larger. Full results, P95, rendering/runtime-pin caveats and frozen evidence
+are in [LiteJavaScriptPerformance.md](LiteJavaScriptPerformance.md).
+
 ### Audio and binding boundaries
 
 The Win32 application supplies a separate XAudio2 output graph service.

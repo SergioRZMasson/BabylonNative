@@ -54,6 +54,10 @@ function node(handle) {
                 data => native.setNodeVector(value, name, data), ["x", "y", "z"]);
             field(object, name, () => proxy, data => native.setNodeVector(value, name, data));
         }
+        const quaternion = vector(() => native.getNodeRotationQuaternion(value),
+            data => native.setNodeRotationQuaternion(value, data), ["x", "y", "z", "w"]);
+        field(object, "rotationQuaternion", () => quaternion,
+            data => native.setNodeRotationQuaternion(value, data));
         field(object, "name", () => native.getNodeName(value), name => native.setNodeName(value, name));
         field(object, "visible", () => native.getNodeVisible(value), visible => native.setNodeVisible(value, visible));
         field(object, "parent", () => {
@@ -127,12 +131,27 @@ function camera(handle) {
 }
 
 export async function createEngine(canvas, options) {
-    return identity(native.createEngine(canvas, options), (object, handle) => {
+    const engine = native.createEngine(canvas, options);
+    globalThis._platformAttachUi?.(engine);
+    return identity(engine, (object, handle) => {
         for (const name of ["drawCallCount", "gpuFrameTimeMs"]) {
             field(object, name, () => native.getEngineStats(handle)[name]);
         }
+
     });
 }
+
+// Native retained-UI extensions, not browser or upstream package API claims.
+export const nativeUi = Object.freeze({
+    createContext: (engine, options) => native.createUiContext(token(engine), options),
+    ...Object.fromEntries([
+        "disposeUiContext", "setUiViewport", "getUiRoot", "createUiElement", "appendUiChild",
+        "removeUiChild", "disposeUiElement", "setUiProperty", "removeUiProperty", "setUiText",
+        "setUiAttribute", "setUiMarkup", "loadUiFont", "registerUiImage", "unregisterUiImage",
+        "setUiImageSampling", "setUiWhiteDifference", "processUiInput", "updateUi", "renderUi",
+        "getUiStats", "addUiEventListener", "removeUiEventListener",
+    ].map(name => [name, (...args) => native[name](...args)])),
+});
 
 export function createSceneContext(engine) {
     return identity(native.createSceneContext(token(engine)), (object, handle) => {
@@ -161,12 +180,32 @@ export const createSphereData = options => native.createSphereData(options);
 export const createBox = (engine, options) => mesh(native.createBox(token(engine), options));
 export const createMeshFromData = (engine, name, ...streams) => mesh(native.createMeshFromData(token(engine), name, ...streams));
 export const createShaderMaterial = options => identity(native.createShaderMaterial(options));
+export const createSphere = (engine, options) => mesh(native.createSphere(token(engine), options));
 export const createTexture2DFromPixels = (engine, ...args) => identity(native.createTexture2DFromPixels(token(engine), ...args));
 export const setShaderFloat = (material, ...args) => native.setShaderFloat(token(material), ...args);
 export const setShaderVector3 = (material, ...args) => native.setShaderVector3(token(material), ...args);
 export const setShaderUniform = (material, ...args) => native.setShaderUniform(token(material), ...args);
+export const setShaderUniformF32 = (material, ...args) => native.setShaderUniformF32(token(material), ...args);
+export const setShaderMatrix = (material, ...args) => native.setShaderMatrix(token(material), ...args);
+export const setShaderMatrixF32 = (material, ...args) => native.setShaderMatrixF32(token(material), ...args);
 export const getShaderUniform = (material, ...args) => native.getShaderUniform(token(material), ...args);
 export const setShaderTexture = (material, name, texture) => native.setShaderTexture(token(material), name, token(texture));
+export const getShaderTexture = (material, name) => identity(native.getShaderTexture(token(material), name));
+export const getTexture2DInfo = texture => native.getTexture2DInfo(token(texture));
+export const updateTexture2DFromPixels = (engine, texture, ...args) =>
+    native.updateTexture2DFromPixels(token(engine), token(texture), ...args);
+export const updateMeshGeometry = (engine, object, geometry) =>
+    native.updateMeshGeometry(token(engine), token(object), geometry);
+export const resizeMeshGeometry = (engine, object, geometry) =>
+    native.resizeMeshGeometry(token(engine), token(object), geometry);
+export const updateMeshGeometryCapacity = (engine, object, ...args) =>
+    native.updateMeshGeometryCapacity(token(engine), token(object), ...args);
+export const updateMeshPositions = (engine, object, ...args) => native.updateMeshPositions(token(engine), token(object), ...args);
+export const updateMeshNormals = (engine, object, ...args) => native.updateMeshNormals(token(engine), token(object), ...args);
+export const updateMeshColors = (engine, object, ...args) => native.updateMeshColors(token(engine), token(object), ...args);
+export const updateMeshUvs = (engine, object, ...args) => native.updateMeshUvs(token(engine), token(object), ...args);
+export const updateMeshUv2 = (engine, object, ...args) => native.updateMeshUv2(token(engine), token(object), ...args);
+export const updateMeshTangents = (engine, object, ...args) => native.updateMeshTangents(token(engine), token(object), ...args);
 export function addToScene(scene, entity) {
     native.addToScene(token(scene), token(entity));
     sceneEntities.get(scene).push(entity);
@@ -177,14 +216,35 @@ export function removeFromScene(scene, entity) {
 }
 export const setSubtreeVisible = (entity, visible) => native.setSubtreeVisible(token(entity), visible);
 export const onBeforeRender = (scene, callback) => native.onBeforeRender(token(scene), callback);
+export const onSceneDispose = (scene, callback) => native.onSceneDispose(token(scene), callback);
+export const removeSceneCallback = (scene, callback) => native.removeSceneCallback(token(scene), callback);
 export async function registerScene(scene) { native.registerScene(token(scene)); }
+export const unregisterScene = scene => native.unregisterScene(token(scene));
+export const disposeScene = scene => { native.disposeScene(token(scene)); sceneEntities.delete(scene); };
 export const startEngine = engine => native.startEngine(token(engine));
+export const stopEngine = engine => native.stopEngine(token(engine));
+export const renderFrame = (engine, deltaMs) => native.renderFrame(token(engine), deltaMs);
+export const invalidateRenderBundles = engine => native.invalidateRenderBundles(token(engine));
 export async function createAudioEngineAsync(options) {
     return identity(native.createAudioEngineAsync(options), (object, handle) => {
         object.audioContext = handle.audioContext;
     });
 }
 export async function unlockAudioEngineAsync(engine) { native.unlockAudioEngineAsync(token(engine)); }
+export const getAudioEngineInfo = engine => native.getAudioEngineInfo(token(engine));
+export const getMasterVolume = engine => native.getMasterVolume(token(engine));
+export const setMasterVolume = (engine, ...args) => native.setMasterVolume(token(engine), ...args);
+export const setSoundSourceVolume = (source, ...args) => native.setSoundSourceVolume(token(source), ...args);
+export const audioUserGesture = engine => native.audioUserGesture(token(engine));
+
+// Embedding-only helpers; these are not claims about the upstream package exports.
+export const nativeExtras = Object.freeze({
+    disposeEngine: engine => native.disposeEngine(token(engine)),
+    resizeEngine: (engine, width, height) => native.resizeEngine(token(engine), width, height),
+    waitForGpuIdle: engine => native.waitForGpuIdle(token(engine)),
+    waitForGpuResourceRetirements: engine => native.waitForGpuResourceRetirements(token(engine)),
+    getHostServices: () => native.getHostServices(),
+});
 export async function createSoundSourceAsync(engine, source, options) {
     const result = identity(native.createSoundSourceAsync(token(engine), source, options));
     // A native source retains its external input and engine, just as the source API does.
