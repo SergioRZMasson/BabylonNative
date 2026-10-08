@@ -127,6 +127,14 @@ static bl_Status validateTarget(bl_Runtime* r, const bl_NativeTarget* t, L_Engin
     }
     for (L_Engine* e = engines; e; e = e->globalNext)
     {
+        for (L_ViewReservation* v = e->reservedViews; v; v = v->next)
+        {
+            if (t->firstViewId < (uint32_t)v->first + v->count &&
+                v->first < (uint32_t)t->firstViewId + t->viewCount)
+            {
+                return L_FAIL(r, BL_BUSY, "Target overlaps a reserved feature view range");
+            }
+        }
         if (e != self)
         {
             const bl_NativeTarget* other = &e->native.target;
@@ -142,6 +150,59 @@ static bl_Status validateTarget(bl_Runtime* r, const bl_NativeTarget* t, L_Engin
         return L_FAIL(r, BL_INVALID_ARGUMENT, "View range exceeds backend limits");
     }
     return BL_OK;
+}
+
+bl_Status l_reserveViews(L_Engine* engine, L_ViewReservation* reservation)
+{
+    bl_Runtime* r = engine->runtime;
+    uint32_t end = (uint32_t)reservation->first + reservation->count;
+    if (!reservation->count || end > bgfx::getCaps()->limits.maxViews)
+    {
+        return L_FAIL(r, BL_INVALID_ARGUMENT, "Invalid feature view range");
+    }
+    if (!lockEngines())
+    {
+        return BL_BUSY;
+    }
+    for (L_Engine* e = engines; e; e = e->globalNext)
+    {
+        const bl_NativeTarget* t = &e->native.target;
+        if (reservation->first < (uint32_t)t->firstViewId + t->viewCount && t->firstViewId < end)
+        {
+            unlockEngines();
+            return L_FAIL(r, BL_BUSY, "Feature view range overlaps an engine");
+        }
+        for (L_ViewReservation* v = e->reservedViews; v; v = v->next)
+        {
+            if (reservation->first < (uint32_t)v->first + v->count && v->first < end)
+            {
+                unlockEngines();
+                return L_FAIL(r, BL_BUSY, "Feature view range overlaps another feature");
+            }
+        }
+    }
+    reservation->next = engine->reservedViews;
+    engine->reservedViews = reservation;
+    unlockEngines();
+    return BL_OK;
+}
+
+void l_releaseViews(L_Engine* engine, L_ViewReservation* reservation)
+{
+    while (!lockEngines())
+    {
+        bx::yield();
+    }
+    L_ViewReservation** link = &engine->reservedViews;
+    while (*link && *link != reservation)
+    {
+        link = &(*link)->next;
+    }
+    if (*link)
+    {
+        *link = reservation->next;
+    }
+    unlockEngines();
 }
 
 static void completion(bl_Runtime* r, L_Engine* e, bl_Status status)
@@ -467,6 +528,10 @@ bl_Status bl_disposeEngine(bl_EngineContext h)
     if (l_inFrame() || l_inDispatch())
     {
         return BL_BUSY;
+    }
+    if (e->reservedViews)
+    {
+        return L_FAIL(h._runtime, BL_BUSY, "Dispose attached feature contexts before engine");
     }
     L_TRY(l_retire(e));
     engineCleanup(h._runtime, &e->record);

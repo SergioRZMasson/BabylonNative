@@ -65,6 +65,11 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
   interfaces. This exception is limited to private RmlUI adapter files, not
   engine data/algorithms. Keep native UI state and helper algorithms C-style
   where practical; do not use this exception to introduce an engine hierarchy.
+- Private RmlUI adapter boundaries must contain `std::bad_alloc` from the
+  third-party API and translate it to the C99 failure contract. This narrow
+  exception-handling allowance is not an engine exception architecture.
+  Non-transactional third-party ownership/global-initialization failures need
+  explicit invalidation/latched failure, never unsafe retry or silent success.
 - RmlUI is the layout/style/text system. Its backend records/uploads UI through
   **bgfx**, with bgfx as the single GPU renderer/presenter. No SDL_Renderer,
   GDI backing overlay or WebGPU renderer inside Core. SDL/window input remains

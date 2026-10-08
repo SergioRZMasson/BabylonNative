@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import shutil
-import tempfile
 import unittest
 
 from check_style import compiler_ast, inspect_ast
@@ -11,17 +10,23 @@ class StyleChecks(unittest.TestCase):
     def check_source(self, code):
         clang = os.environ.get("LITE_STYLE_CLANG") or shutil.which("clang")
         self.assertIsNotNone(clang, "Clang is required for semantic style tests")
-        with tempfile.TemporaryDirectory(prefix="babylon-lite-style-") as directory:
-            source = Path(directory).resolve() / "fixture.cpp"
+        root = Path(os.environ.get("LITE_STYLE_FIXTURE_ROOT", Path.cwd() / "build" / "style-fixtures"))
+        directory = root / self._testMethodName
+        directory.mkdir(parents=True, exist_ok=True)
+        source = directory.resolve() / "fixture.cpp"
+        try:
             source.write_text(code, encoding="utf-8")
             entry = {
-                "directory": directory,
+                "directory": str(directory.resolve()),
                 "arguments": ["c++", "-std=c++20", str(source)],
             }
             tree = compiler_ast(entry, clang, source)
             errors = set()
             inspect_ast(tree, source, source.parent, errors)
             return errors
+        finally:
+            source.unlink(missing_ok=True)
+            directory.rmdir()
 
     def test_separate_declarations_and_braced_else_if_are_valid(self):
         errors = self.check_source("""
@@ -42,6 +47,24 @@ int select_value(int value) {
         errors = self.check_source("struct GeometryOptions { int first, second; };")
         self.assertEqual(len(errors), 1)
         self.assertIn("first, second", next(iter(errors)))
+
+    def test_required_interface_methods_are_checked(self):
+        errors = self.check_source("""
+class RequiredInterface {
+public:
+    virtual int update(int value) = 0;
+};
+class UiAdapter final : public RequiredInterface {
+    int first, second;
+public:
+    int update(int value) override {
+        int left = 0, right = 1;
+        if (value) return left + right;
+        return first + second;
+    }
+};
+""")
+        self.assertEqual(len(errors), 3)
 
     def test_global_declarations_are_checked(self):
         errors = self.check_source("int first = 0, second = 1;")

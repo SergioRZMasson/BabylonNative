@@ -1,0 +1,2 @@
+# Unified-diff context markers must preserve upstream indentation and blank lines.
+BoxShadowRenderManager.patch -whitespace

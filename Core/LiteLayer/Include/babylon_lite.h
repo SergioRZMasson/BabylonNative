@@ -18,7 +18,7 @@
  * All operations are synchronous on the runtime's creating thread. The Async
  * suffixes preserve source names: a JS binding wraps their returned result in a
  * Promise; native callers receive a completed status. Hosts own event loops,
- * input, DOM/HUD, PNG composition, file dialogs and demo/user-code algorithms.
+ * input, browser-to-RML translation, PNG composition, file dialogs and demo/user-code algorithms.
  * Lite owns transforms, scene membership, draw ordering, resource retirement,
  * shader-interface generation, uniform values and audio master/source routing.
  */
@@ -678,6 +678,210 @@ bl_Status bl_renderFrame(bl_EngineContext engine, double deltaMs);
  * means zero draws. BORROWED records/submits into host bgfx; host calls frame.
  * OWNED advances bgfx once per render call. Target resize and first-frame
  * completion occur before/after work, respectively, not inside user callbacks.
+ */
+
+/* ---------------- Optional retained RmlUI/bgfx native UI ------------------ */
+
+typedef struct bl_UiContext
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_UiContext;
+
+typedef struct bl_UiElement
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_UiElement;
+
+typedef struct bl_UiContextOptions
+{
+    bl_NativeTarget target; /* Exclusive later view range, outside engine ranges. */
+    double densityRatio;    /* RmlUI dp-to-physical-pixel ratio, finite (0,16]. */
+} bl_UiContextOptions;
+
+typedef struct bl_UiStats
+{
+    uint64_t geometryCompileCount;
+    uint64_t geometryReleaseCount;
+    uint64_t textureCreateCount;
+    uint64_t textureReleaseCount;
+    uint64_t drawCount; /* Most recent render. */
+    uint64_t uploadedBytes;
+    size_t liveGeometryCount;
+    size_t liveTextureCount;
+    size_t liveElementCount;
+} bl_UiStats;
+
+typedef enum bl_UiInputKind
+{
+    BL_UI_POINTER_MOVE = 0,
+    BL_UI_POINTER_DOWN,
+    BL_UI_POINTER_UP,
+    BL_UI_POINTER_LEAVE,
+    BL_UI_WHEEL,
+    BL_UI_KEY_DOWN,
+    BL_UI_KEY_UP,
+    BL_UI_TEXT
+} bl_UiInputKind;
+
+typedef enum bl_UiKey
+{
+    BL_UI_KEY_UNKNOWN = 0,
+    BL_UI_KEY_BACKSPACE,
+    BL_UI_KEY_TAB,
+    BL_UI_KEY_ENTER,
+    BL_UI_KEY_ESCAPE,
+    BL_UI_KEY_SPACE,
+    BL_UI_KEY_LEFT,
+    BL_UI_KEY_RIGHT,
+    BL_UI_KEY_UP_ARROW,
+    BL_UI_KEY_DOWN_ARROW,
+    BL_UI_KEY_HOME,
+    BL_UI_KEY_END,
+    BL_UI_KEY_DELETE,
+    BL_UI_KEY_A,
+    BL_UI_KEY_C,
+    BL_UI_KEY_V,
+    BL_UI_KEY_X,
+    BL_UI_KEY_Y,
+    BL_UI_KEY_Z
+} bl_UiKey;
+
+#define BL_UI_MOD_SHIFT UINT32_C(1)
+#define BL_UI_MOD_CONTROL UINT32_C(2)
+#define BL_UI_MOD_ALT UINT32_C(4)
+#define BL_UI_MOD_META UINT32_C(8)
+
+typedef struct bl_UiInput
+{
+    bl_UiInputKind kind;
+    double x;        /* Physical pointer coordinate, or horizontal wheel delta. */
+    double y;        /* Physical pointer coordinate, or vertical wheel delta. */
+    uint32_t button; /* 0 left, 1 right, 2 middle. */
+    bl_UiKey key;
+    uint32_t modifiers;
+    bl_String text; /* UTF-8 for BL_UI_TEXT only. */
+} bl_UiInput;
+
+typedef enum bl_UiEventKind
+{
+    BL_UI_EVENT_CLICK = 0,
+    BL_UI_EVENT_CHANGE,
+    BL_UI_EVENT_POINTER_DOWN,
+    BL_UI_EVENT_POINTER_UP,
+    BL_UI_EVENT_KEY_DOWN,
+    BL_UI_EVENT_KEY_UP
+} bl_UiEventKind;
+
+typedef struct bl_UiEvent
+{
+    bl_UiEventKind kind;
+    bl_UiElement currentTarget;
+    bl_UiElement target; /* Null for markup-created targets without a C99 identity. */
+    bl_Vec2 position;
+    uint32_t button;
+    bl_UiKey key;
+    uint32_t modifiers;
+    bl_String value; /* Borrowed through callback only. */
+} bl_UiEvent;
+
+typedef void (*bl_UiEventCallback)(void* userData, const bl_UiEvent* event);
+
+typedef struct bl_UiListenerToken
+{
+    uint64_t value;
+} bl_UiListenerToken;
+
+bl_Status bl_createUiContext(bl_EngineContext engine, const bl_UiContextOptions* options,
+                             bl_UiContext* context);
+bl_Status bl_disposeUiContext(bl_UiContext context);
+bl_Status bl_setUiViewport(bl_UiContext context, uint32_t width, uint32_t height,
+                           double densityRatio);
+bl_Status bl_getUiRoot(bl_UiContext context, bl_UiElement* root);
+bl_Status bl_createUiElement(bl_UiContext context, bl_String tag, bl_UiElement* element);
+bl_Status bl_appendUiChild(bl_UiElement parent, bl_UiElement child);
+bl_Status bl_removeUiChild(bl_UiElement parent, bl_UiElement child);
+bl_Status bl_disposeUiElement(bl_UiElement element);
+bl_Status bl_setUiProperty(bl_UiElement element, bl_String name, bl_String value);
+bl_Status bl_removeUiProperty(bl_UiElement element, bl_String name);
+bl_Status bl_setUiText(bl_UiElement element, bl_String text);
+bl_Status bl_setUiAttribute(bl_UiElement element, bl_String name, bl_String value);
+bl_Status bl_setUiMarkup(bl_UiElement element, bl_String markup);
+bl_Status bl_loadUiFont(bl_UiContext context, bl_Bytes bytes, bl_String family, uint32_t weight,
+                        bool italic, bool fallback);
+bl_Status bl_registerUiImage(bl_UiContext context, bl_String source, bl_Bytes straightRgba8,
+                             uint32_t width, uint32_t height);
+bl_Status bl_unregisterUiImage(bl_UiContext context, bl_String source);
+bl_Status bl_setUiImageSampling(bl_UiContext context, bl_String source, bool pixelated);
+bl_Status bl_processUiInput(bl_UiContext context, const bl_UiInput* input, bool* consumed);
+bl_Status bl_updateUi(bl_UiContext context, double monotonicTimeSeconds);
+bl_Status bl_renderUi(bl_UiContext context);
+bl_Status bl_setUiWhiteDifference(bl_UiContext context, bool enabled);
+bl_Status bl_getUiStats(bl_UiContext context, bl_UiStats* stats);
+bl_Status bl_addUiEventListener(bl_UiElement element, bl_UiEventKind kind,
+                                bl_UiEventCallback callback, void* userData,
+                                bl_UiListenerToken* token);
+bl_Status bl_removeUiEventListener(bl_UiElement element, bl_UiListenerToken token);
+
+/*
+ * UI is optional; disabled builds return UNSUPPORTED without initialization.
+ * Initial UI contexts require a BORROWED engine. Host renders 3D, renders UI,
+ * then calls bgfx::frame ONCE. UI never presents/resets/advances bgfx. Target
+ * framebuffer remains host-owned; UI render preserves its color/depth. D24S8
+ * is required if transformed clipping uses a stencil mask. Views must be later
+ * than the attached engine and nonoverlapping with every engine/UI reservation.
+ * All UI contexts in the process share one creating thread; another thread is
+ * rejected. Multiple runtimes on that thread may each own independent contexts.
+ *
+ * Context owns document/detached elements/image registrations. Its destruction
+ * invalidates all its element handles and waits for actual submitted work.
+ * Engine disposal is BUSY while contexts remain attached. Runtime cascading
+ * disposal destroys UI before engines. Root element disposal is BUSY; dispose
+ * context instead. Element disposal destroys/invalidate its subtree. Append
+ * requires a detached child, rejects cycles/duplicates/cross-context handles.
+ * Remove detaches and preserves identity. Markup/text replacement invalidates
+ * replaced descendant handles. All strings/images/font bytes are copied.
+ *
+ * Properties are RmlUI names/values, not browser cssText or browser shorthand
+ * emulation. Text is plain escaped UTF-8; markup is an explicit RML boundary.
+ * Unknown properties/unsupported effects fail explicitly, never fake success.
+ * Registered images are tight top-to-bottom straight-alpha RGBA8; backend
+ * converts them to RmlUI premultiplied alpha once. Unregister is BUSY while
+ * retained RmlUI textures reference the source. Other sources use runtime IO.
+ * Registered sources default to linear sampling. setUiImageSampling selects
+ * point minification/magnification when pixelated=true, before texture retention;
+ * retained sources return BUSY, unknown sources INVALID_ARGUMENT. This setting
+ * is source-level, not per-element browser CSS or a font-atlas sampler override.
+ * WhiteDifference defaults false. Enabled contexts use exact white-source
+ * difference composition with source-over alpha; colored geometry, textures,
+ * gradient stops and offscreen layers are UNSUPPORTED, not approximated.
+ * The setting is BUSY during dispatch/update/render/teardown. Hosts give this
+ * subtree its own context/view range and order it relative to normal HUD and
+ * underwater contexts. It does not implement arbitrary colored-source difference.
+ * Missing IO/images/fonts are explicit update/render errors. No white fallback.
+ * Font family/weight (1..1000)/italic/fallback describe the RmlUI registration.
+ * Its global font engine retains copied faces until LAST UI context shutdown.
+ * RmlUI/FreeType allocations and font-byte retention are external to runtime
+ * allocator counters; Core identities/upload staging/resources use allocator.
+ * Update consumes finite process-wide nondecreasing monotonic seconds; all
+ * contexts share that clock, and Core owns no clock/event loop.
+ * Update after mutations before rendering; render requires an initial update.
+ * densityRatio maps RmlUI dp units to physical pixels; RmlUI px stay physical.
+ * Input pointer coordinates are physical. consumed reports RmlUI propagation.
+ *
+ * Event callbacks may mutate style/text/attributes. Topology/listener mutation,
+ * nested update/render/input and disposal during dispatch return BUSY. Callback
+ * spans/userdata are borrowed until removal/context disposal and MUST NOT throw.
+ * This narrow event transport does not implement the complete browser DOM.
+ * Retained-resource/effect/layout failures are latched by the context: later
+ * update/render calls continue reporting the failure rather than silently
+ * omitting failed cached content. Recreate the context after such a failure.
+ * External RmlUI initialization/interfaces cannot coexist with Lite UI.
+ * External allocator failure during RmlUI's non-transactional global startup
+ * leaves UI unavailable in that process, rather than attempting unsafe reuse.
+ * An external allocation failure during element ownership transfer can retire
+ * the affected subtree's identities; context rendering then fails explicitly.
  */
 
 /* ---------------- Data-only camera/transform nodes and properties --------- */

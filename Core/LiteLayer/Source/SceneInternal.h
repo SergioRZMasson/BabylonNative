@@ -71,6 +71,14 @@ struct L_Engine
     bl_CompletionCallback completion;
     void* completionUser;
     bl_EngineStats stats;
+    struct L_ViewReservation* reservedViews;
+};
+
+struct L_ViewReservation
+{
+    L_ViewReservation* next;
+    uint16_t first;
+    uint16_t count;
 };
 
 static_assert(__is_trivial(L_Node) && __is_standard_layout(L_Node), "Node storage must be POD");
@@ -92,6 +100,8 @@ void l_unregisterScene(L_Scene* s);
 void l_sceneCleanup(bl_Runtime* r, L_Record* record);
 bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n);
 bl_Status l_retire(L_Engine* e);
+bl_Status l_reserveViews(L_Engine* engine, L_ViewReservation* reservation);
+void l_releaseViews(L_Engine* engine, L_ViewReservation* reservation);
 
 #define L_NODE_GET(handle, variable) \
     L_Node* variable;                \

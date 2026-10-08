@@ -79,7 +79,10 @@ def inspect_body(node, errors, label):
 
 def inspect_ast(tree, source, root, errors):
     record_names = set()
-    declaration = re.compile(r"(?m)^\s*(?:typedef\s+)?(?:struct|union)\s+([A-Za-z_]\w*)\s*\{")
+    declaration = re.compile(
+        r"(?m)^\s*(?:typedef\s+)?(?:struct|union|class)\s+([A-Za-z_]\w*)"
+        r"(?:\s+final)?(?:\s*:\s*[^{]+)?\s*\{"
+    )
     for path in root.rglob("*"):
         if path.suffix in (".h", ".hpp", ".c", ".cpp") and path.is_file():
             record_names.update(declaration.findall(path.read_text(encoding="utf-8-sig")))
@@ -90,7 +93,8 @@ def inspect_ast(tree, source, root, errors):
         if node.get("kind") in ("RecordDecl", "CXXRecordDecl") and name in record_names:
             fields = [child for child in children if child.get("kind") == "FieldDecl"]
             multiple_declarations(fields, errors, name)
-        if node.get("kind") == "FunctionDecl":
+        if node.get("kind") in ("FunctionDecl", "CXXMethodDecl", "CXXConstructorDecl",
+                                "CXXDestructorDecl"):
             where = location(node)
             if not where.get("includedFrom") and (
                 not where.get("file") or Path(where["file"]).resolve() == source
@@ -138,6 +142,7 @@ def main():
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--clang", required=True)
     parser.add_argument("--clang-format", required=True)
+    parser.add_argument("--ui-enabled", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
     files = sorted(
@@ -150,6 +155,10 @@ def main():
     )
     database = json.loads(args.database.read_text(encoding="utf-8-sig"))
     sources = {path.resolve() for path in files if path.suffix in (".cpp", ".c")}
+    inactive_ui = ("UiDisabled.cpp",) if args.ui_enabled else (
+        "UiGpu.cpp", "UiRmlAdapter.cpp", "UiLayers.cpp"
+    )
+    sources -= {(root / "Source" / name).resolve() for name in inactive_ui}
     checked = set()
     errors = set()
     for entry in database:

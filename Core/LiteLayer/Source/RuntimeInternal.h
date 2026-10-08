@@ -18,6 +18,8 @@ enum L_Kind
     L_TEXTURE,
     L_AUDIO,
     L_SOURCE,
+    L_UI_CONTEXT,
+    L_UI_ELEMENT,
     L_DATA
 };
 

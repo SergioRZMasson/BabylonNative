@@ -4,7 +4,8 @@
 Babylon Lite 1.32.0 API, based on original TypeScript at
 `2e064d88ec7422af946f8ec7f089ac6519f99295`. Its only public header is
 `Core/LiteLayer/Include/babylon_lite.h`; its direct link dependencies are `bgfx`
-and `bx`. It contains no JavaScript runtime, NAPI, NativeEngine, SDL, Dawn/WebGPU
+and `bx`, plus explicitly optional `RmlUi::Core` when
+`BABYLON_LITE_ENABLE_UI=ON`. It contains no JavaScript runtime, NAPI, NativeEngine, SDL, Dawn/WebGPU
 renderer, generated Babylon engine or bblitec runtime.
 
 The original Babylon Lite source is Apache-2.0 licensed. Its license is retained
@@ -20,7 +21,7 @@ are carried by the static target.
 
 | Target | Responsibility |
 |---|---|
-| `LiteLayer` | Native transforms, geometry, scenes, materials, rendering/resource lifetime and audio routing. |
+| `LiteLayer` | Native transforms, geometry, scenes, materials, rendering/resource lifetime, audio routing and optional retained RmlUI/bgfx UI. |
 | `LiteShaderCompiler` | Separate synchronous C99 runtime WGSL compilation service. |
 | `LiteJSBinding` | Thin argument/status/identity/property/callback marshalling to C99. |
 | `LiteNativeTests` | Official-source geometry/audio goldens, mutable nodes, allocator churn and stale identities. |
@@ -31,6 +32,7 @@ are carried by the static target.
 | `LiteNativeProjectedTests` | Optional real bblitec-transpiled test applications projected onto C99; no generated engine/runtime objects. |
 | `LitePlatformAudioTests` | Separate real XAudio2 host primitive/routing tests; no human-audibility assertion. |
 | `LiteMinecraftNative` | Complete bblitec-transpiled original Minecraft C++ application with C99-backed handles and a separate Win32 platform host; no JS VM or legacy engine/PAL objects. |
+| `LiteUiTests` | Optional native retained UI lifecycle, input, real runtime shaders and GPU pixel qualification; `--visible` presents/captures a real bgfx swapchain sample. |
 
 The runtime compiler uses the full public Tint reader/SPIR-V writer at
 `a21a4a1c7c497e6366947ccaefbab768d16f32a8`, repository-pinned SPIRV-Cross and
@@ -98,6 +100,223 @@ public API and v11 containers and cannot validate this integration.
 libraries, with `FETCHCONTENT_SOURCE_DIR_LITETINT` at the declared source pin.
 
 ## Evidence and remaining scope
+
+### Optional retained UI infrastructure
+
+The optional UI feature lives **inside `LiteLayer`**, in isolated `UiGpu.cpp`,
+`UiRmlAdapter.cpp`, `UiInternal.h` and a disabled-feature C99 stub. Native records,
+identity/resource storage and GPU algorithms remain C-style/POD. The four private
+mandatory RmlUI interface adapters are the narrow third-party interface exception;
+RmlUI/FreeType implementation and their containers remain dependency code.
+No RmlUI/STL pointer, class, method table or native shader format enters the
+single public C99 header.
+
+The dependency declarations use the repository's FetchContent patterns:
+
+* RmlUI upstream `mikke89/RmlUi`, source
+  `b7b4a0688262832eacf3b9abb41f8bbe73868af8` (6.4 development, MIT).
+* FreeType source `42608f77f20749dd6ddc9e0536788eaad70ea4b5`
+  (2.13.3, upstream FTL/GPL licensing).
+* FreeType compression/image/shaping extras and RmlUI samples/Lua/SVG/Lottie
+  are disabled in dependency-local configuration scope. This does not change
+  unrelated BabylonNative dependency/install/shared-library options.
+
+Source-cache overrides must contain these exact sources, either pristine or with
+only the reviewed renderer-scoped box-shadow cache patch.
+The compiler checkout's RmlUI cache has additional patches; its private
+prebuilt libraries are not this component's dependency. Dependency licenses
+remain in their source trees. The unit font is upstream's Lato Latin Regular,
+with provenance/license in `RmlUi/Samples/assets/LICENSE.txt`; no font is
+silently substituted or vendored into Core.
+`Dependencies/RmlUi/Patches/BoxShadowRenderManager.patch` is MIT-licensed and
+does not change the base pin, geometry/style/hash data, blur or quality.
+It scopes the otherwise process-global shadow cache by owning render manager,
+retains stable geometry-key references and erases empty manager buckets.
+`ApplyBoxShadowPatch.cmake` verifies the pin/identity files and exact canonical
+LF before/after hashes, applies cached overrides too, accepts the patched pair
+idempotently and rejects mismatched/partial states. `RmlUiBoxShadowPatch.json`
+records each build's source, patch digest and verified postcondition; failed
+verification cannot leave a stale successful receipt.
+
+Root builds enable `BABYLON_LITE_ENABLE_UI=ON` with
+`BABYLON_NATIVE_BUILD_LITE_LAYER=ON`.
+`BABYLON_NATIVE_BUILD_LITE_UI_TESTS=ON` additionally requires the separate
+`LiteShaderCompiler` target. Standalone `Core/LiteLayer` also supports the UI
+flag and the same source pins; UI OFF does not fetch RmlUI or FreeType.
+
+The new C99 context attaches to a **BORROWED** engine and the same host-owned
+target, reserving an exclusive later view range outside every engine/context
+reservation. Host ordering is:
+
+1. Dispatch native input and original user updates/3D callbacks.
+2. Submit 3D through the borrowed Lite engine.
+3. Call `bl_updateUi` with process-wide nondecreasing seconds, then `bl_renderUi`.
+4. Advance/present bgfx **once**, in the host.
+
+UI never calls `bgfx::frame`, resets/presents bgfx or owns an OS event loop.
+It preserves the target's 3D color/depth. Rounded/transformed clip masks use
+D24S8 stencil; rectangular scissoring needs no stencil. Static geometry, texture
+and font atlas uploads are retained. Resource release uses bgfx's ordered
+destruction commands, not guessed frame counts or a per-text-update GPU stall.
+Context teardown uses the existing real submitted-work synchronization callback.
+Engine disposal returns BUSY while UI reservations remain; runtime cascading
+disposal destroys UI first.
+
+Contexts use generation-protected element identities and own detached subtrees.
+Append rejects cycles, already-attached children and cross-context identities.
+Remove detaches without disposing; text/markup replacement invalidates replaced
+descendant handles. Plain text is escaped; identical repeated text setters avoid
+rebuilding geometry. Markup is RML, not browser HTML. Narrow click/change/pointer/
+key listeners provide C99 values and tokens. Callbacks may change style/text/
+attributes, but must not throw; nested frames/input, topology/listener mutation
+and disposal during dispatch return BUSY.
+
+RmlUI is process-global: all UI contexts share one creating thread and clock.
+Different runtimes on that thread are supported; externally configured RmlUI
+cannot coexist with this owned UI lifecycle. Registered font data is copied,
+deduplicated by family/weight/style/data and retained until LAST UI shutdown.
+Native identities/staging/resources use the runtime allocator. RmlUI/FreeType
+allocations and retained font bytes are explicitly **external** to its counters.
+An external allocation failure during non-transactional RmlUI global startup
+makes UI unavailable in that process, rather than attempting unsafe reuse.
+
+The backend invokes the **injected runtime WGSL compiler** for authored UI
+color, textured and gradient programs. It validates v12 containers, linked
+attribute semantics (position2/color4/UV2), uniform offsets/types/counts/native
+packing and sampler reflection. Results are released once for every invocation,
+including failures. No Tint/compiler/VM dependency enters `LiteLayer`.
+UI colors/textures use display-encoded RGBA8 premultiplied-alpha composition;
+registered/IO straight-alpha images are converted once before uploading.
+Registered sources default to linear sampling.
+`bl_setUiImageSampling(context, source, true)` selects real point
+minification/magnification before RmlUI retains that source's texture. Retained
+sources return BUSY even for an identical setting; unknown sources are invalid.
+It is an immutable-source sampler choice, not per-element CSS or a font-atlas
+override. A browser `image-rendering: pixelated` bridge must register/select the
+appropriate source before referencing it in RML.
+
+Current supported scope: retained elements, RML, properties/attributes/plain
+text, physical viewport and RmlUI `dp` density, real font atlas/images,
+source-over alpha, translation/scale/matrix transforms, rectangular and stencil
+clipping, linear/radial gradients with 2–8 resolved stops (including repetition),
+and the documented narrow input/event transport.
+The approved white-only context composition is
+`bl_setUiWhiteDifference(context, true)`: exact white premultiplied difference
+using inverse-destination-color/source-over blend factors, retaining source-over
+alpha. Color geometry/images/gradient stops and layers are explicitly rejected
+in that mode. Hosts use a separate ordered context for the crosshair; this is
+not an approximation for arbitrary colored-source difference.
+
+The private backend now records real cached offscreen RGBA8/D24S8 layers,
+ordered reserved-view passes, source-over/replace composition, cropped GPU
+saved textures and separable Gaussian blur. The Gaussian kernel uses a normalized
+discrete three-sigma extent; paired bilinear samples implement the same weighted
+neighbor taps, not a lower-resolution gradient or CPU shadow raster. Sigma
+0–512, up to eight layers and one blur filter per composite are checked limits.
+Texture dimensions and the granted view budget are checked before use.
+Actual layer resources are reused; resize retires old GPU resources through
+bgfx ordering. The real runtime compiler supplies the additional WGSL program.
+Unknown properties and unsupported renderer effects fail explicitly.
+Missing images/fonts/services and retained effect failures are latched: later
+update/render calls keep reporting the error instead of silently omitting cached
+content. Recreate a failed context to recover.
+
+**Host translation limits matter.** At this pristine RmlUI pin, `rgba()` alpha
+is **0–255**, not browser 0–1; hex RGBA or percentage alpha avoids that ambiguity.
+RmlUI `px` are physical; `dp` scale with `densityRatio`. Hosts translating browser
+logical CSS must convert appropriate units. Absolute overflow may need
+`clip: always` to preserve browser clipping. Browser background shorthands,
+`cssText`, system-font fallback and text-shadow need deliberate host translation
+to actual RmlUI properties/font effects/resources. Complex filter chains,
+mask images, conic gradients, clipboard and general colored-source browser
+`mix-blend-mode:difference` remain unsupported. The original underwater
+inset shadow is implemented through RmlUI's actual layer/blur/stencil/save
+commands. There is
+no full Minecraft/browser DOM parity claim and no placeholder white texture,
+GDI backing surface or silent difference/filter approximation.
+
+The exact 1280×720 sigma-110 inset-shadow fixture passes center/edge color/alpha
+and a Gaussian numeric reference, zero/half/full opacity, resize/density
+invalidation, native allocation failure and reserved-view exhaustion checks.
+Across 1000 static frames, texture creations remain 9; draw count falls from
+16 cold to 2 warm. These are resource/command counters, not a complete-host
+timing claim.
+The reviewed patch resolves an upstream-pinned multicontext issue: RmlUI's process-global
+shadow cache omits render-manager identity, so identical shadows can reuse the
+first context's geometry/texture. The regression now passes in Release
+and Debug: simultaneous identical shadows match the single-context pixels,
+destroying the first owner leaves the second valid, recreation and sixteen
+mixed-context churn cycles preserve exact pixels and per-context submissions.
+The immutable original failure evidence remains in
+`rml-shadow-cache-defect.json`; patch application/idempotence/mismatch rejection
+is also an executable test. Single-context original underwater rendering
+has been qualified independently; the host's complete original-input audit is
+owned by its separate integration agent.
+
+Fresh infrastructure Release/Debug/UI-OFF evidence is under
+`build/lite-c99/rmlui-infrastructure`, not historical qualified binary trees.
+`LiteUiTests` verifies actual pixels over a 3D box for font/image/alpha/gradient/
+scissor/transform/rounded-stencil/DPI cases, unchanged-frame retention, live
+mutations/events, 1000-node churn, stale identities, native allocation failure,
+multiple contexts/runtimes, view conflicts and compiler-result ownership.
+Point-versus-linear pixels use the same two-color image data; failed native
+image-registration allocations leave no issued source and permit clean retry.
+Host read/decode failures release exactly the results whose callbacks were
+invoked, and attempts to re-enter Core during the IO callback return BUSY.
+Failed submitted-work synchronization leaves the retained context/resources
+alive and unchanged, rather than prematurely destroying or changing samplers.
+The 1000-node warmup/regrowth check requires exact native allocator plateau;
+process private-byte growth also stays within a disclosed 2 MiB allowance.
+The latter includes driver/test/library heaps and is not a precise RmlUI-only
+allocation counter or a claim about arbitrary UI workloads.
+The visible sample captures the actual swapchain to
+`Release/UiTests/ui-visible-swapchain.ppm`; offscreen captures have separate
+initial/mutated/DPI files. Original native CPU/GPU/implementation tests are
+recompiled in this new tree, and the UI-enabled data-only map contains only
+the original four CPU modules, with no UI/font/renderer/compiler/VM objects.
+This is infrastructure/component evidence, not a fresh full-host benchmark,
+binding qualification or full demonstration corpus result.
+
+Executed gates: six Release CTests (UI plus dependency-patch and recompiled original CPU/GPU/
+implementation/data-only tests), three Debug CTests (UI/patch/data-only), strict C99
+header compilation, LLVM 22 formatting/AST checks including interface methods,
+and eight style-checker unit tests. UI-OFF builds with no RmlUI/FreeType source
+population; its independently linked data-only executable passes the same
+four-CPU-module map audit. `source-link-audit.json` records unchanged original
+98 C99 signatures, unchanged non-UI engine bodies except the minimal engine
+view-reservation hooks, and actual linker/source hashes.
+The Debug Core/RmlUI build is unoptimized with symbols and library assertions,
+using Release CRT/iterator ABI to match the independently imported qualified
+shader compiler. This is not a Debug build of Tint or the shader service.
+
+Standalone infrastructure reproduction uses exact-pin source caches, an existing
+qualified shader-service library tree and its exact-pin Tint libraries:
+
+```powershell
+# Run configure/build in the same vcvars64.bat command process; use jobs 3.
+cmake -S Core\LiteLayer -B build\lite-c99\rmlui-infrastructure\Release -G Ninja `
+    -DCMAKE_BUILD_TYPE=Release -DBABYLON_LITE_ENABLE_UI=ON `
+    -DBABYLON_NATIVE_BUILD_LITE_UI_TESTS=ON -DBABYLON_LITE_ENABLE_STYLE_CHECKS=ON `
+    -DFETCHCONTENT_SOURCE_DIR_LITEBGFX=<exact-bgfx.cmake-source> `
+    -DFETCHCONTENT_SOURCE_DIR_RMLUI=<unmodified-pinned-RmlUI-source> `
+    -DFETCHCONTENT_SOURCE_DIR_LITEFREETYPE=<pinned-FreeType-source> `
+    -DLITE_UI_COMPILER_LIBRARY_DIR=<qualified-Release-native-build> `
+    -DLITE_UI_TINT_LIBRARY_DIR=<exact-pin-Release-Tint-libraries>
+cmake --build build\lite-c99\rmlui-infrastructure\Release `
+    --target LiteUiTests LiteUiHeaderC99 LiteUiDataOnly --parallel 3
+ctest --test-dir build\lite-c99\rmlui-infrastructure\Release --output-on-failure
+Push-Location build\lite-c99\rmlui-infrastructure\Release\UiTests
+.\LiteUiTests.exe --visible
+Pop-Location
+```
+
+The optional `LITE_UI_CORE_REGRESSION_TESTS=ON` uses existing source-pinned
+GoogleTest via `LITE_UI_GTEST_SOURCE_DIR`/`LITE_UI_GTEST_LIBRARY_DIR` to recompile
+the original Core CPU/GPU/implementation tests without altering them or
+historical binaries. Root integration uses its normal GoogleTest/shader targets.
+This task does not qualify the original thirteen full integration CTests or
+six native Minecraft CTests against a new full-UI host; that is a separate
+coordinated host/binding qualification, not an inference from component passes.
 
 `NativeTests/Fixtures/OfficialLite/inventory.json` records eight independent
 official-package geometry fixtures and nine Float32 audio curves, including
@@ -483,6 +702,120 @@ Receipts/audits/captures are under `build/lite-c99/no-ui-comparison`, including
 `qualification-1380.json` and `StandardSource/baseline-overlay.json`.
 The investigation report is `Experiments/Mincraft/pure-native/NO-UI-RESULTS.md`.
 No RmlUI/bgfx backend was implemented by this temporary comparison.
+
+### Original STANDARD C++ Minecraft with retained RmlUI
+
+`NativeProjection/FullMinecraft/RmlUiExperiment` is a separate, explicit opt-in
+native host. It compiles the **same unedited 26 STANDARD compiler-produced user
+translation units and generated `application.hpp`** used by the fresh full-UI
+SDL/Dawn/provider baselines under `build/lite-c99/rmlui-minecraft/Common`.
+`main=MinecraftApplication` is only a user-TU compiler entrypoint adaptation.
+Material descriptions are rehydrated manifest **data**, outside those files;
+the shared compiler-inlined audio routing prelude is separately classified,
+not advertised as exclusively user-authored logic.
+
+The target builds current UI-enabled `LiteLayer`, bgfx, RmlUI and FreeType
+through their source/transitive CMake targets, not a mixture of old Core
+archives. Only the independently qualified runtime shader compiler/Tint archives
+are imported outside Core. It has no NAPI, JS VM, NativeEngine, generated engine
+or legacy PAL renderer objects. The host reuses existing outside-Core Win32
+input/file/dialog/WIC/XAudio transport. **This is Win32, not SDL3.** It does not
+create a GDI overlay/backing bitmap, scan/copy a complete HUD surface, remove
+the original HUD or replace the game with a reduced scene.
+
+The browser/standard-compiler style front end retains C99 DOM identities and
+forwards actual text/style/child mutations to LiteLayer. It translates logical
+pixels to density-scaled `dp`, exact decimal browser alpha to RmlUI percentage
+alpha, the original font stacks, background metadata and text shadows. Original
+hotbar PNGs are decoded once with WIC and registered with **point** sampling
+before texture retention; their logical URLs have stable registered aliases.
+Absolute help/toast content uses the browser's remaining-containing-block
+shrink-to-fit width instead of an unbounded pristine-RmlUI inline width.
+The original `opacity Ns ease` transition is evaluated in the outside-Core
+browser-style front end as CSS `cubic-bezier(.25,.1,.25,1)`, including initial
+style, unchanged targets, same-frame coalescing and reversal shortening.
+Unknown/unrepresented style requirements fail rather than silently disappearing.
+
+The source-authored white crosshair difference effect is restored at the binding
+boundary: STANDARD CSS lowering omitted it in the reference baselines. Three
+disjoint retained white rectangles preserve its union/opacity without blending
+the center twice. They use the approved white-only difference C99 context,
+not normal white drawing or framebuffer readback. View reservations/order are
+3D `0..31`, crosshair `32..63`, normal HUD/underwater `64..255`; insufficient
+renderer view capacity is an explicit startup failure. The original underwater
+radial gradient/inset shadow remains real Core bgfx layer/blur/saved-texture work,
+not a CPU raster or replacement gradient. Native updates submit 3D, update/render
+both UI contexts, and call `bgfx::frame` **once**. Captures are requested on the
+same submit packet before that advance; extra fence/readback frames are outside
+benchmarks.
+
+The host uses installed, hashed Segoe UI/Consolas/Symbol faces without committing
+or redistributing private font binaries. Pristine RmlUI/FreeType rasterization
+differs from the compiler host's Windows font engine. Restored crosshair
+composition also intentionally differs from the stripped reference rendering.
+**No RGB-exact full-UI parity or performance win is claimed.** This app does not
+establish general arbitrary colored-source difference, all browser CSS or
+complete demonstration-corpus coverage. General multi-context shadow readiness
+belongs to the separately qualified, pin-preserving dependency-cache correction,
+not an inference from this app's one shadow-producing context.
+
+Configure in the same Visual Studio developer command process, with the
+exact-pin source-cache paths and qualified shader-library paths described in
+the UI infrastructure section:
+
+```powershell
+cmake -S Apps\LiteTests\NativeProjection\FullMinecraft\RmlUiExperiment `
+    -B build\lite-c99\rmlui-minecraft\NativeRelease -G Ninja `
+    -DCMAKE_BUILD_TYPE=Release -DLITE_MINECRAFT_RMLUI=ON `
+    -DBBLITEC_SOURCE_DIR=<built-standard-compiler-checkout> `
+    -DLITE_COMMON_EMITTED_DIR=<root>\build\lite-c99\rmlui-minecraft\Common\Generated `
+    -DLITE_UI_COMPILER_LIBRARY_DIR=<qualified-native-shader-library-root> `
+    -DLITE_UI_TINT_LIBRARY_DIR=<exact-pin-Release-Tint-library-root> `
+    -DLITE_JSON_INCLUDE_DIR=<nlohmann-include-directory> `
+    -DFETCHCONTENT_SOURCE_DIR_LITEBGFX=<exact-bgfx.cmake-source> `
+    -DFETCHCONTENT_SOURCE_DIR_RMLUI=<declared-pinned-RmlUI-source> `
+    -DFETCHCONTENT_SOURCE_DIR_LITEFREETYPE=<declared-FreeType-source>
+cmake --build build\lite-c99\rmlui-minecraft\NativeRelease --parallel 3
+ctest --test-dir build\lite-c99\rmlui-minecraft\NativeRelease --output-on-failure
+.\build\lite-c99\rmlui-minecraft\NativeRelease\LiteMinecraftRmlUiNative.exe
+```
+
+Nine Release tests and the same nine Debug tests qualify translation/tools,
+1000 unchanged retained UI frames with native click/text/border/scale/font/DPI
+mutation, original 180/1380-frame 397/403-mesh idle runs, the explicitly separate
+37-event Win32 replay, real save/load dialogs and nonzero device audio,
+resize/DPI, and the source underwater overlay over the actual GPU scene.
+The underwater case is explicitly a **UI-only opacity override**, not evidence
+that the player entered water; it is forbidden in benchmark mode. Captures,
+receipts and stronger DOM/control guards are kept in unique build-local
+`Cases` directories. The Debug source graph has symbols/unoptimized code and
+assertions, but uses Release CRT/iterator ABI to match the imported qualified
+shader service; it is not a Debug Tint qualification.
+
+`Tools/audit.py` checks actual Ninja compiler/header dependencies, unchanged
+source bytes, source-transitive Core/UI objects, PE imports and font/binary
+hashes. `Tools/verify-run.py` rejects missing/empty UI, fabricated private world
+observations, absent icons/selection/F3/help/toast changes, stale captures and
+unmatched timing arrays. Fresh receipts refuse overwrites.
+
+```powershell
+.\build\lite-c99\rmlui-minecraft\NativeRelease\LiteMinecraftRmlUiNative.exe `
+    --benchmark-output=<fresh-absolute-output.json> --warmup=180 --measure=1200
+```
+
+The benchmark interface retains SEED 1337/radius 6, all original user updates,
+1280×720/MSAA 1/no-vsync/hidden **real swapchain**, fixed simulation and explicit
+virtual UI/timer clocks. It rejects physical input, validation hashing,
+capture/readback, save/load, resize and diagnostic UI overrides. Raw totals
+include platform timers/audio polling, original C++ update/Core 3D, retained
+RmlUI update/render, bgfx advance/present and user GC. OS polling/script dispatch,
+file output and shutdown are explicitly outside that bracket. Separate raw
+Core, RmlUI update/render, presenter, process/main-thread execution,
+renderer-submit/wait and GPU frequency/frame-ID samples retain their different
+scopes. Unavailable GPU timings are `-1`; repeated GPU IDs must be deduplicated.
+No per-frame JSON or file output occurs. Parent-controlled balanced full-host
+comparisons, profiling-overhead checks and tail/latency acceptance remain
+separate from these functional qualifications.
 
 ### Application-only native projection
 

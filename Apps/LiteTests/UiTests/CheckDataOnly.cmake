@@ -1,0 +1,5 @@
+include("${CMAKE_CURRENT_LIST_DIR}/../NativeTests/Tools/CheckDataOnlyLink.cmake")
+if(LINK_MAP MATCHES "rmlui:|freetype:|LiteLayer:Ui(Gpu|Layers|RmlAdapter|Disabled)\\.cpp\\.obj")
+    message(FATAL_ERROR "Data-only consumer unexpectedly linked UI/font implementation.")
+endif()
+message(STATUS "Optional UI link: no UI initialization, layout, font or renderer objects.")

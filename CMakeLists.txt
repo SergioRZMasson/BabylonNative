@@ -71,6 +71,14 @@ FetchContent_Declare(SPIRV-Cross
     GIT_REPOSITORY https://github.com/BabylonJS/SPIRV-Cross.git
     GIT_TAG 7c8705749fc1e234119c20695f82179b30d90914
     EXCLUDE_FROM_ALL)
+FetchContent_Declare(RmlUi
+    GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
+    GIT_TAG b7b4a0688262832eacf3b9abb41f8bbe73868af8
+    EXCLUDE_FROM_ALL)
+FetchContent_Declare(LiteFreetype
+    GIT_REPOSITORY https://github.com/freetype/freetype.git
+    GIT_TAG 42608f77f20749dd6ddc9e0536788eaad70ea4b5
+    EXCLUDE_FROM_ALL)
 
 # --------------------------------------------------
 
@@ -122,6 +130,8 @@ option(BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER "Build the separate runtime WGS
 option(BABYLON_NATIVE_BUILD_LITE_TESTS "Build the Babylon Lite native contract tests." OFF)
 option(BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS "Build the independent runtime shader compiler tests." OFF)
 option(BABYLON_NATIVE_BUILD_LITE_PLAYGROUND "Build the Babylon Lite JavaScript host." OFF)
+option(BABYLON_LITE_ENABLE_UI "Build the optional retained RmlUI/bgfx LiteLayer feature." OFF)
+option(BABYLON_NATIVE_BUILD_LITE_UI_TESTS "Build the retained UI GPU and lifecycle tests." OFF)
 
 # WARNING: This is experimental. Only use it if you can ensure that your application will properly handle thread affinity.
 option(BABYLON_NATIVE_CHECK_THREAD_AFFINITY "Checks thread safety in the graphics device calls. It can be removed if hosting application ensures thread coherence." ON)
@@ -156,6 +166,13 @@ if(BABYLON_NATIVE_BUILD_LITE_PLAYGROUND AND NOT BABYLON_NATIVE_PLUGIN_LITEJSBIND
 endif()
 if(BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS AND NOT BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER)
     message(FATAL_ERROR "Lite shader tests require BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER=ON.")
+endif()
+if(BABYLON_LITE_ENABLE_UI AND NOT BABYLON_NATIVE_BUILD_LITE_LAYER)
+    message(FATAL_ERROR "Lite UI requires BABYLON_NATIVE_BUILD_LITE_LAYER=ON.")
+endif()
+if(BABYLON_NATIVE_BUILD_LITE_UI_TESTS AND
+    (NOT BABYLON_LITE_ENABLE_UI OR NOT BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER))
+    message(FATAL_ERROR "Lite UI tests require UI and the separate LiteShaderCompiler.")
 endif()
 
 # Polyfills
@@ -443,7 +460,7 @@ if(BABYLON_NATIVE_BUILD_APPS)
     add_subdirectory(Apps)
 endif()
 
-if(BABYLON_NATIVE_BUILD_LITE_TESTS OR BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS OR BABYLON_NATIVE_BUILD_LITE_PLAYGROUND)
+if(BABYLON_NATIVE_BUILD_LITE_TESTS OR BABYLON_NATIVE_BUILD_LITE_SHADER_TESTS OR BABYLON_NATIVE_BUILD_LITE_PLAYGROUND OR BABYLON_NATIVE_BUILD_LITE_UI_TESTS)
     enable_testing()
     add_subdirectory(Apps/LiteTests)
 endif()

@@ -104,6 +104,10 @@ set_property(TARGET bimg PROPERTY FOLDER Dependencies/bgfx)
 set_property(TARGET bx PROPERTY FOLDER Dependencies/bgfx)
 target_compile_definitions(bx PRIVATE _CRT_SECURE_NO_WARNINGS)
 
+if(BABYLON_LITE_ENABLE_UI)
+    include("${CMAKE_CURRENT_LIST_DIR}/RmlUi.cmake")
+endif()
+
 foreach(_bimg_target IN ITEMS bimg_decode bimg_encode tinyexr)
     if(TARGET ${_bimg_target})
         target_compile_definitions(${_bimg_target} PRIVATE _CRT_SECURE_NO_WARNINGS)
