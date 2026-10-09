@@ -84,6 +84,8 @@ def inspect_ast(tree, source, root, errors):
         r"(?:\s+final)?(?:\s*:\s*[^{]+)?\s*\{"
     )
     for path in root.rglob("*"):
+        if path == root / "json" / "json.hpp":
+            continue
         if path.suffix in (".h", ".hpp", ".c", ".cpp") and path.is_file():
             record_names.update(declaration.findall(path.read_text(encoding="utf-8-sig")))
 

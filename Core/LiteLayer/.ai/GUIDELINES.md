@@ -53,6 +53,13 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
 - No NAPI/JS VM, SDL, WebGPU/Dawn renderer, Windows platform calls, image/audio
   codec library, cgltf, Tint, glslang or SPIRV-Cross inside LiteLayer.
   bgfx's own transitive dependencies do not permit direct Core use of them.
+- User-approved JSON storage (2026-10-09): unmodified nlohmann_json 3.12.0 and
+  its MIT license are vendored at `json/json.hpp` and `json/LICENSE`, using the
+  pinned glTF-SDK reference recorded in `json/README.md`. This is a storage
+  location, not permission to use JSON/STL in engine algorithms. The separate
+  native asset decoder consumes `Babylon::LiteAssetJson`; LiteLayer's direct
+  dependency guard and sole public C99 header remain unchanged. Preserve
+  third-party bytes rather than formatting or rewriting the vendor header.
 - Runtime shader compilation, native windows/input/files/image decoding,
   audio output and user-language containers/GC stay in **separate** components.
   Host services cross a narrow C-compatible callback/data boundary.

@@ -7,14 +7,18 @@ from check_style import compiler_ast, inspect_ast
 
 
 class StyleChecks(unittest.TestCase):
-    def check_source(self, code):
+    def check_source(self, code, vendored_json=None):
         clang = os.environ.get("LITE_STYLE_CLANG") or shutil.which("clang")
         self.assertIsNotNone(clang, "Clang is required for semantic style tests")
         root = Path(os.environ.get("LITE_STYLE_FIXTURE_ROOT", Path.cwd() / "build" / "style-fixtures"))
         directory = root / self._testMethodName
         directory.mkdir(parents=True, exist_ok=True)
         source = directory.resolve() / "fixture.cpp"
+        vendor = directory / "json" / "json.hpp"
         try:
+            if vendored_json is not None:
+                vendor.parent.mkdir(exist_ok=True)
+                vendor.write_text(vendored_json, encoding="utf-8")
             source.write_text(code, encoding="utf-8")
             entry = {
                 "directory": str(directory.resolve()),
@@ -26,7 +30,17 @@ class StyleChecks(unittest.TestCase):
             return errors
         finally:
             source.unlink(missing_ok=True)
+            if vendored_json is not None:
+                vendor.unlink(missing_ok=True)
+                vendor.parent.rmdir()
             directory.rmdir()
+
+    def test_unmodified_json_vendor_is_not_owned_engine_style(self):
+        errors = self.check_source(
+            '#include "json/json.hpp"\nint value() { return 1; }\n',
+            vendored_json="struct VendorJson { int first, second; };\n",
+        )
+        self.assertEqual(errors, set())
 
     def test_separate_declarations_and_braced_else_if_are_valid(self):
         errors = self.check_source("""
