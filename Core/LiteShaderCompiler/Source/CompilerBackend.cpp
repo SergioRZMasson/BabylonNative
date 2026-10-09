@@ -11,6 +11,8 @@
 #include <src/tint/lang/core/type/i32.h>
 #include <src/tint/lang/core/type/vector.h>
 #include <src/tint/lang/core/type/matrix.h>
+#include <src/tint/lang/core/type/array.h>
+#include <src/tint/lang/core/type/struct.h>
 #include <src/tint/lang/spirv/writer/writer.h>
 #include <spirv_hlsl.hpp>
 #include <bgfx/bgfx.h>
@@ -20,6 +22,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <limits>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -104,6 +107,80 @@ namespace Babylon::LiteShaderCompiler
             throw std::runtime_error("WGSL uniform type is outside the scalar/vector/mat4 reflection contract.");
         }
 
+        uint32_t CheckedOffset(uint32_t base, uint64_t offset, uint32_t blockSize)
+        {
+            const uint64_t absolute = static_cast<uint64_t>(base) + offset;
+            if (absolute > blockSize || absolute > (std::numeric_limits<uint32_t>::max)())
+            {
+                throw std::runtime_error("WGSL semantic uniform layout offset overflow.");
+            }
+            return static_cast<uint32_t>(absolute);
+        }
+
+        void ReflectLeaves(const tint::core::type::Type* type, const std::string& path,
+            uint32_t offset, uint32_t blockSize, uint32_t depth, std::vector<UniformMember>& result)
+        {
+            if (depth > 64 || result.size() >= 65520u / 4u || type->Size() > blockSize - offset)
+            {
+                throw std::runtime_error("WGSL semantic uniform layout exceeds reflection limits.");
+            }
+            if (const auto* structure = type->As<tint::core::type::Struct>())
+            {
+                for (const auto* member : structure->Members())
+                {
+                    const std::string name = path.empty() ? member->Name().Name()
+                                                          : path + "." + member->Name().Name();
+                    ReflectLeaves(member->Type(), name, CheckedOffset(offset, member->Offset(), blockSize),
+                        blockSize, depth + 1, result);
+                }
+                return;
+            }
+            if (const auto* array = type->As<tint::core::type::Array>())
+            {
+                const auto count = array->ConstantCount();
+                if (!count || !*count)
+                {
+                    throw std::runtime_error("WGSL uniform reflection requires fixed-size arrays.");
+                }
+                const uint32_t stride = array->ImplicitStride();
+                if (stride < array->ElemType()->Size() ||
+                    static_cast<uint64_t>(stride) * *count > array->Size())
+                {
+                    throw std::runtime_error("WGSL uniform array semantic stride is inconsistent.");
+                }
+                for (uint32_t i = 0; i < *count; ++i)
+                {
+                    ReflectLeaves(array->ElemType(), path + "[" + std::to_string(i) + "]",
+                        CheckedOffset(offset, static_cast<uint64_t>(stride) * i, blockSize),
+                        blockSize, depth + 1, result);
+                }
+                return;
+            }
+            if (const auto* vector = type->As<tint::core::type::Vector>();
+                vector && (vector->Type()->Is<tint::core::type::U32>() ||
+                           vector->Type()->Is<tint::core::type::I32>()))
+            {
+                for (uint32_t i = 0; i < vector->Width(); ++i)
+                {
+                    ReflectLeaves(vector->Type(), path + "[" + std::to_string(i) + "]",
+                        CheckedOffset(offset, static_cast<uint64_t>(4) * i, blockSize),
+                        blockSize, depth + 1, result);
+                }
+                return;
+            }
+            const uint32_t kind = UniformType(type);
+            const uint32_t size = type->Size();
+            for (const auto& leaf : result)
+            {
+                if (leaf.name == path || (offset < leaf.byteOffset + leaf.byteSize &&
+                                          leaf.byteOffset < offset + size))
+                {
+                    throw std::runtime_error("WGSL semantic uniform leaf alias/overlap.");
+                }
+            }
+            result.push_back({path, offset, size, kind});
+        }
+
         std::vector<UniformMember> ReflectMembers(const tint::Program& program, Binding binding)
         {
             for (const auto* variable : program.AST().GlobalVariables())
@@ -124,10 +201,7 @@ namespace Babylon::LiteShaderCompiler
                     throw std::runtime_error("WGSL uniform bindings must be declared as structs.");
                 }
                 std::vector<UniformMember> result;
-                for (const auto* member : type->Members())
-                {
-                    result.push_back({member->Name().Name(), member->Offset(), member->Type()->Size(), UniformType(member->Type())});
-                }
+                ReflectLeaves(type, "", 0, type->Size(), 0, result);
                 return result;
             }
             throw std::runtime_error("WGSL uniform binding has no semantic declaration.");

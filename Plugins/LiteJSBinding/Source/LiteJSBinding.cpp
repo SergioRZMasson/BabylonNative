@@ -31,7 +31,12 @@ namespace Babylon::Plugins::LiteJSBinding
             AudioEngine,
             SoundSource,
             UiContext,
-            UiElement
+            UiElement,
+            ArcCamera,
+            StandardMaterial,
+            Light,
+            Control,
+            Limits
         };
 
         struct Token
@@ -44,6 +49,14 @@ namespace Babylon::Plugins::LiteJSBinding
 
         struct State;
         void SurfaceCallback(State& state, Napi::Env env);
+
+        struct ControlPredicates
+        {
+            State* owner{};
+            Napi::FunctionReference pointerDown;
+            Napi::FunctionReference externalDrag;
+            Napi::FunctionReference pendingPick;
+        };
 
         struct BeforeCallback
         {
@@ -107,6 +120,8 @@ namespace Babylon::Plugins::LiteJSBinding
             uint32_t uiCallDepth{};
             FrameTimings frameTimings{};
             std::vector<Token> finalized;
+            std::map<uint64_t, Kind> familyKinds;
+            std::map<uint64_t, std::unique_ptr<ControlPredicates>> controlPredicates;
 
             void DrainFinalized(Napi::Env env)
             {
@@ -123,13 +138,30 @@ namespace Babylon::Plugins::LiteJSBinding
                 {
                     const auto& token = work[index];
                     bl_Status status = BL_OK;
-                    if (token.kind == Kind::Node || token.kind == Kind::Camera || token.kind == Kind::Mesh)
+                    if (token.kind == Kind::Node || token.kind == Kind::Camera || token.kind == Kind::Mesh ||
+                        token.kind == Kind::ArcCamera || token.kind == Kind::Light)
                     {
                         status = bl_disposeNode(token.nodeIdentity);
                     }
                     else if (token.kind == Kind::Material)
                     {
                         status = bl_disposeShaderMaterial({token.identity._runtime, token.identity._id});
+                    }
+                    else if (token.kind == Kind::StandardMaterial)
+                    {
+                        status = bl_disposeStandardMaterial({token.identity._runtime, token.identity._id});
+                    }
+                    else if (token.kind == Kind::Control)
+                    {
+                        status = bl_detachControl({token.identity._runtime, token.identity._id});
+                        if (status == BL_OK || status == BL_DISPOSED)
+                        {
+                            controlPredicates.erase(token.identity._id);
+                        }
+                    }
+                    else if (token.kind == Kind::Limits)
+                    {
+                        status = bl_removeCameraLimits({token.identity._runtime, token.identity._id});
                     }
                     else if (token.kind == Kind::Texture)
                     {
@@ -165,6 +197,10 @@ namespace Babylon::Plugins::LiteJSBinding
                     {
                         finalized.insert(finalized.end(), work.begin() + index, work.end());
                         Check(env, status);
+                    }
+                    else
+                    {
+                        familyKinds.erase(token.identity._id);
                     }
                 }
                 SurfaceCallback(*this, env);
@@ -267,6 +303,16 @@ namespace Babylon::Plugins::LiteJSBinding
                     case Kind::Camera:
                         Check(value.Env(), bl_cameraNode({token.identity._runtime, token.identity._id}, &result));
                         return result;
+                    case Kind::ArcCamera:
+                        Check(value.Env(), bl_arcRotateCameraNode({token.identity._runtime, token.identity._id}, &result));
+                        return result;
+                    case Kind::Light:
+                    {
+                        bl_Light light{};
+                        Check(value.Env(), bl_hemisphericLightAsLight({token.identity._runtime, token.identity._id}, &light));
+                        Check(value.Env(), bl_lightNode(light, &result));
+                        return result;
+                    }
                     default:
                         throw Napi::TypeError::New(value.Env(), "Expected a scene-node identity.");
                 }
@@ -280,6 +326,11 @@ namespace Babylon::Plugins::LiteJSBinding
                     return env.Null();
                 }
                 const auto key = std::pair{kind, handle._id};
+                if (kind == Kind::Camera || kind == Kind::ArcCamera || kind == Kind::Material ||
+                    kind == Kind::StandardMaterial || kind == Kind::Light)
+                {
+                    familyKinds.insert_or_assign(handle._id, kind);
+                }
                 const auto found = objects.find(key);
                 if (found != objects.end())
                 {
@@ -321,7 +372,8 @@ namespace Babylon::Plugins::LiteJSBinding
                 auto reference = Napi::Persistent(object);
                 reference.Unref();
                 objects.emplace(key, std::move(reference));
-                if (kind == Kind::Node || kind == Kind::Mesh || kind == Kind::Camera)
+                if (kind == Kind::Node || kind == Kind::Mesh || kind == Kind::Camera ||
+                    kind == Kind::ArcCamera || kind == Kind::Light)
                 {
                     const auto node = NodeOf(object);
                     external.Data()->nodeIdentity = node;
@@ -345,6 +397,44 @@ namespace Babylon::Plugins::LiteJSBinding
                     nodeObjects.erase(existing);
                 }
                 return Wrap(env, node, Kind::Node);
+            }
+
+            bl_Camera CameraFamily(Napi::Value value)
+            {
+                if (value.IsNull()) return {};
+                const auto& token = Get(value);
+                bl_Camera result{};
+                if (token.kind == Kind::Camera)
+                    Check(value.Env(), bl_freeCameraAsCamera({token.identity._runtime, token.identity._id}, &result));
+                else if (token.kind == Kind::ArcCamera)
+                    Check(value.Env(), bl_arcRotateCameraAsCamera({token.identity._runtime, token.identity._id}, &result));
+                else
+                    throw Napi::TypeError::New(value.Env(), "Expected a camera family identity.");
+                return result;
+            }
+
+            bl_Material MaterialFamily(Napi::Value value)
+            {
+                if (value.IsNull()) return {};
+                const auto& token = Get(value);
+                bl_Material result{};
+                if (token.kind == Kind::Material)
+                    Check(value.Env(), bl_shaderMaterialAsMaterial({token.identity._runtime, token.identity._id}, &result));
+                else if (token.kind == Kind::StandardMaterial)
+                    Check(value.Env(), bl_standardMaterialAsMaterial({token.identity._runtime, token.identity._id}, &result));
+                else
+                    throw Napi::TypeError::New(value.Env(), "Expected a material family identity.");
+                return result;
+            }
+
+            template<typename Handle>
+            Napi::Value WrapFamily(Napi::Env env, Handle handle)
+            {
+                if (!handle._id) return env.Null();
+                const auto kind = familyKinds.find(handle._id);
+                if (kind == familyKinds.end())
+                    throw Napi::TypeError::New(env, "Unissued binding family identity.");
+                return Wrap(env, handle, kind->second);
             }
         };
 
@@ -754,6 +844,9 @@ namespace Babylon::Plugins::LiteJSBinding
                     else
                     {
                         callback.function.Call({Napi::Number::New(callback.function.Env(), deltaMs)});
+                        const auto flush = callback.function.Env().Global().Get("_liteFlushReferenceValues");
+                        if (flush.IsFunction() && !callback.function.Env().IsExceptionPending())
+                            flush.As<Napi::Function>().Call({});
                     }
                     if (callback.function.Env().IsExceptionPending())
                     {
@@ -1220,6 +1313,563 @@ namespace Babylon::Plugins::LiteJSBinding
             return result;
         }
 
+        Napi::Object VectorObject(Napi::Env env, bl_Vec3 v)
+        {
+            auto result = Napi::Object::New(env);
+            result.Set("x", v.x);
+            result.Set("y", v.y);
+            result.Set("z", v.z);
+            return result;
+        }
+
+        Napi::Array ColorArray(Napi::Env env, bl_Vec3 v)
+        {
+            auto result = Napi::Array::New(env, 3);
+            result.Set(uint32_t{0}, v.x);
+            result.Set(uint32_t{1}, v.y);
+            result.Set(uint32_t{2}, v.z);
+            return result;
+        }
+
+        bl_Vec3 ColorValue(Napi::Value value)
+        {
+            const auto numbers = Numbers(value);
+            if (numbers.size() != 3)
+                throw Napi::TypeError::New(value.Env(), "Expected exactly three RGB/direction values.");
+            return {numbers[0], numbers[1], numbers[2]};
+        }
+
+        const std::map<std::string, double bl_ArcRotateCameraProperties::*> ArcNumbers{
+            {"alpha", &bl_ArcRotateCameraProperties::alpha},
+            {"beta", &bl_ArcRotateCameraProperties::beta},
+            {"radius", &bl_ArcRotateCameraProperties::radius},
+            {"fov", &bl_ArcRotateCameraProperties::fov},
+            {"nearPlane", &bl_ArcRotateCameraProperties::nearPlane},
+            {"farPlane", &bl_ArcRotateCameraProperties::farPlane},
+            {"inertia", &bl_ArcRotateCameraProperties::inertia},
+            {"panningInertia", &bl_ArcRotateCameraProperties::panningInertia},
+            {"angularSensibility", &bl_ArcRotateCameraProperties::angularSensibility},
+            {"panningSensibility", &bl_ArcRotateCameraProperties::panningSensibility},
+            {"wheelPrecision", &bl_ArcRotateCameraProperties::wheelPrecision},
+            {"inertialAlphaOffset", &bl_ArcRotateCameraProperties::inertialAlphaOffset},
+            {"inertialBetaOffset", &bl_ArcRotateCameraProperties::inertialBetaOffset},
+            {"inertialRadiusOffset", &bl_ArcRotateCameraProperties::inertialRadiusOffset},
+            {"inertialPanningX", &bl_ArcRotateCameraProperties::inertialPanningX},
+            {"inertialPanningY", &bl_ArcRotateCameraProperties::inertialPanningY}};
+
+        const std::map<std::string, bl_OptionalNumber bl_ArcRotateCameraLimits::*> LimitFields{
+            {"lowerAlphaLimit", &bl_ArcRotateCameraLimits::lowerAlphaLimit},
+            {"upperAlphaLimit", &bl_ArcRotateCameraLimits::upperAlphaLimit},
+            {"lowerBetaLimit", &bl_ArcRotateCameraLimits::lowerBetaLimit},
+            {"upperBetaLimit", &bl_ArcRotateCameraLimits::upperBetaLimit},
+            {"lowerRadiusLimit", &bl_ArcRotateCameraLimits::lowerRadiusLimit},
+            {"upperRadiusLimit", &bl_ArcRotateCameraLimits::upperRadiusLimit}};
+
+        const std::map<std::string, bl_Vec3 bl_StandardMaterialProperties::*> StandardColors{
+            {"diffuseColor", &bl_StandardMaterialProperties::diffuseColor},
+            {"specularColor", &bl_StandardMaterialProperties::specularColor},
+            {"emissiveColor", &bl_StandardMaterialProperties::emissiveColor},
+            {"ambientColor", &bl_StandardMaterialProperties::ambientColor}};
+
+        const std::map<std::string, bl_Vec3 bl_HemisphericLightProperties::*> LightColors{
+            {"diffuseColor", &bl_HemisphericLightProperties::diffuseColor},
+            {"specularColor", &bl_HemisphericLightProperties::specularColor},
+            {"groundColor", &bl_HemisphericLightProperties::groundColor}};
+
+        Napi::Object PointerObject(Napi::Env env, const bl_ArcRotateInput& input)
+        {
+            auto object = Napi::Object::New(env);
+            object.Set("clientX", input.clientX);
+            object.Set("clientY", input.clientY);
+            object.Set("button", input.button);
+            object.Set("pointerId", static_cast<double>(input.pointerId));
+            object.Set("pointerType", input.pointerType == BL_ARC_POINTER_TOUCH ? "touch" :
+                                      input.pointerType == BL_ARC_POINTER_PEN ? "pen" : "mouse");
+            return object;
+        }
+
+        bool ControlPredicate(ControlPredicates& callbacks, Napi::FunctionReference& function,
+                              const bl_ArcRotateInput* input) noexcept
+        {
+            if (function.IsEmpty()) return false;
+            auto& state = *callbacks.owner;
+            if (!state.callbackError.IsEmpty() || state.callbackCaptureFailed) return false;
+            bool result = false;
+            try
+            {
+                try
+                {
+                    const auto value = input
+                        ? function.Call({PointerObject(function.Env(), *input)})
+                        : function.Call({});
+                    if (function.Env().IsExceptionPending())
+                        state.callbackError = function.Env().GetAndClearPendingException();
+                    else
+                        result = value.ToBoolean().Value();
+                }
+                catch (const Napi::Error& error)
+                {
+                    state.callbackError = function.Env().IsExceptionPending()
+                        ? function.Env().GetAndClearPendingException() : error;
+                }
+                catch (const std::exception& error)
+                {
+                    state.callbackError = Napi::Error::New(function.Env(), error.what());
+                }
+            }
+            catch (...)
+            {
+                state.callbackCaptureFailed = true;
+            }
+            return result;
+        }
+
+        void BindFamilies(Napi::Object api, const std::shared_ptr<State>& state)
+        {
+            Bind(api, state, "setArcRotateCameraLimitFields", [](State& s, const Napi::CallbackInfo& i) {
+                const auto source = Options(i[1]);
+                bl_ArcRotateCameraLimitPatch patch{};
+                const std::map<std::string, uint32_t> masks{
+                    {"lowerAlphaLimit", BL_LIMIT_LOWER_ALPHA}, {"upperAlphaLimit", BL_LIMIT_UPPER_ALPHA},
+                    {"lowerBetaLimit", BL_LIMIT_LOWER_BETA}, {"upperBetaLimit", BL_LIMIT_UPPER_BETA},
+                    {"lowerRadiusLimit", BL_LIMIT_LOWER_RADIUS}, {"upperRadiusLimit", BL_LIMIT_UPPER_RADIUS}};
+                for (const auto& [name, member] : LimitFields)
+                {
+                    if (source.HasOwnProperty(name))
+                    {
+                        patch.fields |= masks.at(name);
+                        patch.values.*member = Optional(source, name.c_str());
+                    }
+                }
+                s.Check(i.Env(), bl_setArcRotateCameraLimitFields(
+                    s.HandleOf<bl_ArcRotateCamera>(i[0], Kind::ArcCamera), &patch));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setArcRotateControlOptions", [](State& s, const Napi::CallbackInfo& i) {
+                const auto control = s.HandleOf<bl_ArcRotateControl>(i[0], Kind::Control);
+                if (i[1].IsNull() || i[1].IsUndefined())
+                {
+                    s.Check(i.Env(), bl_setArcRotateControlOptions(control, nullptr));
+                    return i.Env().Undefined();
+                }
+                const auto source = Options(i[1]);
+                bl_ArcRotateControlOptions options{};
+                options.keyboard = source.Get("keyboard").ToBoolean().Value();
+                if (source.Has("pointerMappings") && !source.Get("pointerMappings").IsUndefined())
+                {
+                    const auto mappings = source.Get("pointerMappings").As<Napi::Object>();
+                    const auto action = [&](const char* name) {
+                        const auto value = mappings.Get(name);
+                        if (value.IsUndefined()) return BL_ARC_ACTION_DEFAULT;
+                        const auto text = value.As<Napi::String>().Utf8Value();
+                        if (text == "rotate") return BL_ARC_ACTION_ROTATE;
+                        if (text == "pan") return BL_ARC_ACTION_PAN;
+                        throw Napi::TypeError::New(i.Env(), "Unknown ArcRotate pointer action.");
+                    };
+                    options.primaryButton = action("primaryButton");
+                    options.secondaryButton = action("secondaryButton");
+                }
+                auto callbacks = std::make_unique<ControlPredicates>();
+                callbacks->owner = &s;
+                if (source.Get("shouldHandlePointerDown").IsFunction())
+                {
+                    callbacks->pointerDown = Napi::Persistent(source.Get("shouldHandlePointerDown").As<Napi::Function>());
+                    options.shouldHandlePointerDown = [](void* user, const bl_ArcRotateInput* input) noexcept {
+                        auto& c = *static_cast<ControlPredicates*>(user);
+                        return ControlPredicate(c, c.pointerDown, input);
+                    };
+                }
+                if (source.Get("isExternalDragActive").IsFunction())
+                {
+                    callbacks->externalDrag = Napi::Persistent(source.Get("isExternalDragActive").As<Napi::Function>());
+                    options.isExternalDragActive = [](void* user) noexcept {
+                        auto& c = *static_cast<ControlPredicates*>(user);
+                        return ControlPredicate(c, c.externalDrag, nullptr);
+                    };
+                }
+                if (source.Get("isExternalPickPending").IsFunction())
+                {
+                    callbacks->pendingPick = Napi::Persistent(source.Get("isExternalPickPending").As<Napi::Function>());
+                    options.isExternalPickPending = [](void* user) noexcept {
+                        auto& c = *static_cast<ControlPredicates*>(user);
+                        return ControlPredicate(c, c.pendingPick, nullptr);
+                    };
+                }
+                const auto found = s.controlPredicates.find(control._id);
+                if (found == s.controlPredicates.end())
+                    throw Napi::TypeError::New(i.Env(), "Unknown native control callbacks.");
+                options.userData = callbacks.get();
+                s.Check(i.Env(), bl_setArcRotateControlOptions(control, &options));
+                found->second = std::move(callbacks);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "createArcRotateCamera", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ArcRotateCamera camera{};
+                s.Check(i.Env(), bl_createArcRotateCamera(s.options.runtime,
+                    i[0].As<Napi::Number>().DoubleValue(), i[1].As<Napi::Number>().DoubleValue(),
+                    i[2].As<Napi::Number>().DoubleValue(), Vector(i[3]), &camera));
+                return s.Wrap(i.Env(), camera, Kind::ArcCamera);
+            });
+            Bind(api, state, "getArcRotateCameraProperties", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ArcRotateCameraProperties p{};
+                s.Check(i.Env(), bl_getArcRotateCameraProperties(s.HandleOf<bl_ArcRotateCamera>(i[0], Kind::ArcCamera), &p));
+                auto value = Napi::Object::New(i.Env());
+                for (const auto& [name, member] : ArcNumbers) value.Set(name, p.*member);
+                value.Set("target", VectorObject(i.Env(), p.target));
+                return value;
+            });
+            Bind(api, state, "setArcRotateCameraProperty", [](State& s, const Napi::CallbackInfo& i) {
+                const auto camera = s.HandleOf<bl_ArcRotateCamera>(i[0], Kind::ArcCamera);
+                bl_ArcRotateCameraProperties p{};
+                s.Check(i.Env(), bl_getArcRotateCameraProperties(camera, &p));
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                if (name == "target") p.target = Vector(i[2]);
+                else if (const auto member = ArcNumbers.find(name); member != ArcNumbers.end())
+                    p.*member->second = i[2].As<Napi::Number>().DoubleValue();
+                else throw Napi::TypeError::New(i.Env(), "Unsupported ArcRotate property.");
+                s.Check(i.Env(), bl_setArcRotateCameraProperties(camera, &p));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getArcRotateCameraLimits", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ArcRotateCameraLimits limits{};
+                bool enforced{};
+                s.Check(i.Env(), bl_getArcRotateCameraLimits(s.HandleOf<bl_ArcRotateCamera>(i[0], Kind::ArcCamera), &limits, &enforced));
+                auto value = Napi::Object::New(i.Env());
+                for (const auto& [name, member] : LimitFields)
+                    value.Set(name, (limits.*member).present
+                        ? Napi::Value(Napi::Number::New(i.Env(), (limits.*member).value)) : i.Env().Undefined());
+                value.Set("enforced", enforced);
+                return value;
+            });
+            Bind(api, state, "setCameraLimits", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto source = Options(i[1]);
+                bl_ArcRotateCameraLimitPatch patch{};
+                const std::map<std::string, uint32_t> masks{
+                    {"lowerAlphaLimit", BL_LIMIT_LOWER_ALPHA}, {"upperAlphaLimit", BL_LIMIT_UPPER_ALPHA},
+                    {"lowerBetaLimit", BL_LIMIT_LOWER_BETA}, {"upperBetaLimit", BL_LIMIT_UPPER_BETA},
+                    {"lowerRadiusLimit", BL_LIMIT_LOWER_RADIUS}, {"upperRadiusLimit", BL_LIMIT_UPPER_RADIUS}};
+                for (const auto& [name, member] : LimitFields)
+                {
+                    if (source.HasOwnProperty(name))
+                    {
+                        patch.fields |= masks.at(name);
+                        patch.values.*member = Optional(source, name.c_str());
+                    }
+                }
+                bl_CameraLimitToken disposer{};
+                s.Check(i.Env(), bl_setCameraLimits(s.HandleOf<bl_ArcRotateCamera>(i[0], Kind::ArcCamera), &patch, &disposer));
+                return s.Wrap(i.Env(), disposer, Kind::Limits);
+            });
+            Bind(api, state, "removeCameraLimits", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_removeCameraLimits(s.HandleOf<bl_CameraLimitToken>(i[0], Kind::Limits)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "attachControl", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto source = Options(i[2]);
+                bl_ArcRotateControlOptions options{};
+                if (source.Has("keyboard") && !source.Get("keyboard").IsUndefined())
+                    options.keyboard = source.Get("keyboard").ToBoolean().Value();
+                if (source.Has("pointerMappings"))
+                {
+                    const auto mappings = source.Get("pointerMappings").As<Napi::Object>();
+                    const std::map<std::string, bl_ArcRotatePointerAction> actions{
+                        {"rotate", BL_ARC_ACTION_ROTATE}, {"pan", BL_ARC_ACTION_PAN}};
+                    const auto action = [&](const char* name) {
+                        if (!mappings.Has(name) || mappings.Get(name).IsUndefined())
+                            return BL_ARC_ACTION_DEFAULT;
+                        const auto found = actions.find(mappings.Get(name).As<Napi::String>().Utf8Value());
+                        if (found == actions.end())
+                            throw Napi::TypeError::New(i.Env(), "Unknown ArcRotate pointer action.");
+                        return found->second;
+                    };
+                    options.primaryButton = action("primaryButton");
+                    options.secondaryButton = action("secondaryButton");
+                }
+                auto callbacks = std::make_unique<ControlPredicates>();
+                callbacks->owner = &s;
+                if (source.Get("shouldHandlePointerDown").IsFunction())
+                {
+                    callbacks->pointerDown = Napi::Persistent(source.Get("shouldHandlePointerDown").As<Napi::Function>());
+                    options.shouldHandlePointerDown = [](void* user, const bl_ArcRotateInput* input) noexcept {
+                        auto& callbacks = *static_cast<ControlPredicates*>(user);
+                        return ControlPredicate(callbacks, callbacks.pointerDown, input);
+                    };
+                }
+                if (source.Get("isExternalDragActive").IsFunction())
+                {
+                    callbacks->externalDrag = Napi::Persistent(source.Get("isExternalDragActive").As<Napi::Function>());
+                    options.isExternalDragActive = [](void* user) noexcept {
+                        auto& callbacks = *static_cast<ControlPredicates*>(user);
+                        return ControlPredicate(callbacks, callbacks.externalDrag, nullptr);
+                    };
+                }
+                if (source.Get("isExternalPickPending").IsFunction())
+                {
+                    callbacks->pendingPick = Napi::Persistent(source.Get("isExternalPickPending").As<Napi::Function>());
+                    options.isExternalPickPending = [](void* user) noexcept {
+                        auto& callbacks = *static_cast<ControlPredicates*>(user);
+                        return ControlPredicate(callbacks, callbacks.pendingPick, nullptr);
+                    };
+                }
+                options.userData = callbacks.get();
+                const auto camera = s.HandleOf<bl_ArcRotateCamera>(i[0], Kind::ArcCamera);
+                const auto scene = i[1].IsNull() || i[1].IsUndefined() ? bl_SceneContext{}
+                    : s.HandleOf<bl_SceneContext>(i[1], Kind::Scene);
+                auto ownedCallbacks = s.controlPredicates.emplace(0, std::move(callbacks));
+                if (!ownedCallbacks.second)
+                    throw Napi::Error::New(i.Env(), "Nested native control attachment.");
+                bl_ArcRotateControl control{};
+                const auto status = bl_attachControl(camera, scene, &options, &control);
+                if (status != BL_OK)
+                {
+                    s.controlPredicates.erase(0);
+                    s.Check(i.Env(), status);
+                }
+                auto entry = s.controlPredicates.extract(0);
+                entry.key() = control._id;
+                s.controlPredicates.insert(std::move(entry));
+                try
+                {
+                    return s.Wrap(i.Env(), control, Kind::Control);
+                }
+                catch (...)
+                {
+                    const auto detached = bl_detachControl(control);
+                    if (detached == BL_OK)
+                        s.controlPredicates.erase(control._id);
+                    throw;
+                }
+            });
+            Bind(api, state, "processArcRotateInput", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto source = i[1].As<Napi::Object>();
+                bl_ArcRotateInput input{};
+                const std::map<std::string, bl_ArcRotateInputKind> kinds{
+                    {"pointerdown", BL_ARC_POINTER_DOWN}, {"pointermove", BL_ARC_POINTER_MOVE},
+                    {"pointerup", BL_ARC_POINTER_UP}, {"wheel", BL_ARC_WHEEL},
+                    {"touchstart", BL_ARC_TOUCH_START}, {"touchmove", BL_ARC_TOUCH_MOVE},
+                    {"touchend", BL_ARC_TOUCH_END}, {"contextmenu", BL_ARC_CONTEXT_MENU},
+                    {"gesturestart", BL_ARC_GESTURE}, {"gesturechange", BL_ARC_GESTURE},
+                    {"gestureend", BL_ARC_GESTURE}};
+                const auto kind = kinds.find(source.Get("type").As<Napi::String>().Utf8Value());
+                if (kind == kinds.end())
+                    throw Napi::TypeError::New(i.Env(), "Unknown ArcRotate input kind.");
+                input.kind = kind->second;
+                if (source.Has("pointerType") && !source.Get("pointerType").IsUndefined())
+                {
+                    const auto type = source.Get("pointerType").As<Napi::String>().Utf8Value();
+                    if (type == "touch") input.pointerType = BL_ARC_POINTER_TOUCH;
+                    else if (type == "pen") input.pointerType = BL_ARC_POINTER_PEN;
+                    else if (type != "mouse") throw Napi::TypeError::New(i.Env(), "Unknown pointer type.");
+                }
+                const auto number = [&](const char* name) {
+                    return source.Has(name) && !source.Get(name).IsUndefined()
+                        ? source.Get(name).As<Napi::Number>().DoubleValue() : 0.0;
+                };
+                input.clientX = number("clientX");
+                input.clientY = number("clientY");
+                input.deltaY = number("deltaY");
+                const auto pointer = number("pointerId");
+                const auto button = number("button");
+                if (!std::isfinite(pointer) || std::trunc(pointer) != pointer ||
+                    std::abs(pointer) > 9007199254740991.0 || !std::isfinite(button) ||
+                    std::trunc(button) != button || button < 0 || button > UINT32_MAX)
+                    throw Napi::TypeError::New(i.Env(), "Invalid pointer identity/button.");
+                input.pointerId = static_cast<int64_t>(pointer);
+                input.button = static_cast<uint32_t>(button);
+                std::vector<bl_ArcRotateTouch> touches;
+                if (source.Has("changedTouches"))
+                {
+                    const auto values = source.Get("changedTouches").As<Napi::Array>();
+                    touches.reserve(values.Length());
+                    for (uint32_t index = 0; index < values.Length(); ++index)
+                    {
+                        const auto touch = values.Get(index).As<Napi::Object>();
+                        const double id = touch.Get("identifier").As<Napi::Number>().DoubleValue();
+                        if (!std::isfinite(id) || std::trunc(id) != id || std::abs(id) > 9007199254740991.0)
+                            throw Napi::TypeError::New(i.Env(), "Invalid touch identity.");
+                        touches.push_back({static_cast<int64_t>(id),
+                            touch.Get("clientX").As<Napi::Number>().DoubleValue(),
+                            touch.Get("clientY").As<Napi::Number>().DoubleValue()});
+                    }
+                }
+                input.changedTouches = touches.data();
+                input.changedTouchCount = touches.size();
+                bl_ArcRotateInputEffects effects{};
+                const auto status = bl_processArcRotateInput(s.HandleOf<bl_ArcRotateControl>(i[0], Kind::Control), &input, &effects);
+                SurfaceCallback(s, i.Env());
+                s.Check(i.Env(), status);
+                auto value = Napi::Object::New(i.Env());
+                value.Set("preventDefault", effects.preventDefault);
+                value.Set("capturePointer", effects.capturePointer);
+                value.Set("releasePointer", effects.releasePointer);
+                value.Set("pointerId", static_cast<double>(effects.pointerId));
+                return value;
+            });
+            Bind(api, state, "detachControl", [](State& s, const Napi::CallbackInfo& i) {
+                const auto control = s.HandleOf<bl_ArcRotateControl>(i[0], Kind::Control);
+                s.Check(i.Env(), bl_detachControl(control));
+                s.controlPredicates.erase(control._id);
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "createHemisphericLight", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_HemisphericLightOptions options{};
+                if (!i[0].IsUndefined()) { options.hasDirection = true; options.direction = ColorValue(i[0]); }
+                if (!i[1].IsUndefined()) options.intensity = {true, i[1].As<Napi::Number>().DoubleValue()};
+                bl_HemisphericLight light{};
+                s.Check(i.Env(), bl_createHemisphericLight(s.options.runtime, &options, &light));
+                return s.Wrap(i.Env(), light, Kind::Light);
+            });
+            Bind(api, state, "getHemisphericLightProperties", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_HemisphericLightProperties p{};
+                s.Check(i.Env(), bl_getHemisphericLightProperties(s.HandleOf<bl_HemisphericLight>(i[0], Kind::Light), &p));
+                auto value = Napi::Object::New(i.Env());
+                value.Set("direction", VectorObject(i.Env(), p.direction));
+                value.Set("intensity", p.intensity);
+                for (const auto& [name, member] : LightColors) value.Set(name, ColorArray(i.Env(), p.*member));
+                return value;
+            });
+            Bind(api, state, "setHemisphericLightProperty", [](State& s, const Napi::CallbackInfo& i) {
+                const auto light = s.HandleOf<bl_HemisphericLight>(i[0], Kind::Light);
+                bl_HemisphericLightProperties p{};
+                s.Check(i.Env(), bl_getHemisphericLightProperties(light, &p));
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                if (name == "direction") p.direction = Vector(i[2]);
+                else if (name == "intensity") p.intensity = i[2].As<Napi::Number>().DoubleValue();
+                else if (const auto member = LightColors.find(name); member != LightColors.end()) p.*member->second = ColorValue(i[2]);
+                else throw Napi::TypeError::New(i.Env(), "Unsupported hemispheric property.");
+                s.Check(i.Env(), bl_setHemisphericLightProperties(light, &p));
+                return i.Env().Undefined();
+            });
+            for (const auto* operation : {"setLightIntensity", "markLightUboDirty"})
+            {
+                Bind(api, state, operation, [operation](State& s, const Napi::CallbackInfo& i) {
+                    bl_Light light{};
+                    s.Check(i.Env(), bl_hemisphericLightAsLight(s.HandleOf<bl_HemisphericLight>(i[0], Kind::Light), &light));
+                    s.Check(i.Env(), std::string_view(operation) == "setLightIntensity"
+                        ? bl_setLightIntensity(light, i[1].As<Napi::Number>().DoubleValue()) : bl_markLightUboDirty(light));
+                    return i.Env().Undefined();
+                });
+            }
+            Bind(api, state, "createStandardMaterial", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_StandardMaterial material{};
+                s.Check(i.Env(), bl_createStandardMaterial(s.options.runtime, &material));
+                return s.Wrap(i.Env(), material, Kind::StandardMaterial);
+            });
+            Bind(api, state, "getStandardMaterialProperties", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_StandardMaterialProperties p{};
+                s.Check(i.Env(), bl_getStandardMaterialProperties(s.HandleOf<bl_StandardMaterial>(i[0], Kind::StandardMaterial), &p));
+                auto value = Napi::Object::New(i.Env());
+                for (const auto& [name, member] : StandardColors) value.Set(name, ColorArray(i.Env(), p.*member));
+                value.Set("alpha", p.alpha);
+                value.Set("specularPower", p.specularPower);
+                value.Set("backFaceCulling", p.backFaceCulling);
+                value.Set("disableLighting", p.disableLighting);
+                return value;
+            });
+            Bind(api, state, "setStandardMaterialProperty", [](State& s, const Napi::CallbackInfo& i) {
+                const auto material = s.HandleOf<bl_StandardMaterial>(i[0], Kind::StandardMaterial);
+                bl_StandardMaterialProperties p{};
+                s.Check(i.Env(), bl_getStandardMaterialProperties(material, &p));
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                if (const auto member = StandardColors.find(name); member != StandardColors.end()) p.*member->second = ColorValue(i[2]);
+                else if (name == "alpha") p.alpha = i[2].As<Napi::Number>().DoubleValue();
+                else if (name == "specularPower") p.specularPower = i[2].As<Napi::Number>().DoubleValue();
+                else if (name == "backFaceCulling") p.backFaceCulling = i[2].As<Napi::Boolean>().Value();
+                else if (name == "disableLighting") p.disableLighting = i[2].As<Napi::Boolean>().Value();
+                else throw Napi::TypeError::New(i.Env(), "Unsupported Standard property.");
+                s.Check(i.Env(), bl_setStandardMaterialProperties(material, &p));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "markMaterialUboDirty", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_markMaterialUboDirty(s.MaterialFamily(i[0])));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "rebuildMaterial", [](State& s, const Napi::CallbackInfo& i) {
+                const auto source = Options(i[2]);
+                const bl_RebuildMaterialOptions options{OptionalBool(source, "rebuildViews"), OptionalBool(source, "rebuildFrameGraph")};
+                s.Check(i.Env(), bl_rebuildMaterial(s.HandleOf<bl_SceneContext>(i[0], Kind::Scene), s.MaterialFamily(i[1]), &options));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "rebuildSceneRenderables", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_rebuildSceneRenderables(s.HandleOf<bl_SceneContext>(i[0], Kind::Scene)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "disposeStandardMaterial", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_disposeStandardMaterial(s.HandleOf<bl_StandardMaterial>(i[0], Kind::StandardMaterial)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getMeshProperties2", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_MeshProperties2 p{};
+                s.Check(i.Env(), bl_getMeshProperties2(s.HandleOf<bl_Mesh>(i[0], Kind::Mesh), &p));
+                auto value = Napi::Object::New(i.Env());
+                value.Set("material", s.WrapFamily(i.Env(), p.material));
+                value.Set("renderOrder", p.renderOrder.present ? Napi::Value(Napi::Number::New(i.Env(), p.renderOrder.value)) : i.Env().Undefined());
+                value.Set("receiveShadows", p.receiveShadows);
+                return value;
+            });
+            Bind(api, state, "setMeshProperty2", [](State& s, const Napi::CallbackInfo& i) {
+                const auto mesh = s.HandleOf<bl_Mesh>(i[0], Kind::Mesh);
+                bl_MeshProperties2 p{};
+                s.Check(i.Env(), bl_getMeshProperties2(mesh, &p));
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                if (name == "material") p.material = s.MaterialFamily(i[2]);
+                else if (name == "renderOrder") p.renderOrder = i[2].IsUndefined() ? bl_OptionalNumber{} : bl_OptionalNumber{true, i[2].As<Napi::Number>().DoubleValue()};
+                else if (name == "receiveShadows") p.receiveShadows = i[2].As<Napi::Boolean>().Value();
+                else throw Napi::TypeError::New(i.Env(), "Unknown mesh property.");
+                s.Check(i.Env(), bl_setMeshProperties2(mesh, &p));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getSceneProperties2", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_SceneProperties2 p{};
+                s.Check(i.Env(), bl_getSceneProperties2(s.HandleOf<bl_SceneContext>(i[0], Kind::Scene), &p));
+                auto value = Napi::Object::New(i.Env());
+                auto color = Napi::Object::New(i.Env());
+                color.Set("r", p.clearColor.r); color.Set("g", p.clearColor.g);
+                color.Set("b", p.clearColor.b); color.Set("a", p.clearColor.a);
+                value.Set("clearColor", color);
+                value.Set("camera", s.WrapFamily(i.Env(), p.camera));
+                value.Set("fixedDeltaMs", p.fixedDeltaMs);
+                return value;
+            });
+            Bind(api, state, "setSceneProperty2", [](State& s, const Napi::CallbackInfo& i) {
+                const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                bl_SceneProperties2 p{};
+                s.Check(i.Env(), bl_getSceneProperties2(scene, &p));
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                if (name == "camera") p.camera = s.CameraFamily(i[2]);
+                else if (name == "fixedDeltaMs") p.fixedDeltaMs = i[2].As<Napi::Number>().DoubleValue();
+                else if (name == "clearColor")
+                {
+                    const auto value = i[2].As<Napi::Object>();
+                    p.clearColor = {value.Get("r").As<Napi::Number>().DoubleValue(), value.Get("g").As<Napi::Number>().DoubleValue(),
+                        value.Get("b").As<Napi::Number>().DoubleValue(), value.Get("a").As<Napi::Number>().DoubleValue()};
+                }
+                else throw Napi::TypeError::New(i.Env(), "Unknown scene property.");
+                s.Check(i.Env(), bl_setSceneProperties2(scene, &p));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "cameraAsFreeCamera", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_FreeCamera camera{};
+                s.Check(i.Env(), bl_cameraAsFreeCamera(s.CameraFamily(i[0]), &camera));
+                return s.Wrap(i.Env(), camera, Kind::Camera);
+            });
+            Bind(api, state, "cameraAsArcRotateCamera", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ArcRotateCamera camera{};
+                s.Check(i.Env(), bl_cameraAsArcRotateCamera(s.CameraFamily(i[0]), &camera));
+                return s.Wrap(i.Env(), camera, Kind::ArcCamera);
+            });
+            Bind(api, state, "materialAsShaderMaterial", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ShaderMaterial material{};
+                s.Check(i.Env(), bl_materialAsShaderMaterial(s.MaterialFamily(i[0]), &material));
+                return s.Wrap(i.Env(), material, Kind::Material);
+            });
+            Bind(api, state, "materialAsStandardMaterial", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_StandardMaterial material{};
+                s.Check(i.Env(), bl_materialAsStandardMaterial(s.MaterialFamily(i[0]), &material));
+                return s.Wrap(i.Env(), material, Kind::StandardMaterial);
+            });
+        }
+
         void BindExtras(Napi::Object api, const std::shared_ptr<State>& state)
         {
             Bind(api, state, "createSphere", [](State& s, const Napi::CallbackInfo& i) {
@@ -1519,6 +2169,7 @@ namespace Babylon::Plugins::LiteJSBinding
                               [](Napi::Env, std::shared_ptr<State>* owner) { delete owner; }));
         BindUi(api, state);
         BindExtras(api, state);
+        BindFamilies(api, state);
         Bind(api, state, "disposeEngine", [](State& s, const Napi::CallbackInfo& i) {
             const auto engine = s.HandleOf<bl_EngineContext>(i[0], Kind::Engine);
             s.Check(i.Env(), bl_disposeEngine(engine));
@@ -1964,6 +2615,8 @@ namespace Babylon::Plugins::LiteJSBinding
         }
         state->frameTimings = {};
         state->DrainFinalized(env);
+        const auto flush = env.Global().Get("_liteFlushReferenceValues");
+        if (flush.IsFunction()) flush.As<Napi::Function>().Call({});
         const double monotonicTimeMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now().time_since_epoch())
                                            .count();
@@ -2027,6 +2680,8 @@ namespace Babylon::Plugins::LiteJSBinding
         state->knownUiListeners.clear();
         state->engines.clear();
         state->finalized.clear();
+        state->familyKinds.clear();
+        state->controlPredicates.clear();
         if (!callbackError.IsEmpty())
         {
             throw callbackError;

@@ -327,7 +327,16 @@ typedef struct bl_ReflectedUniformBlock
 
 typedef struct bl_ReflectedUniform
 {
-    bl_String name;      /* Original WGSL member name, not a generated register. */
+    /*
+     * Semantic leaf path relative to its WGSL block, not a generated register.
+     * Grammar: identifier ( "." identifier | "[" decimal-index "]" )*.
+     * Identifiers are WGSL identifiers; indices are nonnegative decimal with
+     * no leading zero except "0". Existing flat names are unchanged.
+     * Fixed arrays/structs recurse at their semantic byte strides/offsets.
+     * Float vectors remain vector leaves; integer vectors may be scalar leaves
+     * indexed by component. Runtime arrays and ambiguous/overlapping paths fail.
+     */
+    bl_String name;
     uint32_t blockIndex; /* Index into result.uniformBlocks. */
     uint32_t byteOffset;
     uint32_t byteSize;
@@ -1488,6 +1497,343 @@ bl_Status bl_pollAudioEngine(bl_AudioEngine engine, double monotonicTimeMs);
  * remains with the host client; core retains only graph connections it creates.
  */
 
+/* ---------------- Additional reviewed camera/light/material families ------- */
+
+typedef struct bl_Camera
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_Camera;
+
+typedef struct bl_ArcRotateCamera
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_ArcRotateCamera;
+
+typedef struct bl_Material
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_Material;
+
+typedef struct bl_StandardMaterial
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_StandardMaterial;
+
+typedef struct bl_Light
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_Light;
+
+typedef struct bl_HemisphericLight
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_HemisphericLight;
+
+typedef struct bl_ArcRotateControl
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_ArcRotateControl;
+
+typedef struct bl_CameraLimitToken
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_CameraLimitToken;
+
+bl_Status bl_freeCameraAsCamera(bl_FreeCamera source, bl_Camera* camera);
+bl_Status bl_arcRotateCameraAsCamera(bl_ArcRotateCamera source, bl_Camera* camera);
+bl_Status bl_cameraAsFreeCamera(bl_Camera source, bl_FreeCamera* camera);
+bl_Status bl_cameraAsArcRotateCamera(bl_Camera source, bl_ArcRotateCamera* camera);
+bl_Status bl_shaderMaterialAsMaterial(bl_ShaderMaterial source, bl_Material* material);
+bl_Status bl_standardMaterialAsMaterial(bl_StandardMaterial source, bl_Material* material);
+bl_Status bl_materialAsShaderMaterial(bl_Material source, bl_ShaderMaterial* material);
+bl_Status bl_materialAsStandardMaterial(bl_Material source, bl_StandardMaterial* material);
+bl_Status bl_hemisphericLightAsLight(bl_HemisphericLight source, bl_Light* light);
+bl_Status bl_arcRotateCameraNode(bl_ArcRotateCamera camera, bl_SceneNode* node);
+bl_Status bl_lightNode(bl_Light light, bl_SceneNode* node);
+
+typedef struct bl_SceneProperties2
+{
+    bl_Color4 clearColor;
+    bl_Camera camera;
+    double fixedDeltaMs;
+} bl_SceneProperties2;
+
+typedef struct bl_MeshProperties2
+{
+    bl_Material material;
+    bl_OptionalNumber renderOrder;
+    bool receiveShadows;
+} bl_MeshProperties2;
+
+bl_Status bl_getSceneProperties2(bl_SceneContext scene, bl_SceneProperties2* properties);
+bl_Status bl_setSceneProperties2(bl_SceneContext scene, const bl_SceneProperties2* properties);
+bl_Status bl_getMeshProperties2(bl_Mesh mesh, bl_MeshProperties2* properties);
+bl_Status bl_setMeshProperties2(bl_Mesh mesh, const bl_MeshProperties2* properties);
+
+/*
+ * Family conversions check concrete kind, preserve identity, and never cast a
+ * new family through a legacy typed handle. Legacy getters return UNSUPPORTED
+ * without writing outputs for unrepresentable new-family selections; legacy
+ * setters still select FreeCamera/ShaderMaterial. Null is accepted only in
+ * scene.camera/mesh.material; all other identity/error/ownership rules above apply.
+ */
+typedef struct bl_ArcRotateCameraProperties
+{
+    double alpha;
+    double beta;
+    double radius;
+    bl_Vec3 target;
+    double fov;
+    double nearPlane;
+    double farPlane;
+    double inertia;
+    double panningInertia;
+    double angularSensibility;
+    double panningSensibility;
+    double wheelPrecision;
+    double inertialAlphaOffset;
+    double inertialBetaOffset;
+    double inertialRadiusOffset;
+    double inertialPanningX;
+    double inertialPanningY;
+} bl_ArcRotateCameraProperties;
+
+bl_Status bl_createArcRotateCamera(bl_Runtime* runtime, double alpha, double beta, double radius,
+                                   bl_Vec3 target, bl_ArcRotateCamera* camera);
+bl_Status bl_getArcRotateCameraProperties(bl_ArcRotateCamera camera,
+                                          bl_ArcRotateCameraProperties* properties);
+bl_Status bl_setArcRotateCameraProperties(bl_ArcRotateCamera camera,
+                                          const bl_ArcRotateCameraProperties* properties);
+
+typedef struct bl_ArcRotateCameraLimits
+{
+    bl_OptionalNumber lowerAlphaLimit;
+    bl_OptionalNumber upperAlphaLimit;
+    bl_OptionalNumber lowerBetaLimit;
+    bl_OptionalNumber upperBetaLimit;
+    bl_OptionalNumber lowerRadiusLimit;
+    bl_OptionalNumber upperRadiusLimit;
+} bl_ArcRotateCameraLimits;
+
+#define BL_LIMIT_LOWER_ALPHA UINT32_C(1)
+#define BL_LIMIT_UPPER_ALPHA UINT32_C(2)
+#define BL_LIMIT_LOWER_BETA UINT32_C(4)
+#define BL_LIMIT_UPPER_BETA UINT32_C(8)
+#define BL_LIMIT_LOWER_RADIUS UINT32_C(16)
+#define BL_LIMIT_UPPER_RADIUS UINT32_C(32)
+
+typedef struct bl_ArcRotateCameraLimitPatch
+{
+    uint32_t fields;
+    bl_ArcRotateCameraLimits values;
+} bl_ArcRotateCameraLimitPatch;
+
+bl_Status bl_getArcRotateCameraLimits(bl_ArcRotateCamera camera, bl_ArcRotateCameraLimits* limits,
+                                      bool* enforced);
+bl_Status bl_setCameraLimits(bl_ArcRotateCamera camera, const bl_ArcRotateCameraLimitPatch* patch,
+                             bl_CameraLimitToken* disposer);
+bl_Status bl_removeCameraLimits(bl_CameraLimitToken disposer);
+bl_Status bl_setArcRotateCameraLimitFields(bl_ArcRotateCamera camera,
+                                           const bl_ArcRotateCameraLimitPatch* patch);
+
+typedef enum bl_ArcRotatePointerAction
+{
+    BL_ARC_ACTION_DEFAULT = 0,
+    BL_ARC_ACTION_ROTATE,
+    BL_ARC_ACTION_PAN
+} bl_ArcRotatePointerAction;
+
+typedef enum bl_ArcRotateInputKind
+{
+    BL_ARC_POINTER_DOWN = 0,
+    BL_ARC_POINTER_MOVE,
+    BL_ARC_POINTER_UP,
+    BL_ARC_WHEEL,
+    BL_ARC_TOUCH_START,
+    BL_ARC_TOUCH_MOVE,
+    BL_ARC_TOUCH_END,
+    BL_ARC_CONTEXT_MENU,
+    BL_ARC_GESTURE
+} bl_ArcRotateInputKind;
+
+typedef enum bl_ArcRotatePointerType
+{
+    BL_ARC_POINTER_MOUSE = 0,
+    BL_ARC_POINTER_PEN,
+    BL_ARC_POINTER_TOUCH
+} bl_ArcRotatePointerType;
+
+typedef struct bl_ArcRotateTouch
+{
+    int64_t identifier;
+    double clientX;
+    double clientY;
+} bl_ArcRotateTouch;
+
+typedef struct bl_ArcRotateInput
+{
+    bl_ArcRotateInputKind kind;
+    bl_ArcRotatePointerType pointerType;
+    int64_t pointerId;
+    uint32_t button;
+    double clientX;
+    double clientY;
+    double deltaY;
+    const bl_ArcRotateTouch* changedTouches;
+    size_t changedTouchCount;
+} bl_ArcRotateInput;
+
+typedef bool (*bl_ArcRotatePointerPredicate)(void* userData, const bl_ArcRotateInput* input);
+typedef bool (*bl_ArcRotateStatePredicate)(void* userData);
+
+typedef struct bl_ArcRotateControlOptions
+{
+    bl_ArcRotatePointerAction primaryButton;
+    bl_ArcRotatePointerAction secondaryButton;
+    bool keyboard;
+    bl_ArcRotatePointerPredicate shouldHandlePointerDown;
+    bl_ArcRotateStatePredicate isExternalDragActive;
+    bl_ArcRotateStatePredicate isExternalPickPending;
+    void* userData;
+} bl_ArcRotateControlOptions;
+
+typedef struct bl_ArcRotateInputEffects
+{
+    bool preventDefault;
+    bool capturePointer;
+    bool releasePointer;
+    int64_t pointerId;
+} bl_ArcRotateInputEffects;
+
+bl_Status bl_attachControl(bl_ArcRotateCamera camera, bl_SceneContext scene,
+                           const bl_ArcRotateControlOptions* options, bl_ArcRotateControl* control);
+bl_Status bl_processArcRotateInput(bl_ArcRotateControl control, const bl_ArcRotateInput* input,
+                                   bl_ArcRotateInputEffects* effects);
+bl_Status bl_detachControl(bl_ArcRotateControl control);
+bl_Status bl_setArcRotateControlOptions(bl_ArcRotateControl control,
+                                        const bl_ArcRotateControlOptions* options);
+
+/*
+ * setArcRotateControlOptions requires a non-NULL table (zero table means defaults),
+ * copies it atomically, and preserves identity, touch/drag/coordinate/inertia state
+ * and frame-hook order. Input/predicate dispatch is BUSY; ordinary before-render
+ * callbacks may replace options safely. Old borrowed callbacks/userdata remain
+ * valid until successful replacement; failure keeps the old table.
+ * setArcRotateCameraLimitFields changes masked DATA only: no hook installation,
+ * clamp, dirty matrix, inertia reset or disposer replacement. Changed scalar orbit
+ * writes invoke an installed hook; equal, target, projection and offset-only writes
+ * do not. setCameraLimits remains the explicit install-and-enforce operation.
+ */
+
+/*
+ * All factories are data-only. Arc defaults: fov=.8, near=.1, far=1000,
+ * inertia/panningInertia=.9, angularSensibility=1000, panningSensibility=50,
+ * wheelPrecision=3, offsets=0. Bare finite beta/radius have no implicit clamps.
+ * Orbit/target writes dirty world lazily; projection writes do not dirty children.
+ * Converted Arc node position/rotation/scaling mutation is unsupported.
+ * Limits: mask absent=keep, selected present=false=clear. Install self-clamping
+ * immediately (radius/beta/alpha), zeroing matching inertia only outside a bound.
+ * Disposer removes only its current hook, leaves bound fields, and is idempotent.
+ * Contradictory bounds/nonfinite values fail atomically as a native safety rule.
+ * Projection requires fov(0,pi), near>0, far>near; sensitivities must be positive.
+ *
+ * Host owns listeners/canvas/capture/preventDefault; Core owns gestures/inertia.
+ * Client coordinates are source CSS pixels (host converts DPI), wheel deltaY
+ * is raw, not a notch. Send pointer AND changed-touch streams in source order.
+ * Default primary rotate/secondary pan fall back independently; touch fixed.
+ * Control APPENDS its frame hook (onBeforeRender PREPENDS). Integration is once
+ * per frame, not delta-scaled. Null scene means no inertia fallback, but pinch
+ * still writes radius. Control pins camera; scene disposal removes frame hook,
+ * not control/listeners. Caller explicitly detaches. Predicates borrow userdata
+ * until detach, must not throw/re-enter. Nested input/detach during dispatch BUSY.
+ * Keyboard=true, viewport/orthographic/LWR are unsupported in this slice.
+ */
+
+typedef struct bl_HemisphericLightOptions
+{
+    bool hasDirection;
+    bl_Vec3 direction;
+    bl_OptionalNumber intensity;
+} bl_HemisphericLightOptions;
+
+typedef struct bl_HemisphericLightProperties
+{
+    bl_Vec3 direction;
+    double intensity;
+    bl_Vec3 diffuseColor;
+    bl_Vec3 specularColor;
+    bl_Vec3 groundColor;
+} bl_HemisphericLightProperties;
+
+bl_Status bl_createHemisphericLight(bl_Runtime* runtime, const bl_HemisphericLightOptions* options,
+                                    bl_HemisphericLight* light);
+bl_Status bl_getHemisphericLightProperties(bl_HemisphericLight light,
+                                           bl_HemisphericLightProperties* properties);
+bl_Status bl_setHemisphericLightProperties(bl_HemisphericLight light,
+                                           const bl_HemisphericLightProperties* properties);
+bl_Status bl_setLightIntensity(bl_Light light, double intensity);
+bl_Status bl_markLightUboDirty(bl_Light light);
+
+typedef struct bl_StandardMaterialProperties
+{
+    bl_Vec3 diffuseColor;
+    double alpha;
+    bl_Vec3 specularColor;
+    double specularPower;
+    bl_Vec3 emissiveColor;
+    bl_Vec3 ambientColor;
+    bool backFaceCulling;
+    bool disableLighting;
+} bl_StandardMaterialProperties;
+
+typedef struct bl_RebuildMaterialOptions
+{
+    bl_OptionalBool rebuildViews;
+    bl_OptionalBool rebuildFrameGraph;
+} bl_RebuildMaterialOptions;
+
+bl_Status bl_createStandardMaterial(bl_Runtime* runtime, bl_StandardMaterial* material);
+bl_Status bl_getStandardMaterialProperties(bl_StandardMaterial material,
+                                           bl_StandardMaterialProperties* properties);
+bl_Status bl_setStandardMaterialProperties(bl_StandardMaterial material,
+                                           const bl_StandardMaterialProperties* properties);
+bl_Status bl_markMaterialUboDirty(bl_Material material);
+bl_Status bl_rebuildMaterial(bl_SceneContext scene, bl_Material material,
+                             const bl_RebuildMaterialOptions* options);
+bl_Status bl_rebuildSceneRenderables(bl_SceneContext scene);
+bl_Status bl_disposeStandardMaterial(bl_StandardMaterial material);
+
+/*
+ * Hemi defaults: direction(0,1,0), intensity1, diffuse/specular(1,1,1), ground0,
+ * ordinary node TRS. RGB uses Vec3 doubles. Directions automatically dirty light
+ * data; plain scalar/color property writes require markLightUboDirty after build.
+ * setLightIntensity is the original helper (finite validation/error134, no-op
+ * for equal values), not an intensity clamp. Zero/non-unit directions preserve
+ * original world-normalization. Scene packing cap16, duplicates/insertion order
+ * retained; excess members exist but are not packed. Light remove is not dispose,
+ * and visible does not suppress packing. Filters/setMaxLights/shadows unsupported.
+ *
+ * Standard defaults: diffuse/specular1, alpha1, power64, emissive/ambient0,
+ * culling=true, disableLighting=false. Set properties copies DATA only; explicit
+ * markMaterialUboDirty refreshes UBOs, rebuildMaterial changes feature/bucket
+ * state. Standard order is PER MESH, not ShaderMaterial merged-group minimum.
+ * Rebuild options: views=true (no-op without exposed views), frameGraph=false.
+ * frameGraph=true is UNSUPPORTED before mutation. Standard colored geometry
+ * must be rejected at preparation until its automatic RGB behavior is supported.
+ * Texture/PBR/plugins/fog/shadow/material-view features are not exposed.
+ * Runtime WGSL compilation/reflection remains required. Disposal is BUSY while
+ * referenced; GPU storage waits for actual submitted work. Public precision,
+ * finite numeric validation, thread/runtime/kind/generation rules above apply.
+ */
+
 /*
  * Supported demo mapping summary:
  * createEngine/createSceneContext/onBeforeRender/registerScene/startEngine;
@@ -1502,7 +1848,10 @@ bl_Status bl_pollAudioEngine(bl_AudioEngine engine, double monotonicTimeMs);
  * createAudioEngineAsync/createSoundSourceAsync/unlockAudioEngineAsync plus
  * native equivalents of every WebAudio primitive actually used by audio.ts.
  *
- * Deliberately not complete: glTF/Draco/meshopt, lights/shadows, PBR, physics,
+ * Additional scoped support: ArcRotate camera/pointer-touch controls and limits,
+ * untextured Standard material and hemispheric lights. This does not establish
+ * support for all Standard, camera, control or lighting features.
+ * Deliberately not complete: glTF/Draco/meshopt, other lights/shadows, PBR, physics,
  * particles subsystem (the demo's cubes are ordinary user-code meshes), full
  * frame graph, postprocess, additional camera kinds, multi-surface APIs, XR,
  * compute/storage shaders, skeletons, GUI, DOM and browser event emulation.

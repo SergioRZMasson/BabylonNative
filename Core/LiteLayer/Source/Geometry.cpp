@@ -244,9 +244,10 @@ static bl_Status gpuGeometry(bl_Runtime* r, L_Geometry* g)
 void l_meshCleanup(bl_Runtime* r, L_Record* record)
 {
     L_Mesh* m = (L_Mesh*)record;
-    if (!L_NULL(m->properties.material))
+    bl_Material material = l_meshMaterial(m);
+    if (!L_NULL(material))
     {
-        L_Material* mat = (L_Material*)l_peek(r, m->properties.material._id);
+        L_Material* mat = (L_Material*)l_peek(r, material._id);
         if (mat && mat->meshReferences)
         {
             --mat->meshReferences;
@@ -352,11 +353,68 @@ bl_Status bl_getMeshProperties(bl_Mesh h, bl_MeshProperties* out)
     {
         return BL_INVALID_ARGUMENT;
     }
+    if (!L_NULL(m->material) && h._runtime->slots[(uint32_t)m->material._id - 1].kind == L_STANDARD)
+    {
+        return BL_UNSUPPORTED;
+    }
     *out = m->properties;
     return BL_OK;
 }
 
 bl_Status bl_setMeshProperties(bl_Mesh h, const bl_MeshProperties* p)
+{
+    L_GET(h, L_MESH, L_Mesh, mesh);
+    (void)mesh;
+    if (!p || (p->renderOrder.present && !isfinite(p->renderOrder.value)))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    if (p->receiveShadows)
+    {
+        return L_FAIL(h._runtime, BL_UNSUPPORTED, "Shadows are outside this scope");
+    }
+    if (!L_NULL(p->material))
+    {
+        if (p->material._runtime != h._runtime)
+        {
+            return BL_WRONG_RUNTIME;
+        }
+        L_Record* record;
+        L_TRY(l_get(h._runtime, p->material._id, L_MATERIAL, &record));
+    }
+    bl_MeshProperties2 properties = {
+        {p->material._runtime, p->material._id}, p->renderOrder, p->receiveShadows};
+    return bl_setMeshProperties2(h, &properties);
+}
+
+bl_Material l_meshMaterial(const L_Mesh* mesh)
+{
+    return L_NULL(mesh->material)
+               ? bl_Material{mesh->properties.material._runtime, mesh->properties.material._id}
+               : mesh->material;
+}
+
+bl_Status l_checkStandardGeometry(bl_Runtime* r, const L_Material* material, const L_Mesh* mesh)
+{
+    if (material->record.kind == L_STANDARD && (mesh->geometry.attributeMask & (1u << 5)))
+    {
+        return L_FAIL(r, BL_UNSUPPORTED, "Standard automatic RGB vertex color is not supported");
+    }
+    return BL_OK;
+}
+
+bl_Status bl_getMeshProperties2(bl_Mesh h, bl_MeshProperties2* out)
+{
+    L_GET(h, L_MESH, L_Mesh, m);
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    *out = {l_meshMaterial(m), m->properties.renderOrder, m->properties.receiveShadows};
+    return BL_OK;
+}
+
+bl_Status bl_setMeshProperties2(bl_Mesh h, const bl_MeshProperties2* p)
 {
     L_GET(h, L_MESH, L_Mesh, m);
     bl_Runtime* r = h._runtime;
@@ -375,9 +433,7 @@ bl_Status bl_setMeshProperties(bl_Mesh h, const bl_MeshProperties* p)
         {
             return BL_WRONG_RUNTIME;
         }
-        L_Record* record;
-        L_TRY(l_get(r, p->material._id, L_MATERIAL, &record));
-        next = (L_Material*)record;
+        L_TRY(l_materialFamily(p->material, &next));
         if (next->engine && next->engine != m->engine)
         {
             return BL_WRONG_ENGINE;
@@ -396,14 +452,45 @@ bl_Status bl_setMeshProperties(bl_Mesh h, const bl_MeshProperties* p)
         }
         if (registered)
         {
+            L_TRY(l_checkStandardGeometry(r, next, m));
             L_TRY(l_prepareMaterial(r, m->engine, next));
         }
     }
-    if (m->properties.material._id != p->material._id)
+    bl_Material current = l_meshMaterial(m);
+    if (current._id != p->material._id)
     {
-        if (!L_NULL(m->properties.material))
+        L_Record* oldRecord = l_peek(r, current._id);
+        bool oldStandard = oldRecord && oldRecord->kind == L_STANDARD;
+        bool newStandard = next && next->record.kind == L_STANDARD;
+        if (oldStandard != newStandard)
         {
-            L_Material* old = (L_Material*)l_peek(r, m->properties.material._id);
+            for (size_t i = 0; i < r->count; ++i)
+            {
+                L_Record* record = r->records[i];
+                if (!record || record->disposed || record->kind != L_SCENE)
+                {
+                    continue;
+                }
+                L_Scene* scene = (L_Scene*)record;
+                for (size_t j = 0; j < scene->memberCount; ++j)
+                {
+                    if (scene->members[j] == &m->node)
+                    {
+                        if (newStandard)
+                        {
+                            ++scene->standardMemberCount;
+                        }
+                        else if (scene->standardMemberCount)
+                        {
+                            --scene->standardMemberCount;
+                        }
+                    }
+                }
+            }
+        }
+        if (!L_NULL(current))
+        {
+            L_Material* old = (L_Material*)l_peek(r, current._id);
             if (old && old->meshReferences)
             {
                 --old->meshReferences;
@@ -414,7 +501,12 @@ bl_Status bl_setMeshProperties(bl_Mesh h, const bl_MeshProperties* p)
             ++next->meshReferences;
         }
     }
-    m->properties = *p;
+    m->material = p->material;
+    m->properties.material = next && next->record.kind == L_MATERIAL
+                                 ? bl_ShaderMaterial{r, next->record.id}
+                                 : bl_ShaderMaterial{};
+    m->properties.renderOrder = p->renderOrder;
+    m->properties.receiveShadows = p->receiveShadows;
     return BL_OK;
 }
 

@@ -1,4 +1,5 @@
 #include "LiteInternal.h"
+#include "ArcRotateInternal.h"
 #include <bx/cpu.h>
 #include <bx/os.h>
 
@@ -286,6 +287,7 @@ void l_sceneCleanup(bl_Runtime* r, L_Record* record)
 {
     L_Scene* s = (L_Scene*)record;
     l_unregisterScene(s);
+    s->disposing = true;
     l_enterDispatch(r);
     for (L_Callback* p = s->dispose; p; p = p->next)
     {
@@ -314,10 +316,19 @@ void l_sceneCleanup(bl_Runtime* r, L_Record* record)
     }
     s->memberCount = 0;
     s->properties.camera = {};
+    if (!L_NULL(s->activeCamera))
+    {
+        l_unpin(l_peek(r, s->activeCamera._id));
+        s->activeCamera = {};
+    }
     L_Callback* p = s->before;
     while (p)
     {
         L_Callback* next = p->next;
+        if (p->control)
+        {
+            p->control->hook = NULL;
+        }
         l_free(r, p);
         p = next;
     }
@@ -329,12 +340,16 @@ void l_sceneCleanup(bl_Runtime* r, L_Record* record)
         p = next;
     }
     s->before = s->dispose = NULL;
+    s->disposing = false;
     l_free(r, s->members);
     l_free(r, s->memberOwners);
     s->members = NULL;
     s->memberOwners = NULL;
     l_free(r, s->drawScratch);
     l_free(r, s->groupScratch);
+    l_free(r, s->standardPackets);
+    s->standardPackets = NULL;
+    s->standardCapacity = 0;
     s->drawScratch = NULL;
     s->groupScratch = NULL;
     s->drawCapacity = 0;
@@ -372,7 +387,8 @@ static void engineCleanup(bl_Runtime* r, L_Record* record)
         {
             continue;
         }
-        if (p->kind == L_MATERIAL && !p->disposed && ((L_Material*)p)->engine == e)
+        if ((p->kind == L_MATERIAL || p->kind == L_STANDARD) && !p->disposed &&
+            ((L_Material*)p)->engine == e)
         {
             L_Material* m = (L_Material*)p;
             if (m->graphicsCleanup)
@@ -651,6 +667,11 @@ bl_Status bl_getSceneProperties(bl_SceneContext h, bl_SceneProperties* out)
     {
         return BL_INVALID_ARGUMENT;
     }
+    if (!L_NULL(s->activeCamera) &&
+        h._runtime->slots[(uint32_t)s->activeCamera._id - 1].kind == L_ARC_CAMERA)
+    {
+        return BL_UNSUPPORTED;
+    }
     *out = s->properties;
     return BL_OK;
 }
@@ -673,7 +694,69 @@ bl_Status bl_setSceneProperties(bl_SceneContext h, const bl_SceneProperties* p)
         camera->highPrecision = s->engine->highPrecision;
         camera->dirty = true;
     }
+    if (s->activeCamera._id != p->camera._id)
+    {
+        if (!L_NULL(s->activeCamera))
+        {
+            l_unpin(l_peek(h._runtime, s->activeCamera._id));
+        }
+        if (!L_NULL(p->camera))
+        {
+            l_pin(l_peek(h._runtime, p->camera._id));
+        }
+    }
     s->properties = *p;
+    s->activeCamera = {p->camera._runtime, p->camera._id};
+    return BL_OK;
+}
+
+bl_Status bl_getSceneProperties2(bl_SceneContext h, bl_SceneProperties2* out)
+{
+    L_GET(h, L_SCENE, L_Scene, s);
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    *out = {s->properties.clearColor, s->activeCamera, s->properties.fixedDeltaMs};
+    return BL_OK;
+}
+
+bl_Status bl_setSceneProperties2(bl_SceneContext h, const bl_SceneProperties2* p)
+{
+    L_GET(h, L_SCENE, L_Scene, s);
+    if (!p || !isfinite(p->fixedDeltaMs) || !isfinite(p->clearColor.r) ||
+        !isfinite(p->clearColor.g) || !isfinite(p->clearColor.b) || !isfinite(p->clearColor.a))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    L_Node* camera = NULL;
+    if (!L_NULL(p->camera))
+    {
+        if (p->camera._runtime != h._runtime)
+        {
+            return BL_WRONG_RUNTIME;
+        }
+        L_TRY(l_cameraFamily(p->camera, &camera));
+    }
+    if (s->activeCamera._id != p->camera._id)
+    {
+        l_unpin(l_peek(h._runtime, s->activeCamera._id));
+        if (camera)
+        {
+            l_pin(&camera->record);
+        }
+    }
+    if (camera && camera->highPrecision != s->engine->highPrecision)
+    {
+        camera->highPrecision = s->engine->highPrecision;
+        camera->dirty = true;
+    }
+    s->activeCamera = p->camera;
+    s->properties.clearColor = p->clearColor;
+    s->properties.fixedDeltaMs = p->fixedDeltaMs;
+    s->properties.camera = camera && camera->record.kind == L_CAMERA
+                               ? bl_FreeCamera{h._runtime, camera->record.id}
+                               : bl_FreeCamera{};
     return BL_OK;
 }
 
@@ -695,9 +778,11 @@ static bl_Status inspectHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n, size_t* 
         {
             return BL_WRONG_ENGINE;
         }
-        if (s->registered && !L_NULL(m->properties.material))
+        bl_Material identity = l_meshMaterial(m);
+        if (s->registered && !L_NULL(identity))
         {
-            L_Material* mat = (L_Material*)l_peek(r, m->properties.material._id);
+            L_Material* mat = (L_Material*)l_peek(r, identity._id);
+            L_TRY(l_checkStandardGeometry(r, mat, m));
             L_TRY(l_prepareMaterial(r, s->engine, mat));
             if (mat->activeAttributes & ~m->geometry.attributeMask)
             {
@@ -734,6 +819,19 @@ static void addHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n)
     }
     s->members[s->memberCount] = n;
     s->memberOwners[s->memberCount++] = owner;
+    if (n->record.kind == L_MESH)
+    {
+        bl_Material material = l_meshMaterial((L_Mesh*)n);
+        L_Record* record = l_peek(r, material._id);
+        if (record && record->kind == L_STANDARD)
+        {
+            ++s->standardMemberCount;
+        }
+    }
+    if (n->record.kind == L_LIGHT)
+    {
+        ++s->lightListVersion;
+    }
     if (owner)
     {
         ++n->sceneCount;
@@ -784,16 +882,29 @@ bl_Status bl_addToScene(bl_SceneContext h, bl_SceneNode entity)
         }
         L_Node** members = (L_Node**)l_alloc(r, bytes);
         bool* owners = (bool*)l_alloc(r, cap * sizeof(bool));
-        if (!members || !owners)
+        L_StandardPacket* packets = NULL;
+        if (s->standardCapacity && l_size(cap, sizeof(*packets), &bytes))
+        {
+            packets = (L_StandardPacket*)l_alloc(r, bytes);
+        }
+        if (!members || !owners || (s->standardCapacity && !packets))
         {
             l_free(r, members);
             l_free(r, owners);
+            l_free(r, packets);
             return BL_OUT_OF_MEMORY;
         }
         if (s->memberCount)
         {
             memcpy(members, s->members, s->memberCount * sizeof(*members));
             memcpy(owners, s->memberOwners, s->memberCount * sizeof(*owners));
+        }
+        if (packets)
+        {
+            memcpy(packets, s->standardPackets, s->standardCapacity * sizeof(*packets));
+            l_free(r, s->standardPackets);
+            s->standardPackets = packets;
+            s->standardCapacity = cap;
         }
         l_free(r, s->members);
         l_free(r, s->memberOwners);
@@ -821,6 +932,11 @@ bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n)
     {
         s->properties.camera = {};
     }
+    if (s->activeCamera._id == n->record.id)
+    {
+        l_unpin(&n->record);
+        s->activeCamera = {};
+    }
     bool removedOwner = false;
     for (size_t i = 0; i < s->memberCount;)
     {
@@ -830,15 +946,34 @@ bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n)
             continue;
         }
         removedOwner = removedOwner || s->memberOwners[i];
+        if (n->record.kind == L_MESH)
+        {
+            bl_Material material = l_meshMaterial((L_Mesh*)n);
+            L_Record* record = l_peek(r, material._id);
+            if (record && record->kind == L_STANDARD && s->standardMemberCount)
+            {
+                --s->standardMemberCount;
+            }
+        }
         l_unpin(&n->record);
         memmove(s->members + i, s->members + i + 1, (s->memberCount - i - 1) * sizeof(*s->members));
         memmove(s->memberOwners + i, s->memberOwners + i + 1,
                 (s->memberCount - i - 1) * sizeof(*s->memberOwners));
+        if (s->standardPackets)
+        {
+            memmove(s->standardPackets + i, s->standardPackets + i + 1,
+                    (s->memberCount - i - 1) * sizeof(*s->standardPackets));
+            s->standardPackets[s->memberCount - 1] = {};
+        }
         --s->memberCount;
     }
     if (removedOwner && n->sceneCount)
     {
         --n->sceneCount;
+    }
+    if (removedOwner && n->record.kind == L_LIGHT)
+    {
+        ++s->lightListVersion;
     }
     if (removedOwner && !n->sceneCount && n->record.kind == L_MESH)
     {
@@ -887,17 +1022,20 @@ bl_Status bl_registerScene(bl_SceneContext h)
             continue;
         }
         L_Mesh* m = (L_Mesh*)n;
-        if (L_NULL(m->properties.material))
+        bl_Material identity = l_meshMaterial(m);
+        if (L_NULL(identity))
         {
             continue;
         }
-        L_Material* mat = (L_Material*)l_peek(h._runtime, m->properties.material._id);
+        L_Material* mat = (L_Material*)l_peek(h._runtime, identity._id);
+        L_TRY(l_checkStandardGeometry(h._runtime, mat, m));
         L_TRY(l_prepareMaterial(h._runtime, s->engine, mat));
         if (mat->activeAttributes & ~m->geometry.attributeMask)
         {
             return BL_INVALID_ARGUMENT;
         }
     }
+    L_TRY(l_prepareStandardPackets(h._runtime, s, false, 0));
     if (s->engine->lastScene)
     {
         s->engine->lastScene->next = s;
@@ -1006,6 +1144,10 @@ bl_Status bl_removeSceneCallback(bl_SceneContext h, bl_CallbackToken token)
             if ((*p)->id == token.value)
             {
                 L_Callback* old = *p;
+                if (old->control)
+                {
+                    return BL_INVALID_ARGUMENT;
+                }
                 *p = old->next;
                 l_free(h._runtime, old);
                 return BL_OK;
@@ -1036,6 +1178,11 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
     for (L_Callback* p = s->before; p; p = p->next)
     {
         p->before(p->user, s->properties.fixedDeltaMs > 0 ? s->properties.fixedDeltaMs : delta);
+        if (p->control && p->control->failure != BL_OK)
+        {
+            l_leaveDispatch(r);
+            return p->control->failure;
+        }
     }
     l_leaveDispatch(r);
     bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
@@ -1055,17 +1202,23 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
     }
     bgfx::setViewClear(viewId, flags, rgba, 0, 0);
     bgfx::touch(viewId);
-    if (L_NULL(s->properties.camera))
+    if (L_NULL(s->activeCamera))
     {
         return BL_OK;
     }
-    L_Record* cameraRecord;
-    L_TRY(l_get(r, s->properties.camera._id, L_CAMERA, &cameraRecord));
-    L_Node* camera = (L_Node*)cameraRecord;
+    L_Node* camera;
+    L_TRY(l_cameraFamily(s->activeCamera, &camera));
     L_TRY(l_world(r, camera));
     bl_Mat4 view;
     bl_Mat4 projection = {};
-    l_inverse(&camera->world, &view, e->highPrecision);
+    if (camera->record.kind == L_ARC_CAMERA)
+    {
+        l_arcView(camera, &view);
+    }
+    else
+    {
+        l_inverse(&camera->world, &view, e->highPrecision);
+    }
     double tanValue = 1 / tan(camera->camera.fov * .5);
     double range = camera->camera.farPlane - camera->camera.nearPlane;
     projection.values[0] = tanValue / ((double)e->native.target.width / e->native.target.height);
@@ -1091,8 +1244,8 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
                             camera->world.values[14]};
         for (size_t i = 0; i < count; ++i)
         {
-            status = l_drawMaterial(r, e, draws[i].material, draws[i].mesh, &view, &projection,
-                                    position, viewId);
+            status = l_drawMaterial(r, e, s, draws[i].material, draws[i].mesh, &view, &projection,
+                                    position, viewId, draws[i].standard);
             if (status != BL_OK)
             {
                 break;

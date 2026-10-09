@@ -96,7 +96,7 @@ bl_Status l_node(bl_SceneNode h, L_Node** out, bool disposedOK)
     L_Record* p;
     L_TRY(l_get(h._runtime, h._id, 0, &p, true));
     unsigned kind = h._runtime->slots[(uint32_t)h._id - 1].kind;
-    if (kind != L_NODE && kind != L_CAMERA && kind != L_MESH)
+    if (!l_isNodeKind(kind))
     {
         return L_FAIL(h._runtime, BL_INVALID_HANDLE, "Not a scene node");
     }
@@ -267,6 +267,10 @@ bl_Status bl_getNodePosition(bl_SceneNode h, bl_Vec3* out)
 bl_Status bl_setNodePosition(bl_SceneNode h, bl_Vec3 value)
 {
     L_NODE_GET(h, n);
+    if (n->record.kind == L_ARC_CAMERA)
+    {
+        return BL_UNSUPPORTED;
+    }
     if (!l_vec(value))
     {
         return BL_INVALID_ARGUMENT;
@@ -293,6 +297,10 @@ bl_Status bl_getNodeScaling(bl_SceneNode h, bl_Vec3* out)
 bl_Status bl_setNodeScaling(bl_SceneNode h, bl_Vec3 value)
 {
     L_NODE_GET(h, n);
+    if (n->record.kind == L_ARC_CAMERA)
+    {
+        return BL_UNSUPPORTED;
+    }
     if (!l_vec(value))
     {
         return BL_INVALID_ARGUMENT;
@@ -338,6 +346,10 @@ bl_Status bl_getNodeRotation(bl_SceneNode h, bl_Vec3* out)
 bl_Status bl_setNodeRotation(bl_SceneNode h, bl_Vec3 value)
 {
     L_NODE_GET(h, n);
+    if (n->record.kind == L_ARC_CAMERA)
+    {
+        return BL_UNSUPPORTED;
+    }
     if (!l_vec(value))
     {
         return BL_INVALID_ARGUMENT;
@@ -371,6 +383,10 @@ bl_Status bl_getNodeRotationQuaternion(bl_SceneNode h, bl_Quat* out)
 bl_Status bl_setNodeRotationQuaternion(bl_SceneNode h, bl_Quat q)
 {
     L_NODE_GET(h, n);
+    if (n->record.kind == L_ARC_CAMERA)
+    {
+        return BL_UNSUPPORTED;
+    }
     if (!l_quat(q))
     {
         return BL_INVALID_ARGUMENT;
@@ -562,11 +578,20 @@ bl_Status l_world(bl_Runtime* r, L_Node* n)
     bl_Mat4 m;
     l_identity(&m);
     double* v = m.values;
-    if (n->record.kind == L_CAMERA)
+    bl_Vec3 position = n->position;
+    bl_Vec3 target = n->target;
+    if (n->record.kind == L_ARC_CAMERA)
     {
-        double zx = n->target.x - n->position.x;
-        double zy = n->target.y - n->position.y;
-        double zz = n->target.z - n->position.z;
+        l_arcEye(n, &position);
+        bl_ArcRotateCameraProperties properties;
+        L_TRY(bl_getArcRotateCameraProperties({r, n->record.id}, &properties));
+        target = properties.target;
+    }
+    if (n->record.kind == L_CAMERA || n->record.kind == L_ARC_CAMERA)
+    {
+        double zx = target.x - position.x;
+        double zy = target.y - position.y;
+        double zz = target.z - position.z;
         double len = sqrt(zx * zx + zy * zy + zz * zz);
         if (len >= 1e-10)
         {
@@ -617,9 +642,9 @@ bl_Status l_world(bl_Runtime* r, L_Node* n)
         v[9] = 2 * (yz - wx) * n->scale.z;
         v[10] = (1 - 2 * (xx + yy)) * n->scale.z;
     }
-    v[12] = n->position.x;
-    v[13] = n->position.y;
-    v[14] = n->position.z;
+    v[12] = position.x;
+    v[13] = position.y;
+    v[14] = position.z;
     if (!n->highPrecision)
     {
         for (unsigned i = 0; i < 16; ++i)
@@ -713,7 +738,7 @@ bl_Status bl_disposeNode(bl_SceneNode h)
     {
         return BL_OK;
     }
-    if (n->sceneCount || n->parent || n->childCount)
+    if (n->sceneCount || n->parent || n->childCount || n->record.pins)
     {
         return L_FAIL(h._runtime, BL_BUSY, "Node is attached");
     }
@@ -725,11 +750,12 @@ bl_Status bl_disposeNode(bl_SceneNode h)
             continue;
         }
         if (!p->disposed && p->kind == L_SCENE &&
-            ((L_Scene*)p)->properties.camera._id == n->record.id)
+            (((L_Scene*)p)->properties.camera._id == n->record.id ||
+             ((L_Scene*)p)->activeCamera._id == n->record.id))
         {
             return BL_BUSY;
         }
-        if (!p->disposed && (p->kind == L_NODE || p->kind == L_CAMERA || p->kind == L_MESH))
+        if (!p->disposed && l_isNodeKind(p->kind))
         {
             L_Node* other = (L_Node*)p;
             if (other->parent == n)

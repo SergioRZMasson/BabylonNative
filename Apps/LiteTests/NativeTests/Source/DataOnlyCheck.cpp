@@ -48,6 +48,18 @@ int main()
     bl_ShaderUniformView value = {};
     assert(bl_getShaderUniform(material, {"value", 5}, &value) == BL_OK);
     assert(value.values.data[0] == 7);
+    bl_ArcRotateCamera arc{};
+    assert(bl_createArcRotateCamera(runtime, 0, 1, 5, {}, &arc) == BL_OK);
+    bl_ArcRotateControl controls{};
+    assert(bl_attachControl(arc, {}, nullptr, &controls) == BL_OK);
+    bl_ArcRotateControlOptions controlOptions{};
+    assert(bl_setArcRotateControlOptions(controls, &controlOptions) == BL_OK);
+    bl_ArcRotateCameraLimitPatch patch{};
+    assert(bl_setArcRotateCameraLimitFields(arc, &patch) == BL_OK);
+    bl_HemisphericLight light{};
+    assert(bl_createHemisphericLight(runtime, nullptr, &light) == BL_OK);
+    bl_StandardMaterial standard{};
+    assert(bl_createStandardMaterial(runtime, &standard) == BL_OK);
     assert(bl_disposeRuntime(runtime) == BL_OK);
     return 0;
 }

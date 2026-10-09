@@ -82,6 +82,7 @@ if(LITE_UI_CORE_REGRESSION_TESTS)
     add_executable(LiteUiCoreRegressionTests
         "../NativeTests/Source/Tests.Geometry.cpp"
         "../NativeTests/Source/Tests.Nodes.cpp"
+        "../NativeTests/Source/Tests.ArcLight.cpp"
         "../NativeTests/Source/Tests.Audio.cpp"
         "../NativeTests/Source/Tests.RenderOrder.cpp"
         "../NativeTests/Source/Tests.Runtime.cpp")

@@ -8,6 +8,8 @@ struct L_Uniform
     bl_String name;
     bl_ShaderUniformType type;
     bool system;
+    uint32_t block;
+    bool rawBits;
     uint32_t offset;
     float values[16];
 };
@@ -16,6 +18,14 @@ struct L_Sampler
 {
     bl_String name;
     bl_Texture2D texture;
+};
+
+struct L_MaterialBlock
+{
+    bl_String name;
+    uint32_t group;
+    uint32_t binding;
+    uint32_t byteSize;
 };
 
 struct L_Material
@@ -53,6 +63,15 @@ struct L_Material
     size_t textureMapCount;
     uint32_t activeAttributes;
     void (*graphicsCleanup)(bl_Runtime*, L_Material*);
+    bl_StandardMaterialProperties standardProperties;
+    bl_StandardMaterialProperties standardSnapshot;
+    uint64_t uboVersion;
+    uint64_t snapshotVersion;
+    bool snapshotValid;
+    bool sourceLightingDisabled;
+    L_MaterialBlock blocks[4];
+    size_t blockCount;
+    L_Material* standardVariants[2];
 };
 
 struct L_Texture
@@ -88,5 +107,7 @@ size_t l_samplerSlot(L_Material* m, bl_String name);
 bool l_samplerSuffix(bl_String a, bl_String b);
 bool l_appendText(bl_Runtime* r, L_Text* t, bl_String s);
 void l_materialCleanup(bl_Runtime* r, L_Record* record);
+bl_Status l_materialFamily(bl_Material handle, L_Material** material);
+bl_Status l_standardSources(bl_Runtime* runtime, L_Material* pipeline, bool disableLighting);
 
 #endif

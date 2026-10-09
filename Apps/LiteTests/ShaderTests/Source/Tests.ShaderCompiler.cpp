@@ -146,6 +146,83 @@ TEST(LiteShaderCompiler, RejectsMismatchedStageInterfaces)
     EXPECT_NE(compiled.Diagnostics().find("vertex outputs"), std::string::npos);
 }
 
+TEST(LiteShaderCompiler, RecursiveSemanticPathsPreserveOriginalOffsetsAndIntegerTypes)
+{
+    const std::string declarations = R"(
+struct Leaf { rgb: vec3f, weight: f32 };
+struct Nested { head: vec4u, entries: array<Leaf,2>, tail: i32 };
+struct Block { nested: Nested, matrix: mat4x4f, gain: f32 };
+@group(2) @binding(3) var<uniform> unrelated: Block;
+@group(2) @binding(7) var<uniform> inactive: Block;
+)";
+    const std::string vertex = declarations + R"(
+struct Input { @location(0) position: vec3f };
+@vertex fn customVertex(input: Input) -> @builtin(position) vec4f {
+    return unrelated.matrix * vec4f(input.position *
+        (unrelated.gain + f32(unrelated.nested.head.x) + unrelated.nested.entries[1].weight),1);
+})";
+    const std::string fragment = declarations + R"(
+@fragment fn customFragment() -> @location(0) vec4f {
+    return vec4f(unrelated.nested.entries[0].rgb *
+        (unrelated.gain + f32(unrelated.nested.tail)),1);
+})";
+    Compiled compiled(vertex, fragment);
+    ASSERT_EQ(compiled.status, BL_OK) << compiled.Diagnostics();
+    ASSERT_EQ(compiled.result.uniformBlockCount, 1u);
+    EXPECT_EQ(compiled.result.uniformBlocks[0].byteSize, 144u);
+    EXPECT_EQ(compiled.result.uniformBlocks[0].stages, BL_STAGE_VERTEX | BL_STAGE_FRAGMENT);
+    const auto find = [&](std::string_view name) -> const bl_ReflectedUniform* {
+        for (size_t i = 0; i < compiled.result.uniformCount; ++i)
+        {
+            const auto& uniform = compiled.result.uniforms[i];
+            if (std::string_view(uniform.name.data, uniform.name.length) == name)
+            {
+                return &uniform;
+            }
+        }
+        return nullptr;
+    };
+    const auto* component = find("nested.head[3]");
+    const auto* rgb = find("nested.entries[0].rgb");
+    const auto* weight = find("nested.entries[1].weight");
+    const auto* tail = find("nested.tail");
+    const auto* matrix = find("matrix");
+    ASSERT_NE(component, nullptr);
+    ASSERT_NE(rgb, nullptr);
+    ASSERT_NE(weight, nullptr);
+    ASSERT_NE(tail, nullptr);
+    ASSERT_NE(matrix, nullptr);
+    EXPECT_EQ(component->type, BL_UNIFORM_U32);
+    EXPECT_EQ(component->byteOffset, 12u);
+    EXPECT_EQ(component->byteSize, 4u);
+    EXPECT_EQ(rgb->type, BL_UNIFORM_VEC3);
+    EXPECT_EQ(rgb->byteOffset, 16u);
+    EXPECT_EQ(rgb->byteSize, 12u);
+    EXPECT_EQ(weight->byteOffset, 44u);
+    EXPECT_EQ(tail->byteOffset, 48u);
+    EXPECT_EQ(tail->type, BL_UNIFORM_I32);
+    EXPECT_EQ(matrix->byteOffset, 64u);
+    EXPECT_EQ(matrix->nativeCount, 9u);
+    EXPECT_EQ(matrix->nativeByteOffset, matrix->byteOffset);
+    EXPECT_EQ(std::string_view(component->nativeName.data, component->nativeName.length),
+              std::string_view(matrix->nativeName.data, matrix->nativeName.length));
+    EXPECT_EQ(ReflectBytecode(compiled.result.vertexContainer) != nullptr, true);
+    EXPECT_EQ(ReflectBytecode(compiled.result.fragmentContainer) != nullptr, true);
+}
+
+TEST(LiteShaderCompiler, RecursiveRuntimeSizedUniformLayoutsRejectWithDiagnostics)
+{
+    const std::string vertex = R"(
+struct Invalid { values: array<vec4f> };
+@group(0) @binding(0) var<uniform> invalid: Invalid;
+@vertex fn customVertex() -> @builtin(position) vec4f { return invalid.values[0]; }
+)";
+    Compiled compiled(vertex, Fragment);
+    EXPECT_EQ(compiled.status, BL_SHADER_ERROR);
+    EXPECT_FALSE(compiled.Diagnostics().empty());
+    EXPECT_EQ(compiled.result.vertexContainer.count, 0u);
+}
+
 TEST(LiteShaderCompiler, ConsolidatesMultipleWGSLBlocksAndPreservesMemberLayouts)
 {
     const std::string vertex = R"(

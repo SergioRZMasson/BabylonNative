@@ -20,7 +20,12 @@ enum L_Kind
     L_SOURCE,
     L_UI_CONTEXT,
     L_UI_ELEMENT,
-    L_DATA
+    L_DATA,
+    L_ARC_CAMERA,
+    L_LIGHT,
+    L_CONTROL,
+    L_LIMIT,
+    L_STANDARD
 };
 
 struct L_Record
@@ -61,7 +66,7 @@ struct bl_Runtime
     unsigned dispatchDepth;
     L_Record** records;
     L_Slot* slots;
-    size_t freeHeads[L_DATA + 1];
+    size_t freeHeads[L_STANDARD + 1];
     size_t count;
     size_t capacity;
     uint64_t matrixVersion;

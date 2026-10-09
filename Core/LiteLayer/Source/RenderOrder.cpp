@@ -57,6 +57,7 @@ static L_DrawGroup* drawGroup(L_Scene* s, uint64_t materialId)
 
 bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t* out)
 {
+    L_TRY(l_prepareStandardPackets(r, s, false, 0));
     L_TRY(reserveDraws(r, s));
     if (s->groupCapacity)
     {
@@ -70,12 +71,14 @@ bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t*
             continue;
         }
         L_Mesh* mesh = (L_Mesh*)n;
-        if (L_NULL(mesh->properties.material))
+        bl_Material identity = l_meshMaterial(mesh);
+        if (L_NULL(identity))
         {
             continue;
         }
-        L_Record* record = l_peek(r, mesh->properties.material._id);
-        if (!record || record->disposed || record->kind != L_MATERIAL)
+        L_Record* record = l_peek(r, identity._id);
+        if (!record || record->disposed ||
+            (record->kind != L_MATERIAL && record->kind != L_STANDARD))
         {
             return L_FAIL(r, BL_INVALID_HANDLE, "Scene material identity is not live");
         }
@@ -83,7 +86,7 @@ bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t*
         double order = mesh->properties.renderOrder.present ? mesh->properties.renderOrder.value
                        : material->blending                 ? 200.0
                                                             : 100.0;
-        if (!material->blending)
+        if (!material->blending && record->kind == L_MATERIAL)
         {
             // All members participate, even hidden or empty meshes. Each duplicate still draws.
             L_DrawGroup* group = drawGroup(s, record->id);
@@ -107,24 +110,27 @@ bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t*
             continue;
         }
         L_Mesh* mesh = (L_Mesh*)n;
-        if (L_NULL(mesh->properties.material) || !mesh->geometry.vertices ||
-            !mesh->geometry.indexCount)
+        bl_Material identity = l_meshMaterial(mesh);
+        if (L_NULL(identity) || !mesh->geometry.vertices || !mesh->geometry.indexCount)
         {
             continue;
         }
-        L_Material* material = (L_Material*)l_peek(r, mesh->properties.material._id);
+        L_Material* material = (L_Material*)l_peek(r, identity._id);
+        L_StandardPacket* standard =
+            material->record.kind == L_STANDARD ? s->standardPackets + i : NULL;
+        bool transparent = standard ? standard->transparent : material->blending;
         double order = mesh->properties.renderOrder.present ? mesh->properties.renderOrder.value
-                       : material->blending                 ? 200.0
+                       : transparent                        ? 200.0
                                                             : 100.0;
         L_TRY(l_world(r, n));
         double depth = view->values[2] * n->world.values[12] +
                        view->values[6] * n->world.values[13] +
                        view->values[10] * n->world.values[14] + view->values[14];
-        draws[count++] = {mesh, material, order, depth, i, i, material->blending};
+        draws[count++] = {mesh, material, order, depth, i, i, transparent, standard};
     }
     for (size_t i = 0; i < count; ++i)
     {
-        if (!draws[i].transparent)
+        if (!draws[i].transparent && draws[i].material->record.kind == L_MATERIAL)
         {
             L_DrawGroup* group = drawGroup(s, draws[i].material->record.id);
             draws[i].order = group->order;

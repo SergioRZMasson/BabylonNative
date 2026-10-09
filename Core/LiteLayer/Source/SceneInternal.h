@@ -34,6 +34,7 @@ struct L_Callback
     bl_BeforeRenderCallback before;
     bl_SceneDisposeCallback dispose;
     void* user;
+    struct L_Control* control;
 };
 
 struct L_Scene
@@ -41,6 +42,7 @@ struct L_Scene
     L_Record record;
     struct L_Engine* engine;
     bl_SceneProperties properties;
+    bl_Camera activeCamera;
     L_Node** members;
     bool* memberOwners;
     size_t memberCount;
@@ -53,6 +55,17 @@ struct L_Scene
     size_t drawCapacity;
     struct L_DrawGroup* groupScratch;
     size_t groupCapacity;
+    uint64_t lightListVersion;
+    struct L_StandardPacket* standardPackets;
+    size_t standardCapacity;
+    float lightData[260];
+    uint64_t lightVersions[16];
+    uint64_t lightIdentities[16];
+    uint64_t packedListVersion;
+    size_t packedLightCount;
+    bool lightsReady;
+    size_t standardMemberCount;
+    bool disposing;
 };
 
 struct L_Engine
@@ -102,6 +115,9 @@ bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n);
 bl_Status l_retire(L_Engine* e);
 bl_Status l_reserveViews(L_Engine* engine, L_ViewReservation* reservation);
 void l_releaseViews(L_Engine* engine, L_ViewReservation* reservation);
+bool l_isNodeKind(unsigned kind);
+bl_Status l_cameraFamily(bl_Camera camera, L_Node** node);
+void l_arcEye(L_Node* node, bl_Vec3* eye);
 
 #define L_NODE_GET(handle, variable) \
     L_Node* variable;                \

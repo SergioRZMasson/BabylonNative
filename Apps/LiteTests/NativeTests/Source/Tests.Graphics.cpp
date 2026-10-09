@@ -255,6 +255,253 @@ namespace
     };
 }
 
+TEST_F(LiteNativeGraphics, OriginalArcHemisphericStandardUsesRuntimeWGSLAndRealPixels)
+{
+    bl_ArcRotateCamera camera{};
+    ASSERT_EQ(bl_createArcRotateCamera(runtime->runtime, -3.141592653589793 / 2, 1.1, 5, {}, &camera), BL_OK);
+    bl_Camera family{};
+    ASSERT_EQ(bl_arcRotateCameraAsCamera(camera, &family), BL_OK);
+    bl_SceneProperties2 sceneProperties{};
+    ASSERT_EQ(bl_getSceneProperties2(scene, &sceneProperties), BL_OK);
+    sceneProperties.camera = family;
+    ASSERT_EQ(bl_setSceneProperties2(scene, &sceneProperties), BL_OK);
+    bl_SceneProperties sentinel{};
+    sentinel.fixedDeltaMs = 123;
+    EXPECT_EQ(bl_getSceneProperties(scene, &sentinel), BL_UNSUPPORTED);
+    EXPECT_EQ(sentinel.fixedDeltaMs, 123);
+    bl_HemisphericLight light{};
+    ASSERT_EQ(bl_createHemisphericLight(runtime->runtime, nullptr, &light), BL_OK);
+    bl_Light lightFamily{};
+    ASSERT_EQ(bl_hemisphericLightAsLight(light, &lightFamily), BL_OK);
+    bl_SceneNode lightNode{};
+    ASSERT_EQ(bl_lightNode(lightFamily, &lightNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, lightNode), BL_OK);
+    bl_StandardMaterial standard{};
+    ASSERT_EQ(bl_createStandardMaterial(runtime->runtime, &standard), BL_OK);
+    bl_StandardMaterialProperties properties{};
+    ASSERT_EQ(bl_getStandardMaterialProperties(standard, &properties), BL_OK);
+    properties.diffuseColor = {.85, .34, .2};
+    ASSERT_EQ(bl_setStandardMaterialProperties(standard, &properties), BL_OK);
+    bl_Material materialFamily{};
+    ASSERT_EQ(bl_standardMaterialAsMaterial(standard, &materialFamily), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &mesh), BL_OK);
+    bl_MeshProperties2 meshProperties{materialFamily, {}, false};
+    ASSERT_EQ(bl_setMeshProperties2(mesh, &meshProperties), BL_OK);
+    ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
+    const auto registered = bl_registerScene(scene);
+    bl_Error error{};
+    bl_getLastError(runtime->runtime, &error);
+    ASSERT_EQ(registered, BL_OK) << std::string(error.message.data ? error.message.data : "", error.message.length);
+    ASSERT_EQ(bl_renderFrame(engine, 1000.0 / 60), BL_OK);
+    ASSERT_TRUE(Readback());
+    size_t upward = 0;
+    size_t vertical = 0;
+    for (size_t i = 0; i < pixels.size(); i += 4)
+    {
+        if (std::abs(int(pixels[i]) - 217) <= 1 &&
+            std::abs(int(pixels[i + 1]) - 87) <= 1 &&
+            std::abs(int(pixels[i + 2]) - 51) <= 1)
+        {
+            ++upward;
+        }
+        if (std::abs(int(pixels[i]) - 108) <= 1 &&
+            std::abs(int(pixels[i + 1]) - 43) <= 1 &&
+            std::abs(int(pixels[i + 2]) - 26) <= 1)
+        {
+            ++vertical;
+        }
+    }
+    EXPECT_GT(upward, 5u);
+    EXPECT_GT(vertical, 30u);
+    auto* nativeScene = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, scene._id));
+    ASSERT_NE(nativeScene->standardPackets[1].pipeline, nullptr);
+    EXPECT_EQ(nativeScene->standardPackets[1].pipeline->blockCount, 4u);
+    EXPECT_GT(nativeScene->standardPackets[1].pipeline->nativeUniformCount, 1u);
+    const auto before = Center();
+    ASSERT_EQ(bl_setLightIntensity(lightFamily, 0), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_LT(Center()[0], 3);
+    ASSERT_EQ(bl_setLightIntensity(lightFamily, 1), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center(), before);
+    bl_HemisphericLightProperties lightProperties{};
+    ASSERT_EQ(bl_getHemisphericLightProperties(light, &lightProperties), BL_OK);
+    lightProperties.diffuseColor = {};
+    ASSERT_EQ(bl_setHemisphericLightProperties(light, &lightProperties), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center(), before);
+    ASSERT_EQ(bl_markLightUboDirty(lightFamily), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_LT(Center()[0], before[0] / 2);
+    lightProperties.diffuseColor = {1, 1, 1};
+    ASSERT_EQ(bl_setHemisphericLightProperties(light, &lightProperties), BL_OK);
+    ASSERT_EQ(bl_markLightUboDirty(lightFamily), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center(), before);
+    properties.diffuseColor = {0, 1, 0};
+    ASSERT_EQ(bl_setStandardMaterialProperties(standard, &properties), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center(), before);
+    ASSERT_EQ(bl_markMaterialUboDirty(materialFamily), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    const auto green = Center();
+    EXPECT_GT(green[1], green[0] + 50);
+    EXPECT_GT(green[1], green[2] + 50);
+    bl_RebuildMaterialOptions unsupported{};
+    unsupported.rebuildFrameGraph = BL_BOOL_TRUE;
+    properties.disableLighting = true;
+    properties.emissiveColor = {1, 1, 1};
+    ASSERT_EQ(bl_setStandardMaterialProperties(standard, &properties), BL_OK);
+    auto* previous = nativeScene->standardPackets[1].pipeline;
+    EXPECT_EQ(bl_rebuildMaterial(scene, materialFamily, &unsupported), BL_UNSUPPORTED);
+    EXPECT_EQ(nativeScene->standardPackets[1].pipeline, previous);
+    ASSERT_EQ(bl_rebuildMaterial(scene, materialFamily, nullptr), BL_OK);
+    EXPECT_NE(nativeScene->standardPackets[1].pipeline, previous);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_GT(Center()[1], 240);
+    bl_GeometryData box{};
+    ASSERT_EQ(bl_createBoxData(runtime->runtime, nullptr, &box), BL_OK);
+    std::vector<float> colors(box.vertexCount * 4, 1);
+    bl_MeshGeometry colored{{box.positions, box.vertexCount * 3},
+        {box.normals, box.vertexCount * 3}, {box.indices, box.indexCount},
+        {box.uvs, box.vertexCount * 2}, {}, {}, {colors.data(), colors.size()}};
+    ASSERT_EQ(bl_resizeMeshGeometry(engine, mesh, &colored), BL_OK);
+    EXPECT_EQ(bl_renderFrame(engine, 16), BL_UNSUPPORTED);
+    colored.colors = {};
+    ASSERT_EQ(bl_resizeMeshGeometry(engine, mesh, &colored), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_EQ(bl_freeGeometryData(runtime->runtime, &box), BL_OK);
+}
+
+TEST_F(LiteNativeGraphics, ArcControlAppendsOriginalPerFrameInertiaAfterUserPrepend)
+{
+    bl_ArcRotateCamera camera{};
+    ASSERT_EQ(bl_createArcRotateCamera(runtime->runtime, 0, 1, 5, {}, &camera), BL_OK);
+    bl_Camera family{};
+    ASSERT_EQ(bl_arcRotateCameraAsCamera(camera, &family), BL_OK);
+    bl_SceneProperties2 properties{};
+    ASSERT_EQ(bl_getSceneProperties2(scene, &properties), BL_OK);
+    properties.camera = family;
+    ASSERT_EQ(bl_setSceneProperties2(scene, &properties), BL_OK);
+    bl_ArcRotateControl control{};
+    ASSERT_EQ(bl_attachControl(camera, scene, nullptr, &control), BL_OK);
+    struct Observer
+    {
+        bl_ArcRotateCamera camera;
+        bl_ArcRotateControl control;
+        double alpha{};
+        bl_Status status{};
+        bl_Status replacement{};
+    } observer{camera, control};
+    bl_CallbackToken callback{};
+    ASSERT_EQ(bl_onBeforeRender(scene, [](void* user, double) {
+        auto* observer = static_cast<Observer*>(user);
+        bl_ArcRotateCameraProperties p{};
+        observer->status = bl_getArcRotateCameraProperties(observer->camera, &p);
+        observer->alpha = p.alpha;
+        bl_ArcRotateControlOptions options{};
+        options.primaryButton = BL_ARC_ACTION_PAN;
+        observer->replacement = bl_setArcRotateControlOptions(observer->control, &options);
+    }, &observer, &callback), BL_OK);
+    bl_ArcRotateInput input{};
+    bl_ArcRotateInputEffects effects{};
+    input.kind = BL_ARC_POINTER_DOWN;
+    ASSERT_EQ(bl_processArcRotateInput(control, &input, &effects), BL_OK);
+    input.kind = BL_ARC_POINTER_MOVE;
+    input.clientX = 100;
+    ASSERT_EQ(bl_processArcRotateInput(control, &input, &effects), BL_OK);
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 3), BL_OK);
+    EXPECT_EQ(observer.status, BL_OK);
+    EXPECT_EQ(observer.replacement, BL_OK);
+    EXPECT_DOUBLE_EQ(observer.alpha, 0);
+    bl_ArcRotateCameraProperties p{};
+    ASSERT_EQ(bl_getArcRotateCameraProperties(camera, &p), BL_OK);
+    EXPECT_DOUBLE_EQ(p.alpha, -.1);
+    ASSERT_EQ(bl_renderFrame(engine, 333), BL_OK);
+    EXPECT_DOUBLE_EQ(observer.alpha, -.1);
+    ASSERT_EQ(bl_getArcRotateCameraProperties(camera, &p), BL_OK);
+    EXPECT_NEAR(p.alpha, -.19, 1e-15);
+    ASSERT_EQ(bl_disposeScene(scene), BL_OK);
+    input.kind = BL_ARC_WHEEL;
+    input.deltaY = 120;
+    ASSERT_EQ(bl_processArcRotateInput(control, &input, &effects), BL_OK);
+    ASSERT_EQ(bl_getArcRotateCameraProperties(camera, &p), BL_OK);
+    EXPECT_DOUBLE_EQ(p.radius, 5);
+    EXPECT_DOUBLE_EQ(p.inertialRadiusOffset, -.2);
+    ASSERT_EQ(bl_detachControl(control), BL_OK);
+}
+
+TEST_F(LiteNativeGraphics, StandardPerMeshOrderAndSharedOwnerVersionsAreIndependent)
+{
+    bl_StandardMaterial standard{};
+    ASSERT_EQ(bl_createStandardMaterial(runtime->runtime, &standard), BL_OK);
+    bl_StandardMaterialProperties p{};
+    ASSERT_EQ(bl_getStandardMaterialProperties(standard, &p), BL_OK);
+    p.disableLighting = true;
+    p.emissiveColor = {1, 1, 1};
+    ASSERT_EQ(bl_setStandardMaterialProperties(standard, &p), BL_OK);
+    bl_Material family{};
+    ASSERT_EQ(bl_standardMaterialAsMaterial(standard, &family), BL_OK);
+    bl_Mesh first{}, second{};
+    ASSERT_EQ(bl_createBox(engine, nullptr, &first), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &second), BL_OK);
+    bl_MeshProperties2 properties{family, {true, 200}, false};
+    ASSERT_EQ(bl_setMeshProperties2(first, &properties), BL_OK);
+    properties.renderOrder.value = 10;
+    ASSERT_EQ(bl_setMeshProperties2(second, &properties), BL_OK);
+    bl_SceneNode a{}, b{};
+    ASSERT_EQ(bl_meshNode(first, &a), BL_OK);
+    ASSERT_EQ(bl_meshNode(second, &b), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, a), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, b), BL_OK);
+    bl_SceneContext other{};
+    ASSERT_EQ(bl_createSceneContext(engine, &other), BL_OK);
+    bl_SceneProperties2 sceneProperties{};
+    ASSERT_EQ(bl_getSceneProperties2(scene, &sceneProperties), BL_OK);
+    ASSERT_EQ(bl_setSceneProperties2(other, &sceneProperties), BL_OK);
+    ASSERT_EQ(bl_addToScene(other, a), BL_OK);
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    ASSERT_EQ(bl_registerScene(other), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    auto* s = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, scene._id));
+    auto* t = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, other._id));
+    const auto* draws = static_cast<L_Draw*>(s->drawScratch);
+    EXPECT_EQ(draws[0].mesh->node.record.id, b._id);
+    EXPECT_EQ(draws[0].order, 10);
+    EXPECT_EQ(draws[1].order, 200);
+    p.diffuseColor = {0, 1, 0};
+    ASSERT_EQ(bl_setStandardMaterialProperties(standard, &p), BL_OK);
+    ASSERT_EQ(bl_markMaterialUboDirty(family), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_EQ(s->standardPackets[0].properties.diffuseColor.y, 1);
+    EXPECT_EQ(t->standardPackets[0].properties.diffuseColor.y, 1);
+    p.disableLighting = false;
+    p.backFaceCulling = false;
+    p.alpha = .5;
+    ASSERT_EQ(bl_setStandardMaterialProperties(standard, &p), BL_OK);
+    ASSERT_EQ(bl_rebuildMaterial(scene, family, nullptr), BL_OK);
+    EXPECT_TRUE(s->standardPackets[0].transparent);
+    EXPECT_FALSE(s->standardPackets[0].culling);
+    EXPECT_FALSE(t->standardPackets[0].transparent);
+    EXPECT_TRUE(t->standardPackets[0].culling);
+    ASSERT_EQ(bl_removeFromScene(scene, a), BL_OK);
+    bl_Vec3 rotation{};
+    EXPECT_EQ(bl_getNodeRotation(a, &rotation), BL_OK);
+    EXPECT_EQ(bl_disposeStandardMaterial(standard), BL_BUSY);
+    ASSERT_EQ(bl_removeFromScene(other, a), BL_OK);
+    EXPECT_EQ(bl_getNodeRotation(a, &rotation), BL_DISPOSED);
+}
+
 TEST_F(LiteNativeGraphics, RuntimeUniformMutationChangesActualGPUReadback)
 {
     CreateColoredBox();
@@ -626,7 +873,9 @@ TEST_F(LiteNativeGraphics, InvalidReflectionStringsFailBeforeDereferenceAndRelea
         bl_ShaderCompilerService original;
         bl_ShaderCompileResult owned{};
         std::vector<bl_ReflectedAttribute> attributes;
+        std::vector<bl_ReflectedUniform> uniforms;
         size_t releases{};
+        unsigned mode{};
     } compilerState{runtime->runtime->compiler};
     runtime->runtime->compiler.userData = &compilerState;
     runtime->runtime->compiler.compile = [](void* user, const bl_ShaderCompileRequest* request,
@@ -635,11 +884,46 @@ TEST_F(LiteNativeGraphics, InvalidReflectionStringsFailBeforeDereferenceAndRelea
         auto& state = *static_cast<MalformedCompiler*>(user);
         const auto status = state.original.compile(state.original.userData, request, result);
         state.owned = *result;
-        if (status == BL_OK && result->attributeCount)
+        if (status == BL_OK)
         {
             state.attributes.assign(result->attributes, result->attributes + result->attributeCount);
-            state.attributes[0].name.data = nullptr;
+            state.uniforms.assign(result->uniforms, result->uniforms + result->uniformCount);
+            if (state.mode == 0)
+            {
+                state.attributes.at(0).name.data = nullptr;
+            }
+            else if (state.mode == 1)
+            {
+                state.uniforms.at(0).name.data = nullptr;
+            }
+            else if (state.mode == 2)
+            {
+                state.uniforms.at(0).nativeName.data = nullptr;
+            }
+            else if (state.mode == 3)
+            {
+                state.uniforms.at(0).nativeByteOffset = UINT32_MAX;
+            }
+            else if (state.mode == 4)
+            {
+                state.uniforms.at(0).byteOffset = UINT32_MAX;
+            }
+            else if (state.mode == 5 || state.mode == 6)
+            {
+                auto& first = state.uniforms.at(0);
+                auto& second = state.uniforms.at(1);
+                second.nativeName = first.nativeName;
+                second.nativeType = first.nativeType;
+                second.nativeCount = static_cast<uint16_t>(
+                    first.nativeCount + (state.mode == 6 ? 1 : 0));
+                second.nativeByteOffset = first.nativeByteOffset;
+            }
+            else if (state.mode == 7)
+            {
+                state.uniforms.at(0).stages = 0;
+            }
             result->attributes = state.attributes.data();
+            result->uniforms = state.uniforms.data();
         }
         return status;
     };
@@ -668,10 +952,21 @@ TEST_F(LiteNativeGraphics, InvalidReflectionStringsFailBeforeDereferenceAndRelea
     ASSERT_EQ(bl_setMeshProperties(mesh, &properties), BL_OK);
     ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
     ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
-    const auto status = bl_registerScene(scene);
+    for (unsigned mode = 0; mode < 8; ++mode)
+    {
+        compilerState.mode = mode;
+        EXPECT_EQ(bl_registerScene(scene), BL_SHADER_ERROR) << "Corruption mode " << mode;
+        EXPECT_EQ(compilerState.releases, mode + 1);
+        bl_Error error{};
+        ASSERT_EQ(bl_getLastError(runtime->runtime, &error), BL_OK);
+        EXPECT_GT(error.message.length, 0u);
+    }
+    compilerState.mode = 8;
+    EXPECT_EQ(bl_registerScene(scene), BL_OK);
+    EXPECT_EQ(compilerState.releases, 9u);
     runtime->runtime->compiler = compilerState.original;
-    EXPECT_EQ(status, BL_SHADER_ERROR);
-    EXPECT_EQ(compilerState.releases, 1u);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
 }
 
 TEST(LiteNativeOwnership, OwnedEngineCanBeDisposedAndRecreatedWithoutStaleCapabilityDetection)

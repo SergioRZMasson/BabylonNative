@@ -3,6 +3,7 @@ set(SOURCES
     "Source/TestRuntime.h"
     "Source/Tests.Geometry.cpp"
     "Source/Tests.Nodes.cpp"
+    "Source/Tests.ArcLight.cpp"
     "Source/Tests.Audio.cpp"
     "Source/Tests.RenderOrder.cpp"
     "Source/Tests.Runtime.cpp")

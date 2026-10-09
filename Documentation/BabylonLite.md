@@ -1,7 +1,7 @@
 # Babylon Lite native component
 
-`LiteLayer` is a handwritten C-style implementation of the Minecraft-reached
-Babylon Lite 1.32.0 API, based on original TypeScript at
+`LiteLayer` is a handwritten C-style implementation of the Minecraft- and
+auxiliary native-cube-reached Babylon Lite 1.32.0 API, based on original TypeScript at
 `2e064d88ec7422af946f8ec7f089ac6519f99295`. Its only public header is
 `Core/LiteLayer/Include/babylon_lite.h`; its direct link dependencies are `bgfx`
 and `bx`, plus explicitly optional `RmlUi::Core` when
@@ -18,6 +18,82 @@ C++20 because the pinned bx public headers require it. Native users link
 are carried by the static target.
 
 ## Components
+
+### Additional native-cube slice (2026-10-08)
+
+The reviewed additive contract now has **160 functions**: the unchanged 122
+engine/optional-UI declarations plus 38 camera/control/light/material transports.
+All 122 legacy signatures and public record field declarations are preserved.
+Strict-C99 binary witnesses also match all 389 sizes/offsets of the 72 legacy
+records against the parent-frozen header.
+ArcRotate orbit/world/view math, pointer/touch inertia, live control-option
+replacement and masked limits, hemispheric light packing, and untextured Standard
+Blinn-Phong composition are handwritten C-style Core modules. Standard packets
+retain per-scene/per-mesh versions and ordering; plain material/light color writes
+still require original explicit dirty/rebuild operations. Frame-graph rebuild
+requests, Standard color geometry, textures/PBR/other lights/shadows, keyboard,
+viewport and orthographic features fail explicitly in this slice.
+
+The external runtime compiler reflects semantic struct/array leaves and integer
+vector components at actual offsets/strides. Standard uses the original logical
+368/1040/144/96-byte scene/light/mesh/material blocks and the shared native
+packing/submission path. No compiler dependency or generated engine is in Core.
+
+`Apps/LiteTests/NativeCube` compiles the exact STANDARD auxiliary `native-cube`
+user `main.cpp` through external compiler ABI headers, and separately bundles the
+unchanged auxiliary TypeScript with the native shim only. This is a bblitec-owned
+sample, **not registered demo-cube or original-corpus completeness**. Existing
+header-only user-language containers/GC remain outside Core. GPU screenshots at
+frames 1/61/121 match the frozen SDL hulls (C++ IoU 1.0; JS last pose
+0.999979), with no interior C++ differences above 2 LSB. BGFX's quantized clear
+blue is 77 versus SDL's 76; float C++ versus double JS rotation is disclosed.
+
+Fresh independent current-source regression builds passed 19 UI-ON, 13 UI-OFF,
+and 10 original native Minecraft cases. Neither the earlier Minecraft binaries
+nor their measurements were overwritten. Commands/configuration, source/binary
+hashes, actual GPU captures, source/original-TS/routing/PE audits and detailed
+qualification are retained in the ignored
+`build/lite-c99/demo-native-cube/` artifacts.
+The CPU/GPU/compiler runners exercise 21/14/9 individual cases respectively.
+Separate control fixtures cover live mappings during a gesture, atomic rejected
+options, borrowed predicate replacement/error/reentry, raw/equal limits and
+frame-callback replacement preserving the APPEND hook. The cube itself never
+attaches controls. Eight malformed reflection cases reject with diagnostics and
+exactly one service-result release per attempt, then successfully retry.
+
+The cube's external C++ compiler-ABI adapter intentionally covers its reached
+calls and one application mesh; it is not a full bblitec API/runtime replacement.
+The Core material/scene implementation is independently shared-owner and
+per-mesh tested. Actual executed configuration/build/test commands are indexed
+in `implementation-receipts/configure-native.json`,
+`final-expanded-commands.json` and `MatchedCube15/round-*/.../process.json`.
+Reuse the source/configuration in a new build tree rather than overwriting
+measured binaries.
+
+The fresh 15-round/45-process MSAA4 cube comparison is **not a speedup**:
+median run means were C++/bgfx-D3D11 **0.335292 ms**, original-JS/native
+**0.359839 ms**, and STANDARD SDL-GPU/D3D12 **0.303000 ms**; median run P95s
+were 0.5743/0.6448/0.381 ms respectively. Paired mean C++ versus SDL was
++12.58%, 95% bootstrap interval [+7.80%, +19.52%]. The observed C++ bracket was
+0.00622 ms Core/user versus 0.32908 ms submission/handoff/wait and approximately
+0.03003 ms real GPU execution. This identifies native renderer handoff as the
+dominant measured category, not an algorithm-cost or universal backend claim.
+JS includes VM dispatch/completion wait. SDL's standard summary provides no
+process/GPU breakdown; unavailable fields are not zeros. No Minecraft timing,
+workload reduction, capture/input, concurrent compilation or outlier removal is
+used in this result. Raw protocol, run-level confidence intervals and limitations
+are in `MatchedCube15/summary.json`.
+A separate six-round alternating host diagnostic selects bgfx's supported
+same-API-thread rendering without changing Core, shaders or workload. It
+reproduces all three GPU poses, but does not reliably improve C++ timing and
+worsens JS timing; it is **not adopted** and does not replace the 45-process
+comparison. Its commands/raw results are in `HostHandoffExperiment/`.
+
+The parent independently reran the 19/13/10 regression suites, strict Core
+style checks and cube C++/JS GPU/semantic fixtures, and verified 541 indexed
+fingerprints plus the unchanged legacy signatures. See
+[LiteNativeCubePerformance.md](LiteNativeCubePerformance.md) for the accepted
+functional scope and explicitly unmet cube performance target.
 
 | Target | Responsibility |
 |---|---|

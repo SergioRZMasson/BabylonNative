@@ -73,7 +73,8 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
         !l_typedSpan(c->uniformBlocks, c->uniformBlockCount, alignof(bl_ReflectedUniformBlock)) ||
         !l_typedSpan(c->textures, c->textureCount, alignof(bl_ReflectedTexture)) ||
         c->attributeCount > 6 || c->uniformCount > m->uniformCount * 2 ||
-        c->textureCount > m->samplerCount || c->uniformBlockCount > 2)
+        c->textureCount > m->samplerCount ||
+        c->uniformBlockCount > (m->blockCount ? m->blockCount : 2))
     {
         return BL_SHADER_ERROR;
     }
@@ -103,6 +104,34 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
     for (size_t i = 0; i < c->uniformBlockCount; ++i)
     {
         const bl_ReflectedUniformBlock* b = c->uniformBlocks + i;
+        if (m->blockCount)
+        {
+            bool found = false;
+            for (size_t j = 0; j < m->blockCount; ++j)
+            {
+                const L_MaterialBlock* expected = m->blocks + j;
+                if (b->group == expected->group && b->binding == expected->binding &&
+                    l_equal(b->name, expected->name) && b->byteSize == expected->byteSize &&
+                    stages(b->stages))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            for (size_t j = 0; j < i; ++j)
+            {
+                if (c->uniformBlocks[j].group == b->group &&
+                    c->uniformBlocks[j].binding == b->binding)
+                {
+                    return BL_SHADER_ERROR;
+                }
+            }
+            if (!found)
+            {
+                return BL_SHADER_ERROR;
+            }
+            continue;
+        }
         uint32_t expected = 0;
         for (size_t j = 0; j < m->uniformCount; ++j)
         {
@@ -146,8 +175,16 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
             return BL_SHADER_ERROR;
         }
         const bl_ReflectedUniformBlock* b = c->uniformBlocks + v->blockIndex;
-        if (b->binding != (m->uniforms[slot].system ? 0u : 1u) || v->byteOffset > b->byteSize ||
-            v->byteSize > b->byteSize - v->byteOffset || (v->stages & ~b->stages))
+        L_Uniform* declared = m->uniforms + slot;
+        if (m->blockCount &&
+            (declared->block >= m->blockCount || b->binding != m->blocks[declared->block].binding ||
+             b->group != m->blocks[declared->block].group))
+        {
+            return BL_SHADER_ERROR;
+        }
+        if ((!m->blockCount && b->binding != (declared->system ? 0u : 1u)) ||
+            v->byteOffset > b->byteSize || v->byteSize > b->byteSize - v->byteOffset ||
+            (v->stages & ~b->stages))
         {
             return BL_SHADER_ERROR;
         }
@@ -197,6 +234,10 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
         for (size_t j = 0; j < m->mapCount; ++j)
         {
             L_UniformMap* p = m->maps + j;
+            if (p->slot == slot && (p->stages & v->stages))
+            {
+                return BL_SHADER_ERROR;
+            }
             if (p->nativeSlot == nativeSlot && v->nativeByteOffset < p->offset + p->byteSize &&
                 p->offset < v->nativeByteOffset + v->byteSize)
             {
@@ -254,6 +295,13 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
 
 bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
 {
+    if (m->record.kind == L_STANDARD && !m->blockCount)
+    {
+        L_Material* pipeline;
+        bool disabled = m->snapshotValid ? m->standardSnapshot.disableLighting
+                                         : m->standardProperties.disableLighting;
+        return l_prepareStandard(r, e, m, disabled, &pipeline);
+    }
     if (m->record.disposed)
     {
         return BL_DISPOSED;
@@ -289,8 +337,12 @@ bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
         BL_CONTRACT_VERSION,
         e->backend,
         12,
-        {BL_STAGE_VERTEX, {vertex.data, vertex.length}, {"mainVertex", 10}},
-        {BL_STAGE_FRAGMENT, {fragment.data, fragment.length}, {"mainFragment", 12}},
+        {BL_STAGE_VERTEX,
+         {vertex.data, vertex.length},
+         m->blockCount ? bl_String{"main", 4} : bl_String{"mainVertex", 10}},
+        {BL_STAGE_FRAGMENT,
+         {fragment.data, fragment.length},
+         m->blockCount ? bl_String{"main", 4} : bl_String{"mainFragment", 12}},
         caps->homogeneousDepth,
         caps->originBottomLeft,
         m->name};
@@ -436,10 +488,16 @@ static uint32_t integerBits(float f)
     return (uint32_t)value;
 }
 
-bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Material* m, L_Mesh* mesh,
+bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material* m, L_Mesh* mesh,
                          const bl_Mat4* view, const bl_Mat4* projection, bl_Vec3 position,
-                         uint16_t viewId)
+                         uint16_t viewId, L_StandardPacket* standard)
 {
+    if (standard)
+    {
+        L_TRY(l_checkStandardGeometry(r, m, mesh));
+        L_TRY(l_standardValues(r, e, scene, standard, mesh, view, projection, position));
+        m = standard->pipeline;
+    }
     L_TRY(l_prepareMaterial(r, e, m));
     if (m->activeAttributes & ~mesh->geometry.attributeMask)
     {
@@ -461,7 +519,7 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Material* m, L_Mesh* mesh
         L_UniformMap* p = m->maps + i;
         L_Uniform* u = m->uniforms + p->slot;
         uint8_t* dest = m->nativeUniforms[p->nativeSlot].bytes + p->offset;
-        if (u->type == BL_UNIFORM_U32 || u->type == BL_UNIFORM_I32)
+        if (!u->rawBits && (u->type == BL_UNIFORM_U32 || u->type == BL_UNIFORM_I32))
         {
             uint32_t bits = integerBits(u->values[0]);
             memcpy(dest, &bits, 4);
@@ -491,16 +549,16 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Material* m, L_Mesh* mesh
     if (e->native.target.depthFormat != BL_DEPTH_NONE)
     {
         state |= compare[m->depthCompare];
-        if (m->depthWrite)
+        if (standard ? !standard->transparent : m->depthWrite)
         {
             state |= BGFX_STATE_WRITE_Z;
         }
     }
-    if (m->culling)
+    if (standard ? standard->culling : m->culling)
     {
         state |= BGFX_STATE_CULL_CW;
     }
-    if (m->blending)
+    if (standard ? standard->transparent : m->blending)
     {
         state |=
             m->blend == BL_BLEND_ADDITIVE

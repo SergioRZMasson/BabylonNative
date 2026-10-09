@@ -42,7 +42,21 @@ def main():
                 f"Original user source edited since qualified parent snapshot: {relative}")
     header = root / "Core" / "LiteLayer" / "Include" / "babylon_lite.h"
     functions = set(re.findall(r"bl_Status\s+(bl_\w+)\s*\(", header.read_text()))
-    require(len(functions) == 122, "Reviewed 122-function C99 snapshot changed.")
+    require(len(functions) == 160, "Reviewed 160-function additive C99 snapshot changed.")
+    original_header = subprocess.check_output([
+        "git", "-C", str(root), "show",
+        "2d94a54df5c1b721a88cdb5c316acc216b3ba60e:Core/LiteLayer/Include/babylon_lite.h"
+    ]).decode()
+    normalize = lambda value: re.sub(r"\s+", " ", value).strip()
+    declarations = lambda text: {
+        match.group(1): normalize(match.group(2))
+        for match in re.finditer(r"bl_Status\s+(bl_\w+)\s*\((.*?)\)\s*;", text, re.S)
+    }
+    old_declarations = declarations(original_header)
+    current_declarations = declarations(header.read_text())
+    require(len(old_declarations) == 122, "Legacy parent ABI snapshot changed.")
+    for name, arguments in old_declarations.items():
+        require(current_declarations.get(name) == arguments, f"Legacy signature changed: {name}")
     plugin_files = list((root / "Plugins" / "LiteJSBinding" / "Source").glob("*.cpp"))
     host_files = list((root / "Apps" / "LiteTests" / "LitePlayground" / "Source").glob("*.cpp"))
     plugin = "\n".join(file.read_text() for file in plugin_files)
@@ -125,7 +139,7 @@ def main():
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
-    print(f"JS/RmlUI audit passed: 27 original files, 122 routed C99 functions, "
+    print(f"JS/RmlUI audit passed: 27 original files, 160 routed C99 functions, "
           f"{len(plugin_reach)} directly referenced by binding; no whole-package/performance claim.")
 
 

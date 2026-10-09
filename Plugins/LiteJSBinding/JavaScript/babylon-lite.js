@@ -7,6 +7,45 @@ const handles = new WeakMap();
 const meshHandles = new WeakSet();
 const cameraHandles = new WeakSet();
 const sceneEntities = new WeakMap();
+const referenceValues = [];
+const flushReference = Symbol("native-reference-values");
+
+globalThis._liteFlushReferenceValues = () => {
+    let live = 0;
+    for (const reference of referenceValues) {
+        const object = reference.deref();
+        if (object) {
+            object[flushReference]();
+            referenceValues[live++] = reference;
+        }
+    }
+    referenceValues.length = live;
+};
+
+function tupleFields(object, handle, properties, names, set) {
+    const values = {};
+    const previous = {};
+    for (const name of names) {
+        values[name] = properties[name];
+        previous[name] = [...values[name]];
+        field(object, name, () => values[name], value => {
+            set(handle, name, value);
+            values[name] = value;
+            previous[name] = [...value];
+        });
+    }
+    Object.defineProperty(object, flushReference, { value: () => {
+        for (const name of names) {
+            const value = values[name];
+            if (value.length !== previous[name].length ||
+                value.some((component, index) => component !== previous[name][index])) {
+                set(handle, name, value);
+                previous[name] = [...value];
+            }
+        }
+    } });
+    referenceValues.push(new WeakRef(object));
+}
 
 function token(object) {
     if (object === null || object === undefined) return null;
@@ -104,12 +143,12 @@ function mesh(handle) {
     let materialReference = null;
     for (const name of ["material", "renderOrder", "receiveShadows"]) {
         field(object, name, () => {
-            const value = native.getMeshProperties(handle)[name];
+            const value = native.getMeshProperties2(handle)[name];
             if (name !== "material") return value;
             materialReference = identity(value);
             return materialReference;
         }, value => {
-            native.setMeshProperty(handle, name, name === "material" ? token(value) : value);
+            native.setMeshProperty2(handle, name, name === "material" ? token(value) : value);
             if (name === "material") materialReference = value;
         });
     }
@@ -157,23 +196,184 @@ export function createSceneContext(engine) {
     return identity(native.createSceneContext(token(engine)), (object, handle) => {
         sceneEntities.set(object, []);
         let cameraReference = null;
-        const color = vector(() => native.getSceneProperties(handle).clearColor,
-            value => native.setSceneProperty(handle, "clearColor", value), ["r", "g", "b", "a"]);
-        field(object, "clearColor", () => color, value => native.setSceneProperty(handle, "clearColor", value));
+        const color = vector(() => native.getSceneProperties2(handle).clearColor,
+            value => native.setSceneProperty2(handle, "clearColor", value), ["r", "g", "b", "a"]);
+        field(object, "clearColor", () => color, value => native.setSceneProperty2(handle, "clearColor", value));
         field(object, "camera", () => {
-            const value = native.getSceneProperties(handle).camera;
+            const value = native.getSceneProperties2(handle).camera;
             cameraReference = value === null ? null : camera(value);
             return cameraReference;
         }, value => {
-            native.setSceneProperty(handle, "camera", token(value));
+            native.setSceneProperty2(handle, "camera", token(value));
             cameraReference = value;
         });
-        field(object, "fixedDeltaMs", () => native.getSceneProperties(handle).fixedDeltaMs,
-            value => native.setSceneProperty(handle, "fixedDeltaMs", value));
+        field(object, "fixedDeltaMs", () => native.getSceneProperties2(handle).fixedDeltaMs,
+            value => native.setSceneProperty2(handle, "fixedDeltaMs", value));
     });
 }
 
 export const createFreeCamera = (position, target) => camera(native.createFreeCamera(position, target));
+export function createArcRotateCamera(alpha, beta, radius, target) {
+    const handle = native.createArcRotateCamera(alpha, beta, radius, target);
+    const object = node(handle);
+    cameraHandles.add(handle);
+    const targetView = vector(() => native.getArcRotateCameraProperties(handle).target,
+        value => native.setArcRotateCameraProperty(handle, "target", value), ["x", "y", "z"]);
+    field(object, "target", () => targetView,
+        value => native.setArcRotateCameraProperty(handle, "target", value));
+    for (const name of ["alpha", "beta", "radius", "fov", "nearPlane", "farPlane", "inertia",
+        "panningInertia", "angularSensibility", "panningSensibility", "wheelPrecision",
+        "inertialAlphaOffset", "inertialBetaOffset", "inertialRadiusOffset",
+        "inertialPanningX", "inertialPanningY"]) {
+        field(object, name, () => native.getArcRotateCameraProperties(handle)[name],
+            value => native.setArcRotateCameraProperty(handle, name, value));
+    }
+    for (const name of ["lowerAlphaLimit", "upperAlphaLimit", "lowerBetaLimit", "upperBetaLimit",
+        "lowerRadiusLimit", "upperRadiusLimit"]) {
+        field(object, name, () => native.getArcRotateCameraLimits(handle)[name],
+            value => native.setArcRotateCameraLimitFields(handle, { [name]: value }));
+    }
+    return object;
+}
+
+export function setCameraLimits(object, limits, _unusedScene) {
+    const disposer = native.setCameraLimits(token(object), limits);
+    return () => native.removeCameraLimits(disposer);
+}
+
+export function attachControl(object, canvas, scene, options) {
+    const mappings = {
+        primaryButton: options?.pointerMappings?.primaryButton,
+        secondaryButton: options?.pointerMappings?.secondaryButton,
+        keyboard: options?.keyboard,
+    };
+    let currentPointerEvent = null;
+    const transportOptions = {
+        ...options,
+        shouldHandlePointerDown: () =>
+            options?.shouldHandlePointerDown ? options.shouldHandlePointerDown(currentPointerEvent) : true,
+        isExternalDragActive: () => options?.isExternalDragActive?.() ?? false,
+        isExternalPickPending: () => options?.isExternalPickPending?.() ?? false,
+    };
+    const control = native.attachControl(token(object), token(scene), transportOptions);
+    const attached = [];
+    let detached = false;
+    const dispatch = event => {
+        if (options?.pointerMappings?.primaryButton !== mappings.primaryButton ||
+            options?.pointerMappings?.secondaryButton !== mappings.secondaryButton ||
+            options?.keyboard !== mappings.keyboard) {
+            native.setArcRotateControlOptions(control, {
+                ...transportOptions, pointerMappings: options?.pointerMappings,
+                keyboard: options?.keyboard,
+            });
+            mappings.primaryButton = options?.pointerMappings?.primaryButton;
+            mappings.secondaryButton = options?.pointerMappings?.secondaryButton;
+            mappings.keyboard = options?.keyboard;
+        }
+        const input = {
+            type: event.type,
+            pointerType: event.pointerType,
+            pointerId: event.pointerId,
+            button: event.button,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            deltaY: event.deltaY,
+        };
+        if (event.changedTouches) {
+            input.changedTouches = Array.from(event.changedTouches, touch => ({
+                identifier: touch.identifier, clientX: touch.clientX, clientY: touch.clientY,
+            }));
+        }
+        let effects;
+        const previousPointerEvent = currentPointerEvent;
+        currentPointerEvent = event;
+        try {
+            effects = native.processArcRotateInput(control, input);
+        } finally {
+            currentPointerEvent = previousPointerEvent;
+        }
+        if (effects.capturePointer) canvas.setPointerCapture(effects.pointerId);
+        if (effects.releasePointer) canvas.releasePointerCapture(effects.pointerId);
+        if (effects.preventDefault) event.preventDefault();
+    };
+    const detach = () => {
+        if (detached) return;
+        native.detachControl(control);
+        for (const [type, handler] of attached) canvas.removeEventListener(type, handler);
+        detached = true;
+    };
+    try {
+        for (const type of ["pointerdown", "pointermove", "pointerup", "wheel", "contextmenu",
+            "touchstart", "touchmove", "touchend", "gesturestart", "gesturechange", "gestureend"]) {
+            canvas.addEventListener(type, dispatch,
+                ["wheel", "touchstart", "touchmove", "gesturestart", "gesturechange", "gestureend"].includes(type)
+                    ? { passive: false } : undefined);
+            attached.push([type, dispatch]);
+        }
+    } catch (error) {
+        detach();
+        throw error;
+    }
+    return detach;
+}
+
+export function createHemisphericLight(direction, intensity) {
+    const handle = native.createHemisphericLight(direction, intensity);
+    const object = node(handle);
+    const directionView = vector(() => native.getHemisphericLightProperties(handle).direction,
+        value => native.setHemisphericLightProperty(handle, "direction", value), ["x", "y", "z"]);
+    field(object, "direction", () => directionView);
+    field(object, "lightType", () => "hemispheric");
+    field(object, "intensity", () => native.getHemisphericLightProperties(handle).intensity,
+        value => native.setHemisphericLightProperty(handle, "intensity", value));
+    tupleFields(object, handle, native.getHemisphericLightProperties(handle),
+        ["diffuseColor", "specularColor", "groundColor"],
+        (value, name, data) => native.setHemisphericLightProperty(value, name, data));
+    return Object.seal(object);
+}
+
+export function createStandardMaterial() {
+    const handle = native.createStandardMaterial();
+    const object = identity(handle);
+    tupleFields(object, handle, native.getStandardMaterialProperties(handle),
+        ["diffuseColor", "specularColor", "emissiveColor", "ambientColor"],
+        (value, name, data) => native.setStandardMaterialProperty(value, name, data));
+    for (const name of ["alpha", "specularPower", "backFaceCulling", "disableLighting"]) {
+        field(object, name, () => native.getStandardMaterialProperties(handle)[name],
+            value => native.setStandardMaterialProperty(handle, name, value));
+    }
+    const defaults = {
+        diffuseTexture: null, diffuseCoordIndex: 0, bumpLevel: 1, specularCoordIndex: 0,
+        ambientTexLevel: 1, ambientCoordIndex: 0, lightmapLevel: 1, lightmapCoordIndex: 1,
+        useLightmapAsShadowmap: false, opacityLevel: 1, opacityFromRGB: false, alphaCutOff: 0,
+        reflectionLevel: 1, reflectionCoordMode: 1,
+    };
+    for (const [name, value] of Object.entries(defaults)) {
+        field(object, name, () => value, () => {
+            throw new Error(`Standard ${name} is outside the current native feature contract.`);
+        });
+    }
+    const uvScale = Object.freeze([1, 1]);
+    field(object, "uvScale", () => uvScale, () => {
+        throw new Error("Standard textures/UV features are outside the current native contract.");
+    });
+    return Object.seal(object);
+}
+
+export const setLightIntensity = (light, value) => native.setLightIntensity(token(light), value);
+export const markLightUboDirty = light => {
+    light[flushReference]?.();
+    native.markLightUboDirty(token(light));
+};
+export const markMaterialUboDirty = material => {
+    material[flushReference]?.();
+    native.markMaterialUboDirty(token(material));
+};
+export const rebuildMaterial = (scene, material, options) => {
+    if (!options?.rebuildFrameGraph) material[flushReference]?.();
+    return native.rebuildMaterial(token(scene), token(material), options);
+};
+export const rebuildSceneRenderables = scene => native.rebuildSceneRenderables(token(scene));
 export const createTransformNode = name => node(native.createTransformNode(name));
 export const createBoxData = options => native.createBoxData(options);
 export const createSphereData = options => native.createSphereData(options);
