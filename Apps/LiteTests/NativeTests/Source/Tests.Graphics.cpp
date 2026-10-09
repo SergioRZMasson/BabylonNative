@@ -14,6 +14,7 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <cstring>
 
 namespace
 {
@@ -1336,3 +1337,5 @@ TEST(LiteNativeOwnership, OwnedEngineCanBeDisposedAndRecreatedWithoutStaleCapabi
         std::printf("Owned lifecycle %u: successful init/dispose\n", i);
     }
 }
+
+#include "Tests.ProceduralGraphics.inc"

@@ -33,10 +33,10 @@ static bl_Status createData(bl_Runtime* r, size_t vertices, size_t indices, L_Da
         return L_FAIL(r, BL_INVALID_ARGUMENT, "Geometry data size overflow");
     }
     L_NEW(r, L_DATA, 30, dataCleanup, L_Data, data);
-    data->data.positions = (float*)l_alloc(r, positionBytes);
-    data->data.normals = (float*)l_alloc(r, positionBytes);
-    data->data.uvs = (float*)l_alloc(r, uvBytes);
-    data->data.indices = (uint32_t*)l_alloc(r, indexBytes);
+    data->data.positions = (float*)l_alloc(r, positionBytes ? positionBytes : sizeof(float));
+    data->data.normals = (float*)l_alloc(r, positionBytes ? positionBytes : sizeof(float));
+    data->data.uvs = (float*)l_alloc(r, uvBytes ? uvBytes : sizeof(float));
+    data->data.indices = (uint32_t*)l_alloc(r, indexBytes ? indexBytes : sizeof(uint32_t));
     if (!data->data.positions || !data->data.normals || !data->data.uvs || !data->data.indices)
     {
         dataCleanup(r, &data->record);
@@ -53,6 +53,14 @@ static bl_Status createData(bl_Runtime* r, size_t vertices, size_t indices, L_Da
     data->data.indexCount = indices;
     data->data.allocation = (void*)(uintptr_t)data->record.serial;
     *out = data;
+    return BL_OK;
+}
+
+bl_Status l_createGeometryData(bl_Runtime* r, size_t vertices, size_t indices, bl_GeometryData* out)
+{
+    L_Data* data;
+    L_TRY(createData(r, vertices, indices, &data));
+    *out = data->data;
     return BL_OK;
 }
 

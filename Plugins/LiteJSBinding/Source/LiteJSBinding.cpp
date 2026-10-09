@@ -699,6 +699,227 @@ namespace Babylon::Plugins::LiteJSBinding
             }
         }
 
+        std::vector<bl_Vec3> ProceduralPoints(Napi::Value value)
+        {
+            if (!value.IsArray())
+            {
+                throw Napi::TypeError::New(value.Env(), "Procedural path/shape requires an array of Vec3.");
+            }
+            const auto array = value.As<Napi::Array>();
+            std::vector<bl_Vec3> result;
+            result.reserve(array.Length());
+            for (uint32_t index = 0; index < array.Length(); ++index)
+            {
+                const auto point = array.Get(index);
+                if (!point.IsObject() || point.IsArray())
+                {
+                    throw Napi::TypeError::New(value.Env(), "Procedural points require {x,y,z}.");
+                }
+                const auto object = point.As<Napi::Object>();
+                const auto x = object.Get("x");
+                const auto y = object.Get("y");
+                const auto z = object.Get("z");
+                if (!x.IsNumber() || !y.IsNumber() || !z.IsNumber())
+                {
+                    throw Napi::TypeError::New(value.Env(), "Procedural point components must be numbers.");
+                }
+                result.push_back({x.As<Napi::Number>().DoubleValue(), y.As<Napi::Number>().DoubleValue(),
+                    z.As<Napi::Number>().DoubleValue()});
+            }
+            return result;
+        }
+
+        bl_GeometryCap ProceduralCap(Napi::Object options)
+        {
+            const auto value = options.Get("cap");
+            if (value.IsUndefined() || value.IsNull())
+            {
+                return BL_CAP_NONE;
+            }
+            if (!value.IsNumber())
+            {
+                throw Napi::TypeError::New(options.Env(), "Geometry cap requires a number.");
+            }
+            double number = value.As<Napi::Number>().DoubleValue();
+            if (!std::isfinite(number))
+            {
+                throw Napi::TypeError::New(options.Env(), "Geometry cap must be finite.");
+            }
+            if (number < 0 || number > 3)
+            {
+                number = 0;
+            }
+            if (std::floor(number) != number)
+            {
+                throw Napi::TypeError::New(options.Env(), "Fractional cap has no representable original rows.");
+            }
+            return static_cast<bl_GeometryCap>(static_cast<unsigned>(number));
+        }
+
+        bl_OptionalNumber ProceduralNumber(Napi::Object options, const char* name)
+        {
+            const auto value = options.Get(name);
+            if (value.IsUndefined() || value.IsNull())
+            {
+                return {};
+            }
+            if (!value.IsNumber())
+            {
+                throw Napi::TypeError::New(options.Env(), "Procedural option requires a number.");
+            }
+            return {true, value.As<Napi::Number>().DoubleValue()};
+        }
+
+        bl_OptionalBool ProceduralFlat(Napi::Object options)
+        {
+            const auto value = options.Get("flat");
+            if (value.IsUndefined() || value.IsNull())
+            {
+                return BL_BOOL_DEFAULT;
+            }
+            if (!value.IsBoolean())
+            {
+                throw Napi::TypeError::New(options.Env(), "Polyhedron flat requires a boolean.");
+            }
+            return value.As<Napi::Boolean>().Value() ? BL_BOOL_TRUE : BL_BOOL_FALSE;
+        }
+
+        Napi::Value ProceduralGeometry(State& state, const Napi::CallbackInfo& info,
+                                      unsigned family, bool mesh)
+        {
+            const auto value = info[mesh ? 1 : 0];
+            const auto options = Options(value);
+            const auto engine = mesh ? state.HandleOf<bl_EngineContext>(info[0], Kind::Engine)
+                : bl_EngineContext{};
+            bl_GeometryData data{};
+            bl_Mesh identity{};
+            bl_Status status = BL_INVALID_ARGUMENT;
+            switch (family)
+            {
+                case 0:
+                {
+                    const bl_CylinderOptions native{ProceduralNumber(options,"height"), ProceduralNumber(options,"diameter"),
+                        ProceduralNumber(options,"diameterTop"), ProceduralNumber(options,"diameterBottom"),
+                        ProceduralNumber(options,"tessellation"), ProceduralNumber(options,"subdivisions")};
+                    status = mesh ? bl_createCylinder(engine, &native, &identity)
+                        : bl_createCylinderData(state.options.runtime, &native, &data);
+                    break;
+                }
+                case 1:
+                {
+                    const bl_PlaneOptions native{ProceduralNumber(options,"size"), ProceduralNumber(options,"width"),
+                        ProceduralNumber(options,"height")};
+                    status = mesh ? bl_createPlane(engine, &native, &identity)
+                        : bl_createPlaneData(state.options.runtime, &native, &data);
+                    break;
+                }
+                case 2:
+                {
+                    const bl_DiscOptions native{ProceduralNumber(options,"radius"), ProceduralNumber(options,"tessellation"),
+                        ProceduralNumber(options,"arc")};
+                    status = mesh ? bl_createDisc(engine, &native, &identity)
+                        : bl_createDiscData(state.options.runtime, &native, &data);
+                    break;
+                }
+                case 3:
+                {
+                    const bl_PolyhedronOptions native{ProceduralNumber(options,"type"), ProceduralNumber(options,"size"),
+                        ProceduralNumber(options,"sizeX"), ProceduralNumber(options,"sizeY"), ProceduralNumber(options,"sizeZ"),
+                        ProceduralFlat(options)};
+                    status = mesh ? bl_createPolyhedron(engine, &native, &identity)
+                        : bl_createPolyhedronData(state.options.runtime, &native, &data);
+                    break;
+                }
+                case 4:
+                {
+                    const auto input = options.Get("pathArray");
+                    if (!input.IsArray())
+                    {
+                        throw Napi::TypeError::New(info.Env(), "Ribbon requires pathArray.");
+                    }
+                    const auto array = input.As<Napi::Array>();
+                    std::vector<std::vector<bl_Vec3>> points;
+                    points.reserve(array.Length());
+                    for (uint32_t index = 0; index < array.Length(); ++index)
+                    {
+                        points.push_back(ProceduralPoints(array.Get(index)));
+                    }
+                    std::vector<bl_Vec3Span> rows;
+                    rows.reserve(points.size());
+                    for (const auto& row : points)
+                    {
+                        rows.push_back({row.data(), row.size()});
+                    }
+                    const bl_RibbonOptions native{{rows.data(), rows.size()},
+                        options.Get("closeArray").ToBoolean().Value(), options.Get("closePath").ToBoolean().Value(),
+                        ProceduralNumber(options,"offset")};
+                    status = mesh ? bl_createRibbon(engine, &native, &identity)
+                        : bl_createRibbonData(state.options.runtime, &native, &data);
+                    break;
+                }
+                case 5:
+                {
+                    const auto callback = options.Get("radiusFunction");
+                    if (!callback.IsUndefined() && !callback.IsNull())
+                    {
+                        auto error = Napi::Error::New(info.Env(), "Tube radiusFunction is outside this native contract.");
+                        error.Set("status", static_cast<double>(BL_UNSUPPORTED));
+                        error.Set("code", 0.0);
+                        error.Set("operation", mesh ? "createTube" : "createTubeData");
+                        throw error;
+                    }
+                    const auto points = ProceduralPoints(options.Get("path"));
+                    const bl_TubeOptions native{{points.data(), points.size()}, ProceduralNumber(options,"radius"),
+                        ProceduralNumber(options,"tessellation"), ProceduralCap(options), ProceduralNumber(options,"arc")};
+                    status = mesh ? bl_createTube(engine, &native, &identity)
+                        : bl_createTubeData(state.options.runtime, &native, &data);
+                    break;
+                }
+                case 6:
+                {
+                    const auto shape = ProceduralPoints(options.Get("shape"));
+                    const auto path = ProceduralPoints(options.Get("path"));
+                    const bl_ExtrudeShapeOptions native{{shape.data(), shape.size()}, {path.data(), path.size()},
+                        ProceduralNumber(options,"scale"), ProceduralNumber(options,"rotation"), ProceduralCap(options)};
+                    status = mesh ? bl_createExtrudeShape(engine, &native, &identity)
+                        : bl_createExtrudeShapeData(state.options.runtime, &native, &data);
+                    break;
+                }
+            }
+            state.Check(info.Env(), status);
+            if (mesh)
+            {
+                try
+                {
+                    return state.Wrap(info.Env(), identity, Kind::Mesh);
+                }
+                catch (...)
+                {
+                    bl_SceneNode node{};
+                    if (bl_meshNode(identity, &node) == BL_OK)
+                    {
+                        bl_disposeNode(node);
+                    }
+                    throw;
+                }
+            }
+            try
+            {
+                auto result = Napi::Object::New(info.Env());
+                result.Set("positions", CopyArray<Napi::Float32Array>(info.Env(),data.positions,data.vertexCount*3));
+                result.Set("normals", CopyArray<Napi::Float32Array>(info.Env(),data.normals,data.vertexCount*3));
+                result.Set("uvs", CopyArray<Napi::Float32Array>(info.Env(),data.uvs,data.vertexCount*2));
+                result.Set("indices", CopyArray<Napi::Uint32Array>(info.Env(),data.indices,data.indexCount));
+                state.Check(info.Env(), bl_freeGeometryData(state.options.runtime, &data));
+                return result;
+            }
+            catch (...)
+            {
+                bl_freeGeometryData(state.options.runtime, &data);
+                throw;
+            }
+        }
+
         bl_VertexSemantic Attribute(const std::string& name)
         {
             const std::map<std::string, bl_VertexSemantic> names{
@@ -2316,6 +2537,20 @@ namespace Babylon::Plugins::LiteJSBinding
             return s.Wrap(i.Env(), node, Kind::Node);
         });
         Bind(api, state, "createBoxData", [](State& s, const auto& i) { return Geometry(s, i, false); });
+        Bind(api, state, "createCylinderData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,0,false); });
+        Bind(api, state, "createPlaneData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,1,false); });
+        Bind(api, state, "createDiscData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,2,false); });
+        Bind(api, state, "createPolyhedronData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,3,false); });
+        Bind(api, state, "createRibbonData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,4,false); });
+        Bind(api, state, "createTubeData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,5,false); });
+        Bind(api, state, "createExtrudeShapeData", [](State& s, const auto& i) { return ProceduralGeometry(s,i,6,false); });
+        Bind(api, state, "createCylinder", [](State& s, const auto& i) { return ProceduralGeometry(s,i,0,true); });
+        Bind(api, state, "createPlane", [](State& s, const auto& i) { return ProceduralGeometry(s,i,1,true); });
+        Bind(api, state, "createDisc", [](State& s, const auto& i) { return ProceduralGeometry(s,i,2,true); });
+        Bind(api, state, "createPolyhedron", [](State& s, const auto& i) { return ProceduralGeometry(s,i,3,true); });
+        Bind(api, state, "createRibbon", [](State& s, const auto& i) { return ProceduralGeometry(s,i,4,true); });
+        Bind(api, state, "createTube", [](State& s, const auto& i) { return ProceduralGeometry(s,i,5,true); });
+        Bind(api, state, "createExtrudeShape", [](State& s, const auto& i) { return ProceduralGeometry(s,i,6,true); });
         Bind(api, state, "createSphereData", [](State& s, const auto& i) { return Geometry(s, i, true); });
         Bind(api, state, "createFlatGroundData", [](State& s, const auto& i) { return Geometry(s, i, 2); });
         Bind(api, state, "createGround", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {

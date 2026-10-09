@@ -42,7 +42,7 @@ def main():
                 f"Original user source edited since qualified parent snapshot: {relative}")
     header = root / "Core" / "LiteLayer" / "Include" / "babylon_lite.h"
     functions = set(re.findall(r"bl_Status\s+(bl_\w+)\s*\(", header.read_text()))
-    require(len(functions) == 167, "Reviewed 167-function additive C99 snapshot changed.")
+    require(len(functions) == 181, "Reviewed 181-function additive C99 snapshot changed.")
     original_header = subprocess.check_output([
         "git", "-C", str(root), "show",
         "2d94a54df5c1b721a88cdb5c316acc216b3ba60e:Core/LiteLayer/Include/babylon_lite.h"
@@ -54,6 +54,14 @@ def main():
     }
     old_declarations = declarations(original_header)
     current_declarations = declarations(header.read_text())
+    scene38_parent = subprocess.check_output([
+        "git", "-C", str(root), "show",
+        "bf6736826c55847ce6f69cb57d1172b176332471:Core/LiteLayer/Include/babylon_lite.h"
+    ]).decode()
+    scene38_parent_declarations = declarations(scene38_parent)
+    require(len(scene38_parent_declarations) == 167, "Approved pre-scene38 snapshot changed.")
+    for name, arguments in scene38_parent_declarations.items():
+        require(current_declarations.get(name) == arguments, f"Pre-scene38 signature changed: {name}")
     directional_parent = subprocess.check_output([
         "git", "-C", str(root), "show",
         "8a3ca669d195d424aa538fdddc801a14c8d283c0:Core/LiteLayer/Include/babylon_lite.h"
@@ -69,6 +77,8 @@ def main():
     }
     parent_records = records(directional_parent)
     current_records = records(header.read_text())
+    for name, body in records(scene38_parent).items():
+        require(current_records.get(name) == body, f"Pre-scene38 record changed: {name}")
     for name, body in parent_records.items():
         require(current_records.get(name) == body, f"Pre-Directional record changed: {name}")
     camera_ground_parent = subprocess.check_output([
@@ -164,7 +174,7 @@ def main():
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
-    print(f"JS/RmlUI audit passed: 27 original files, 167 routed C99 functions, "
+    print(f"JS/RmlUI audit passed: 27 original files, 181 routed C99 functions, "
           f"{len(plugin_reach)} directly referenced by binding; no whole-package/performance claim.")
 
 

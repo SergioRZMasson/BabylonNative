@@ -407,6 +407,22 @@ export const createTransformNode = name => node(native.createTransformNode(name)
 export const createBoxData = options => native.createBoxData(options);
 export const createSphereData = options => native.createSphereData(options);
 export const createFlatGroundData = options => native.createFlatGroundData(options);
+export const createCylinderData = options => native.createCylinderData(options);
+// Native helper exports: these six data functions are original module exports,
+// not exports of the original Babylon Lite package root.
+export const createPlaneData = options => native.createPlaneData(options);
+export const createDiscData = options => native.createDiscData(options);
+export const createPolyhedronData = options => native.createPolyhedronData(options);
+export const createRibbonData = options => native.createRibbonData(options);
+export const createTubeData = options => native.createTubeData(options);
+export const createExtrudeShapeData = options => native.createExtrudeShapeData(options);
+export const createCylinder = (engine, options) => mesh(native.createCylinder(token(engine), options));
+export const createPlane = (engine, options) => mesh(native.createPlane(token(engine), options));
+export const createDisc = (engine, options) => mesh(native.createDisc(token(engine), options));
+export const createPolyhedron = (engine, options) => mesh(native.createPolyhedron(token(engine), options));
+export const createRibbon = (engine, options) => mesh(native.createRibbon(token(engine), options));
+export const createTube = (engine, options) => mesh(native.createTube(token(engine), options));
+export const createExtrudeShape = (engine, options) => mesh(native.createExtrudeShape(token(engine), options));
 export const createGround = (engine, options) => mesh(native.createGround(token(engine), options));
 export const createBox = (engine, options) => mesh(native.createBox(token(engine), options));
 export const createMeshFromData = (engine, name, ...streams) => mesh(native.createMeshFromData(token(engine), name, ...streams));

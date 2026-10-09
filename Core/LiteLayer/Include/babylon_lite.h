@@ -1108,6 +1108,86 @@ typedef struct bl_GroundOptions
     bl_Vec2 uvScale;
 } bl_GroundOptions;
 
+typedef struct bl_Vec3Span
+{
+    const bl_Vec3* data;
+    size_t count;
+} bl_Vec3Span;
+
+typedef struct bl_Vec3PathSpan
+{
+    const bl_Vec3Span* data;
+    size_t count;
+} bl_Vec3PathSpan;
+
+typedef enum bl_GeometryCap
+{
+    BL_CAP_NONE = 0,
+    BL_CAP_START = 1,
+    BL_CAP_END = 2,
+    BL_CAP_ALL = 3
+} bl_GeometryCap;
+
+typedef struct bl_CylinderOptions
+{
+    bl_OptionalNumber height;
+    bl_OptionalNumber diameter;
+    bl_OptionalNumber diameterTop;
+    bl_OptionalNumber diameterBottom;
+    bl_OptionalNumber tessellation;
+    bl_OptionalNumber subdivisions;
+} bl_CylinderOptions;
+
+typedef struct bl_PlaneOptions
+{
+    bl_OptionalNumber size;
+    bl_OptionalNumber width;
+    bl_OptionalNumber height;
+} bl_PlaneOptions;
+
+typedef struct bl_DiscOptions
+{
+    bl_OptionalNumber radius;
+    bl_OptionalNumber tessellation;
+    bl_OptionalNumber arc;
+} bl_DiscOptions;
+
+typedef struct bl_PolyhedronOptions
+{
+    bl_OptionalNumber type;
+    bl_OptionalNumber size;
+    bl_OptionalNumber sizeX;
+    bl_OptionalNumber sizeY;
+    bl_OptionalNumber sizeZ;
+    bl_OptionalBool flat;
+} bl_PolyhedronOptions;
+
+typedef struct bl_RibbonOptions
+{
+    bl_Vec3PathSpan pathArray;
+    bool closeArray;
+    bool closePath;
+    bl_OptionalNumber offset;
+} bl_RibbonOptions;
+
+typedef struct bl_TubeOptions
+{
+    bl_Vec3Span path;
+    bl_OptionalNumber radius;
+    bl_OptionalNumber tessellation;
+    bl_GeometryCap cap;
+    bl_OptionalNumber arc;
+} bl_TubeOptions;
+
+typedef struct bl_ExtrudeShapeOptions
+{
+    bl_Vec3Span shape;
+    bl_Vec3Span path;
+    bl_OptionalNumber scale;
+    bl_OptionalNumber rotation;
+    bl_GeometryCap cap;
+} bl_ExtrudeShapeOptions;
+
 typedef struct bl_MeshProperties
 {
     bl_ShaderMaterial material;    /* Original default null, assigned before rendering. */
@@ -1142,12 +1222,36 @@ bl_Status bl_createSphereData(bl_Runtime* runtime, const bl_SphereOptions* optio
                               bl_GeometryData* data);
 bl_Status bl_createFlatGroundData(bl_Runtime* runtime, const bl_GroundOptions* options,
                                   bl_GeometryData* data);
+bl_Status bl_createCylinderData(bl_Runtime* runtime, const bl_CylinderOptions* options,
+                                bl_GeometryData* data);
+bl_Status bl_createPlaneData(bl_Runtime* runtime, const bl_PlaneOptions* options,
+                             bl_GeometryData* data);
+bl_Status bl_createDiscData(bl_Runtime* runtime, const bl_DiscOptions* options,
+                            bl_GeometryData* data);
+bl_Status bl_createPolyhedronData(bl_Runtime* runtime, const bl_PolyhedronOptions* options,
+                                  bl_GeometryData* data);
+bl_Status bl_createRibbonData(bl_Runtime* runtime, const bl_RibbonOptions* options,
+                              bl_GeometryData* data);
+bl_Status bl_createTubeData(bl_Runtime* runtime, const bl_TubeOptions* options,
+                            bl_GeometryData* data);
+bl_Status bl_createExtrudeShapeData(bl_Runtime* runtime, const bl_ExtrudeShapeOptions* options,
+                                    bl_GeometryData* data);
 bl_Status bl_freeGeometryData(bl_Runtime* runtime, bl_GeometryData* data);
 bl_Status bl_createMeshFromData(bl_EngineContext engine, bl_String name,
                                 const bl_MeshGeometry* geometry, bl_Mesh* mesh);
 bl_Status bl_createBox(bl_EngineContext engine, const bl_BoxOptions* options, bl_Mesh* mesh);
 bl_Status bl_createSphere(bl_EngineContext engine, const bl_SphereOptions* options, bl_Mesh* mesh);
 bl_Status bl_createGround(bl_EngineContext engine, const bl_GroundOptions* options, bl_Mesh* mesh);
+bl_Status bl_createCylinder(bl_EngineContext engine, const bl_CylinderOptions* options,
+                            bl_Mesh* mesh);
+bl_Status bl_createPlane(bl_EngineContext engine, const bl_PlaneOptions* options, bl_Mesh* mesh);
+bl_Status bl_createDisc(bl_EngineContext engine, const bl_DiscOptions* options, bl_Mesh* mesh);
+bl_Status bl_createPolyhedron(bl_EngineContext engine, const bl_PolyhedronOptions* options,
+                              bl_Mesh* mesh);
+bl_Status bl_createRibbon(bl_EngineContext engine, const bl_RibbonOptions* options, bl_Mesh* mesh);
+bl_Status bl_createTube(bl_EngineContext engine, const bl_TubeOptions* options, bl_Mesh* mesh);
+bl_Status bl_createExtrudeShape(bl_EngineContext engine, const bl_ExtrudeShapeOptions* options,
+                                bl_Mesh* mesh);
 bl_Status bl_getMeshProperties(bl_Mesh mesh, bl_MeshProperties* properties);
 bl_Status bl_setMeshProperties(bl_Mesh mesh, const bl_MeshProperties* properties);
 bl_Status bl_updateMeshGeometry(bl_EngineContext engine, bl_Mesh mesh,
@@ -1219,6 +1323,51 @@ bl_Status bl_invalidateRenderBundles(bl_EngineContext engine);
  * sets name "ground", releases staging, and inserts no scene/material. Checked
  * count/byte/allocator/index-address and mesh GPU budgets precede allocation;
  * overflow is INVALID_ARGUMENT, allocation failure OUT_OF_MEMORY, outputs unchanged.
+ *
+ * Additional procedural factories follow original Lite 1.32.0 bodies. All seven
+ * mesh factories are root exports; only CylinderData is a root data export. The
+ * other six Data functions map actual module exports, not fictitious root aliases.
+ * Cylinder/Plane/Disc/Polyhedron accept NULL defaults. Ribbon/Tube/Extrude require
+ * option tables. Point/row spans are borrowed only during the synchronous call;
+ * every result owns four independent arrays, including allocated empty backing.
+ * Factories copy into existing mesh storage, set original names, release staging,
+ * and insert no material/scene. Data allocation requires no engine/compiler/GPU/UI.
+ *
+ * Cylinder: height2, diameters1, tess24/subdiv1; axis diameters override diameter.
+ * Exact JS ToInt32 then max(3,tess)/max(1,subdiv). Selected zero diameters become
+ * 0.00001; explicit diameterTop=0 also reuses DOUBLE previous-ring tip normals.
+ * Both source caps/seams remain. Plane defaults size1; width/height override it.
+ * Disc defaults radius.5/tess64/arc1, accumulated angles and source fractional
+ * loop/step semantics. Nonzero arc<=0 or>1 resets1, but arc0 remains0. Safe tess1/2,
+ * positive fractions and zero/negative partial-disc counts remain supported.
+ * Full-disc tess<=0 generates missing seam data and is INVALID_ARGUMENT.
+ * Polyhedron preserves all15 presets, type0/flattrue/axes1 defaults, source
+ * out-of-range type reset0, flat face duplication and smooth zero-filled UVs.
+ * In-range fractional types are INVALID_ARGUMENT (missing original table entry).
+ *
+ * Ribbon preserves distance-normalized UVs, single-path split/offset floor+cap,
+ * closure duplication and original seam-normal order/index behavior. Unequal rows
+ * return INVALID_ARGUMENT because original short UVs cannot fit this unchanged
+ * GeometryData. Empty open rows and safe one-point cases are supported; cases
+ * yielding original out-of-bounds indices/nonfinite data fail, never pad/drop data.
+ * Tube defaults radius1/tess64/capNONE/arc1, exact ToInt32, source Path3D/Rodrigues,
+ * endpoint cap rows and always closePath, including partial arcs. Effective tess1/2
+ * are valid; tess<=0 produces missing circle points and is INVALID_ARGUMENT.
+ * Extrude defaults scale1/rotation0/capNONE, preserves cumulative rotation, explicit
+ * closing shape point, source frame and barycenter caps including that point.
+ * Empty shapes/safe low-count results remain valid. Missing/unsafe frames fail.
+ * Cap is 0..3; invalid enum fails rather than source's numeric fallback.
+ *
+ * Selected values/points must be finite; checked source-array/count/byte/index/
+ * allocator/GPU budgets precede allocation. Finite zero/negative dimensions,
+ * radius/scale remain valid when original output is finite and representable.
+ * Float32 rounding includes the finite half-ULP interval above FLT_MAX; the
+ * original overflow threshold itself and above are rejected, never clamped.
+ * No aesthetic minimum counts or arbitrary path caps. Source pre-F32 F64 stages,
+ * UV seam copies, signed zeros, winding and normal arithmetic remain unchanged.
+ * Tube radiusFunction is outside this unreached slice; bindings reject provided
+ * callbacks explicitly. No source-omitted sides/customUV/colors/custom-polyhedra/
+ * instances/updatable options are invented. Existing geometry updates apply.
  *
  * updateMeshGeometry requires same counts/optional layout, refreshes retained
  * CPU data and bounds, and preserves GPU buffer identity. resizeMeshGeometry

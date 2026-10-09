@@ -1,7 +1,7 @@
 # Babylon Lite native component
 
 `LiteLayer` is a handwritten C-style implementation of the Babylon Lite 1.32.0 API
-reached by Minecraft, original scene2 and auxiliary native-cube/primitives,
+reached by Minecraft, original scene2/scene38 and auxiliary native-cube/primitives,
 based on original TypeScript at
 `2e064d88ec7422af946f8ec7f089ac6519f99295`. Its only public header is
 `Core/LiteLayer/Include/babylon_lite.h`; its direct link dependencies are `bgfx`
@@ -20,9 +20,60 @@ are carried by the static target.
 
 ## Components
 
+### Original scene38 procedural slice
+
+The current single C99 header has **181 functions**. Fourteen reviewed additions
+provide data and mesh factories for Cylinder, Plane, Disc, Polyhedron, Ribbon,
+Tube and ExtrudeShape. All previous 167 signatures, 97 records and 515 layout
+witnesses remain unchanged, as do the older 122/160/162 ABI subsets.
+`bl_GeometryData` retains its layout and four independent mutable output arrays.
+Only CylinderData is a root data export in the original package; the other data
+helpers correspond to actual module exports, not invented original root aliases.
+
+Private geometry modules manually preserve the original double intermediates,
+Float32 stages, signed zeros, winding, caps, seams and Path3D arithmetic. All 15
+Polyhedron presets support flat/smooth construction. Safe low-count/fractional
+Disc and ToInt32 Tube/Cylinder cases are supported without aesthetic minimums.
+Checked spans, alignment, count/byte/index/GPU budgets, runtime allocation,
+atomic failure and existing mesh update/retirement rules apply. Data factories
+do not initialize or link graphics, a compiler, VM or UI.
+
+Unequal Ribbon rows are explicitly rejected: the original short UV stream cannot
+be represented safely by unchanged `bl_GeometryData`. Missing/unsafe source
+frames, invalid indices and nonfinite generated data are rejected, not repaired.
+Tube `radiusFunction` is outside this unreached slice; bindings reject supplied
+callbacks with `UNSUPPORTED` without invoking them. No new custom geometry,
+instance, side-orientation or callback API is implied.
+
+`Apps/LiteTests/NativeScene38` projects the byte-preserved STANDARD user C++ and
+bundles unchanged original `scene38.ts` with only the thin native shim. Both lanes
+retain 10 meshes/draws, 1,057 vertices, 4,527 indices, 11 distinct Standard
+materials (one unused), Hemi plus Directional lights and the original camera.
+The source has no attached controls or animation. Rotate/wheel/pan captures
+therefore test **no effect**, not newly invented interaction. The back-facing
+Ribbon remains a submitted draw despite zero visible coverage.
+
+All 99 original fixtures are classified: 98 match all four streams byte-for-byte
+and the jagged Ribbon is rejected. Expanded native/JS checks cover 289 cases
+(235 accepted, 54 rejected), eight exact F64 frame oracles, per-allocation failure,
+10,000 churns per family, independent updates and shared-scene retirement.
+Actual GPU captures have silhouette IoU 1 and interior RGB error at most one LSB
+against all nine byte-identical frozen SDL images. One JS intermediate capture
+has 20 temporal pixels differing by one LSB; no exact temporal-GPU claim is made.
+The C++ frontend's one-ULP Directional input transport difference is disclosed
+separately from Core parity. Fresh UI-on/off 19/13 and native Minecraft 10
+regressions pass; prior-demo captures retain their historical acceptance rules.
+
+The independent ignored `build\lite-c99\demo-scene38` tree contains preserved
+failures/retries, source/body/license/ABI/style/link evidence, deployment hashes
+and a separate final handoff. Its fresh 54-process matched batch meets this
+scene's complete-host mean/P95 goal, not the earlier Cube/Primitives goals or
+package-wide compatibility. See
+[LiteNativeScene38Performance.md](LiteNativeScene38Performance.md).
+
 ### Original scene2 Directional slice
 
-The current single C99 header has **167 functions**. The five reviewed additions
+The scene2 milestone brought the single C99 header to **167 functions**. The five reviewed additions
 create/query/update a typed Directional light and perform checked conversions to/from
 the existing Light family. All 162 previous signatures and 94-record/504-witness
 layouts remain unchanged, including the older 160/93/498 and 122/72/389 snapshots.
