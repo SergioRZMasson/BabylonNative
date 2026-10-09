@@ -1561,6 +1561,12 @@ typedef struct bl_HemisphericLight
     uint64_t _id;
 } bl_HemisphericLight;
 
+typedef struct bl_DirectionalLight
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_DirectionalLight;
+
 typedef struct bl_ArcRotateControl
 {
     bl_Runtime* _runtime;
@@ -1808,6 +1814,51 @@ bl_Status bl_setHemisphericLightProperties(bl_HemisphericLight light,
 bl_Status bl_setLightIntensity(bl_Light light, double intensity);
 bl_Status bl_markLightUboDirty(bl_Light light);
 
+typedef struct bl_DirectionalLightOptions
+{
+    bl_Vec3 direction;
+    bl_OptionalNumber intensity;
+} bl_DirectionalLightOptions;
+
+typedef struct bl_DirectionalLightProperties
+{
+    bl_Vec3 direction;
+    double intensity;
+    bl_Vec3 diffuse;
+    bl_Vec3 specular;
+} bl_DirectionalLightProperties;
+
+bl_Status bl_createDirectionalLight(bl_Runtime* runtime, const bl_DirectionalLightOptions* options,
+                                    bl_DirectionalLight* light);
+bl_Status bl_getDirectionalLightProperties(bl_DirectionalLight light,
+                                           bl_DirectionalLightProperties* properties);
+bl_Status bl_setDirectionalLightProperties(bl_DirectionalLight light,
+                                           const bl_DirectionalLightProperties* properties);
+bl_Status bl_directionalLightAsLight(bl_DirectionalLight source, bl_Light* light);
+bl_Status bl_lightAsDirectionalLight(bl_Light source, bl_DirectionalLight* light);
+
+/*
+ * Directional options are required: the source has no default direction argument.
+ * Zero/nonunit direction is valid; intensity defaults to1, diffuse/specular to1.
+ * Node TRS/parent/name/visibility/position use directionalLightAsLight/lightNode
+ * and the existing node APIs. Source readonly direction/position fixes vector
+ * identity, not component values. Native copied Vec3 properties are snapshots.
+ * Changed direction bumps light data; equal aggregate writes follow the existing
+ * Hemi transport, not source ObservableVec3.set's unconditional notification.
+ * Plain diffuse/specular/intensity writes require explicit markLightUboDirty;
+ * setLightIntensity remains the original helper with equal-value no-op/error134.
+ * Nonfinite public data fails atomically; finite negative intensity/colors remain
+ * valid. Generic helpers check the common family and concrete conversions check
+ * the private tag before accessing fields. Identity/lifetime rules above apply.
+ *
+ * Directional packing normalizes the world-linear transformed local direction
+ * without translation, encodes type1, and preserves the original intentional
+ * F32(Number.MAX_VALUE)=+infinity range. That internal sentinel is not permission
+ * for nonfinite user inputs. Standard uses the original normalize(-direction),
+ * Lambert diffuse and Blinn-Phong specular formula. No shadows/filters/other
+ * light families are exposed by this addition. Creation remains CPU-only.
+ */
+
 typedef struct bl_StandardMaterialProperties
 {
     bl_Vec3 diffuseColor;
@@ -1875,7 +1926,7 @@ bl_Status bl_disposeStandardMaterial(bl_StandardMaterial material);
  * native equivalents of every WebAudio primitive actually used by audio.ts.
  *
  * Additional scoped support: ArcRotate camera/pointer-touch controls and limits,
- * untextured Standard material and hemispheric lights. This does not establish
+ * untextured Standard material and hemispheric/directional lights. This does not establish
  * support for all Standard, camera, control or lighting features.
  * Deliberately not complete: glTF/Draco/meshopt, other lights/shadows, PBR, physics,
  * particles subsystem (the demo's cubes are ordinary user-code meshes), full

@@ -35,6 +35,7 @@ namespace Babylon::Plugins::LiteJSBinding
             ArcCamera,
             StandardMaterial,
             Light,
+            DirectionalLight,
             Control,
             Limits
         };
@@ -139,7 +140,8 @@ namespace Babylon::Plugins::LiteJSBinding
                     const auto& token = work[index];
                     bl_Status status = BL_OK;
                     if (token.kind == Kind::Node || token.kind == Kind::Camera || token.kind == Kind::Mesh ||
-                        token.kind == Kind::ArcCamera || token.kind == Kind::Light)
+                        token.kind == Kind::ArcCamera || token.kind == Kind::Light ||
+                        token.kind == Kind::DirectionalLight)
                     {
                         status = bl_disposeNode(token.nodeIdentity);
                     }
@@ -285,6 +287,27 @@ namespace Babylon::Plugins::LiteJSBinding
                 return {token.identity._runtime, token.identity._id};
             }
 
+            bl_Light LightOf(Napi::Value value)
+            {
+                const auto& token = Get(value);
+                bl_Light result{};
+                if (token.kind == Kind::Light)
+                {
+                    Check(value.Env(), bl_hemisphericLightAsLight(
+                        {token.identity._runtime, token.identity._id}, &result));
+                }
+                else if (token.kind == Kind::DirectionalLight)
+                {
+                    Check(value.Env(), bl_directionalLightAsLight(
+                        {token.identity._runtime, token.identity._id}, &result));
+                }
+                else
+                {
+                    throw Napi::TypeError::New(value.Env(), "Expected a light identity.");
+                }
+                return result;
+            }
+
             bl_SceneNode NodeOf(Napi::Value value)
             {
                 if (value.IsNull() || value.IsUndefined())
@@ -307,9 +330,9 @@ namespace Babylon::Plugins::LiteJSBinding
                         Check(value.Env(), bl_arcRotateCameraNode({token.identity._runtime, token.identity._id}, &result));
                         return result;
                     case Kind::Light:
+                    case Kind::DirectionalLight:
                     {
-                        bl_Light light{};
-                        Check(value.Env(), bl_hemisphericLightAsLight({token.identity._runtime, token.identity._id}, &light));
+                        const auto light = LightOf(value);
                         Check(value.Env(), bl_lightNode(light, &result));
                         return result;
                     }
@@ -327,7 +350,8 @@ namespace Babylon::Plugins::LiteJSBinding
                 }
                 const auto key = std::pair{kind, handle._id};
                 if (kind == Kind::Camera || kind == Kind::ArcCamera || kind == Kind::Material ||
-                    kind == Kind::StandardMaterial || kind == Kind::Light)
+                    kind == Kind::StandardMaterial || kind == Kind::Light ||
+                    kind == Kind::DirectionalLight)
                 {
                     familyKinds.insert_or_assign(handle._id, kind);
                 }
@@ -373,7 +397,8 @@ namespace Babylon::Plugins::LiteJSBinding
                 reference.Unref();
                 objects.emplace(key, std::move(reference));
                 if (kind == Kind::Node || kind == Kind::Mesh || kind == Kind::Camera ||
-                    kind == Kind::ArcCamera || kind == Kind::Light)
+                    kind == Kind::ArcCamera || kind == Kind::Light ||
+                    kind == Kind::DirectionalLight)
                 {
                     const auto node = NodeOf(object);
                     external.Data()->nodeIdentity = node;
@@ -1403,6 +1428,10 @@ namespace Babylon::Plugins::LiteJSBinding
             {"specularColor", &bl_HemisphericLightProperties::specularColor},
             {"groundColor", &bl_HemisphericLightProperties::groundColor}};
 
+        const std::map<std::string, bl_Vec3 bl_DirectionalLightProperties::*> DirectionalColors{
+            {"diffuse", &bl_DirectionalLightProperties::diffuse},
+            {"specular", &bl_DirectionalLightProperties::specular}};
+
         Napi::Object PointerObject(Napi::Env env, const bl_ArcRotateInput& input)
         {
             auto object = Napi::Object::New(env);
@@ -1767,11 +1796,46 @@ namespace Babylon::Plugins::LiteJSBinding
                 s.Check(i.Env(), bl_setHemisphericLightProperties(light, &p));
                 return i.Env().Undefined();
             });
+            Bind(api, state, "createDirectionalLight", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const bl_DirectionalLightOptions options{ColorValue(i[0]),
+                    i[1].IsUndefined() ? bl_OptionalNumber{} : bl_OptionalNumber{true, i[1].As<Napi::Number>().DoubleValue()}};
+                bl_DirectionalLight light{};
+                s.Check(i.Env(), bl_createDirectionalLight(s.options.runtime, &options, &light));
+                return s.Wrap(i.Env(), light, Kind::DirectionalLight);
+            });
+            Bind(api, state, "getDirectionalLightProperties", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_DirectionalLight light{};
+                s.Check(i.Env(), bl_lightAsDirectionalLight(s.LightOf(i[0]), &light));
+                bl_DirectionalLightProperties p{};
+                s.Check(i.Env(), bl_getDirectionalLightProperties(light, &p));
+                auto value = Napi::Object::New(i.Env());
+                value.Set("direction", VectorObject(i.Env(), p.direction));
+                value.Set("intensity", p.intensity);
+                for (const auto& [name, member] : DirectionalColors) value.Set(name, ColorArray(i.Env(), p.*member));
+                return value;
+            });
+            Bind(api, state, "setDirectionalLightProperty", [](State& s, const Napi::CallbackInfo& i) {
+                const auto light = s.HandleOf<bl_DirectionalLight>(i[0], Kind::DirectionalLight);
+                bl_DirectionalLightProperties p{};
+                s.Check(i.Env(), bl_getDirectionalLightProperties(light, &p));
+                const auto name = i[1].As<Napi::String>().Utf8Value();
+                const bl_Vec3 previousDirection = p.direction;
+                if (name == "direction") p.direction = Vector(i[2]);
+                else if (name == "intensity") p.intensity = i[2].As<Napi::Number>().DoubleValue();
+                else if (const auto member = DirectionalColors.find(name); member != DirectionalColors.end()) p.*member->second = ColorValue(i[2]);
+                else throw Napi::TypeError::New(i.Env(), "Unsupported directional property.");
+                s.Check(i.Env(), bl_setDirectionalLightProperties(light, &p));
+                if (name == "direction" && i[3].IsBoolean() && i[3].As<Napi::Boolean>().Value() &&
+                    std::memcmp(&previousDirection, &p.direction, sizeof(p.direction)) == 0)
+                {
+                    s.Check(i.Env(), bl_markLightUboDirty(s.LightOf(i[0])));
+                }
+                return i.Env().Undefined();
+            });
             for (const auto* operation : {"setLightIntensity", "markLightUboDirty"})
             {
                 Bind(api, state, operation, [operation](State& s, const Napi::CallbackInfo& i) {
-                    bl_Light light{};
-                    s.Check(i.Env(), bl_hemisphericLightAsLight(s.HandleOf<bl_HemisphericLight>(i[0], Kind::Light), &light));
+                    const auto light = s.LightOf(i[0]);
                     s.Check(i.Env(), std::string_view(operation) == "setLightIntensity"
                         ? bl_setLightIntensity(light, i[1].As<Napi::Number>().DoubleValue()) : bl_markLightUboDirty(light));
                     return i.Env().Undefined();

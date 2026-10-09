@@ -11,6 +11,18 @@ static bool lightProperties(const bl_HemisphericLightProperties* p)
            l_vec(p->specularColor) && l_vec(p->groundColor);
 }
 
+bl_Status l_hemisphericLight(bl_HemisphericLight h, L_HemisphericLight** out)
+{
+    L_Light* light;
+    L_TRY(l_lightFamily({h._runtime, h._id}, &light));
+    if (light->kind != L_LIGHT_HEMISPHERIC)
+    {
+        return BL_INVALID_HANDLE;
+    }
+    *out = (L_HemisphericLight*)light;
+    return BL_OK;
+}
+
 bl_Status bl_createHemisphericLight(bl_Runtime* r, const bl_HemisphericLightOptions* options,
                                     bl_HemisphericLight* out)
 {
@@ -33,16 +45,18 @@ bl_Status bl_createHemisphericLight(bl_Runtime* r, const bl_HemisphericLightOpti
         return BL_INVALID_ARGUMENT;
     }
     L_NEW(r, L_LIGHT, 30, lightCleanup, L_HemisphericLight, light);
-    l_initNode(&light->node);
+    l_initNode(&light->light.node);
+    light->light.kind = L_LIGHT_HEMISPHERIC;
     light->properties = {direction, intensity, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}};
-    *out = {r, light->node.record.id};
+    *out = {r, light->light.node.record.id};
     return BL_OK;
 }
 
 bl_Status bl_getHemisphericLightProperties(bl_HemisphericLight h,
                                            bl_HemisphericLightProperties* out)
 {
-    L_GET(h, L_LIGHT, L_HemisphericLight, light);
+    L_HemisphericLight* light;
+    L_TRY(l_hemisphericLight(h, &light));
     if (!out)
     {
         return BL_INVALID_ARGUMENT;
@@ -54,67 +68,36 @@ bl_Status bl_getHemisphericLightProperties(bl_HemisphericLight h,
 bl_Status bl_setHemisphericLightProperties(bl_HemisphericLight h,
                                            const bl_HemisphericLightProperties* p)
 {
-    L_GET(h, L_LIGHT, L_HemisphericLight, light);
+    L_HemisphericLight* light;
+    L_TRY(l_hemisphericLight(h, &light));
     if (!lightProperties(p))
     {
         return BL_INVALID_ARGUMENT;
     }
     if (memcmp(&p->direction, &light->properties.direction, sizeof(p->direction)))
     {
-        ++light->dataVersion;
+        ++light->light.dataVersion;
     }
     light->properties = *p;
     return BL_OK;
 }
 
-bl_Status bl_setLightIntensity(bl_Light h, double value)
-{
-    L_GET(h, L_LIGHT, L_HemisphericLight, light);
-    if (!isfinite(value))
-    {
-        return l_error(h._runtime, BL_INVALID_ARGUMENT, __func__, "Nonfinite intensity", 134);
-    }
-    if (value != light->properties.intensity)
-    {
-        light->properties.intensity = value;
-        ++light->dataVersion;
-    }
-    return BL_OK;
-}
-
-bl_Status bl_markLightUboDirty(bl_Light h)
-{
-    L_GET(h, L_LIGHT, L_HemisphericLight, light);
-    ++light->dataVersion;
-    return BL_OK;
-}
-
 bl_Status bl_hemisphericLightAsLight(bl_HemisphericLight h, bl_Light* out)
 {
-    L_GET(h, L_LIGHT, L_HemisphericLight, light);
+    L_HemisphericLight* light;
+    L_TRY(l_hemisphericLight(h, &light));
     if (!out)
     {
         return BL_INVALID_ARGUMENT;
     }
-    *out = {h._runtime, light->node.record.id};
-    return BL_OK;
-}
-
-bl_Status bl_lightNode(bl_Light h, bl_SceneNode* out)
-{
-    L_GET(h, L_LIGHT, L_Node, light);
-    if (!out)
-    {
-        return BL_INVALID_ARGUMENT;
-    }
-    *out = {h._runtime, light->record.id};
+    *out = {h._runtime, light->light.node.record.id};
     return BL_OK;
 }
 
 bl_Status l_writeHemisphericLight(bl_Runtime* r, L_HemisphericLight* light, float* data)
 {
-    L_TRY(l_world(r, &light->node));
-    const double* w = light->node.world.values;
+    L_TRY(l_world(r, &light->light.node));
+    const double* w = light->light.node.world.values;
     bl_Vec3 direction = light->properties.direction;
     double x = w[0] * direction.x + w[4] * direction.y + w[8] * direction.z;
     double y = w[1] * direction.x + w[5] * direction.y + w[9] * direction.z;

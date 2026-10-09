@@ -69,11 +69,12 @@ function field(object, name, read, write) {
     Object.defineProperty(object, name, { enumerable: true, get: read, set: write });
 }
 
-function vector(read, write, components) {
+function vector(read, write, components, sameValueNoop = false) {
     const object = {};
     for (const component of components) {
         field(object, component, () => read()[component], value => {
             const data = read();
+            if (sameValueNoop && data[component] === value) return;
             data[component] = value;
             write(data);
         });
@@ -81,17 +82,26 @@ function vector(read, write, components) {
     Object.defineProperty(object, "set", {
         value: (...values) => write(Object.fromEntries(components.map((name, index) => [name, values[index]]))),
     });
+    if (sameValueNoop) {
+        Object.defineProperty(object, "copyFrom", { value: value => write(value) });
+        Object.defineProperty(object, "toArray", { value: (out, offset = 0) => {
+            const data = read();
+            components.forEach((name, index) => { out[offset + index] = data[name]; });
+        } });
+    }
     return object;
 }
 
-function node(handle) {
+function node(handle, readonlyPosition = false) {
     return identity(handle, (object, value) => {
         let parentReference = null;
         let childReferences = [];
         for (const name of ["position", "rotation", "scaling"]) {
             const proxy = vector(() => native.getNodeVector(value, name),
-                data => native.setNodeVector(value, name, data), ["x", "y", "z"]);
-            field(object, name, () => proxy, data => native.setNodeVector(value, name, data));
+                data => native.setNodeVector(value, name, data), ["x", "y", "z"],
+                readonlyPosition && name === "position");
+            field(object, name, () => proxy, readonlyPosition && name === "position"
+                ? undefined : data => native.setNodeVector(value, name, data));
         }
         const quaternion = vector(() => native.getNodeRotationQuaternion(value),
             data => native.setNodeRotationQuaternion(value, data), ["x", "y", "z", "w"]);
@@ -329,6 +339,25 @@ export function createHemisphericLight(direction, intensity) {
     tupleFields(object, handle, native.getHemisphericLightProperties(handle),
         ["diffuseColor", "specularColor", "groundColor"],
         (value, name, data) => native.setHemisphericLightProperty(value, name, data));
+    return Object.seal(object);
+}
+
+export function createDirectionalLight(direction, intensity) {
+    const handle = native.createDirectionalLight(direction, intensity);
+    const object = node(handle, true);
+    const directionView = vector(() => native.getDirectionalLightProperties(handle).direction,
+        value => native.setDirectionalLightProperty(handle, "direction", value, true),
+        ["x", "y", "z"], true);
+    field(object, "direction", () => directionView);
+    field(object, "lightType", () => "directional");
+    field(object, "intensity", () => native.getDirectionalLightProperties(handle).intensity,
+        value => native.setDirectionalLightProperty(handle, "intensity", value));
+    tupleFields(object, handle, native.getDirectionalLightProperties(handle),
+        ["diffuse", "specular"],
+        (value, name, data) => native.setDirectionalLightProperty(value, name, data));
+    Object.defineProperty(object, "_bumpLightVersion", {
+        value: () => markLightUboDirty(object),
+    });
     return Object.seal(object);
 }
 

@@ -1,5 +1,5 @@
 #include "LiteInternal.h"
-#include "HemisphericLightInternal.h"
+#include "LightInternal.h"
 
 static void standardGraphicsCleanup(bl_Runtime* r, L_Material* owner)
 {
@@ -160,7 +160,7 @@ static bl_Status sceneLights(bl_Runtime* r, L_Scene* scene)
     size_t count = 0;
     uint64_t versions[16] = {};
     uint64_t identities[16] = {};
-    L_HemisphericLight* lights[16] = {};
+    L_Light* lights[16] = {};
     for (size_t i = 0; i < scene->memberCount && count < 16; ++i)
     {
         L_Node* node = scene->members[i];
@@ -168,8 +168,9 @@ static bl_Status sceneLights(bl_Runtime* r, L_Scene* scene)
         {
             continue;
         }
+        L_Light* light;
+        L_TRY(l_lightFamily({r, node->record.id}, &light));
         L_TRY(l_world(r, node));
-        L_HemisphericLight* light = (L_HemisphericLight*)node;
         identities[count] = node->record.id;
         versions[count] = light->dataVersion + node->version;
         lights[count++] = light;
@@ -186,7 +187,7 @@ static bl_Status sceneLights(bl_Runtime* r, L_Scene* scene)
     memcpy(data, &packedCount, sizeof(packedCount));
     for (size_t i = 0; i < count; ++i)
     {
-        L_TRY(l_writeHemisphericLight(r, lights[i], data + 4 + i * 16));
+        L_TRY(l_writeLight(r, lights[i], data + 4 + i * 16));
     }
     memcpy(scene->lightData, data, sizeof(data));
     memcpy(scene->lightIdentities, identities, sizeof(identities));

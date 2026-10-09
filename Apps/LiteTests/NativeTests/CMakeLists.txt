@@ -5,6 +5,7 @@ set(SOURCES
     "Source/Tests.Ground.cpp"
     "Source/Tests.Nodes.cpp"
     "Source/Tests.ArcLight.cpp"
+    "Source/Tests.Directional.cpp"
     "Source/Tests.Audio.cpp"
     "Source/Tests.RenderOrder.cpp"
     "Source/Tests.Runtime.cpp")

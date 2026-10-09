@@ -62,6 +62,15 @@ int main()
     assert(bl_setArcRotateCameraLimitFields(arc, &patch) == BL_OK);
     bl_HemisphericLight light{};
     assert(bl_createHemisphericLight(runtime, nullptr, &light) == BL_OK);
+    const bl_DirectionalLightOptions directionalOptions{{0, -1, 0}, {}};
+    bl_DirectionalLight directional{};
+    assert(bl_createDirectionalLight(runtime, &directionalOptions, &directional) == BL_OK);
+    bl_Light lightFamily{};
+    assert(bl_directionalLightAsLight(directional, &lightFamily) == BL_OK);
+    assert(bl_setLightIntensity(lightFamily, -2) == BL_OK);
+    bl_DirectionalLightProperties directionalProperties{};
+    assert(bl_getDirectionalLightProperties(directional, &directionalProperties) == BL_OK);
+    assert(directionalProperties.intensity == -2);
     bl_StandardMaterial standard{};
     assert(bl_createStandardMaterial(runtime, &standard) == BL_OK);
     assert(bl_disposeRuntime(runtime) == BL_OK);

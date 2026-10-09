@@ -47,14 +47,39 @@ struct VertexOutput {
 )WGSL";
 
 static const char* standardLighting = R"WGSL(
-fn computeHemisphericLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32)
+fn computeLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32, P: vec3<f32>)
     -> array<vec3<f32>, 2> {
+    var lv: vec3<f32>;
+    var a: f32 = 1.0;
+    let t = u32(L.vLightData.w);
+    if (t == 3u) {
     let direction = normalize(L.vLightData.xyz);
     let nl = 0.5 + 0.5 * dot(N, direction);
     let diff = mix(L.vLightDirection.xyz, L.vLightDiffuse.rgb, nl);
     let h = normalize(viewDir + direction);
     let s = pow(max(0.0, dot(N, h)), max(1.0, g));
     return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb);
+    }
+    if (t == 1u) {
+        lv = normalize(-L.vLightData.xyz);
+    } else {
+        let d = L.vLightData.xyz - P;
+        a = max(0.0, 1.0 - length(d) / L.vLightDiffuse.a);
+        lv = normalize(d);
+        if (t == 2u) {
+            let c = max(0.0, dot(L.vLightDirection.xyz, -lv));
+            if (c >= L.vLightDirection.w) {
+                a *= max(0.0, pow(c, L.vLightSpecular.a));
+            } else {
+                a = 0.0;
+            }
+        }
+    }
+    let nl = max(0.0, dot(N, lv));
+    let diff = nl * L.vLightDiffuse.rgb * a;
+    let h = normalize(viewDir + lv);
+    let s = pow(max(0.0, dot(N, h)), max(1.0, g));
+    return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb * a);
 }
 )WGSL";
 
@@ -68,8 +93,8 @@ static const char* litFragment = R"WGSL(
     let count = min(mesh.lc & 255u, 16u);
     for (var index = 0u; index < count; index++) {
         let lightIndex = mesh.li[index / 4u][index % 4u];
-        let result = computeHemisphericLighting(viewDirectionW, normalW,
-                                               lights.lights[lightIndex], mat.sc.a);
+        let result = computeLighting(viewDirectionW, normalW,
+                                     lights.lights[lightIndex], mat.sc.a, vp);
         diffuseBase += result[0];
         specularBase += result[1];
     }

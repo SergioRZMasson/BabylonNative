@@ -150,7 +150,7 @@ TEST(LiteHemispheric, OriginalWorldDirectionPackAndExplicitScalarDirty)
     p.intensity = -2;
     ASSERT_EQ(bl_setHemisphericLightProperties(light, &p), BL_OK);
     auto* native = reinterpret_cast<L_HemisphericLight*>(l_peek(host.runtime, light._id));
-    EXPECT_EQ(native->dataVersion, 1u);
+    EXPECT_EQ(native->light.dataVersion, 1u);
     float data[16]{};
     ASSERT_EQ(l_writeHemisphericLight(host.runtime, native, data), BL_OK);
     EXPECT_EQ(data[1], 1);
@@ -159,13 +159,13 @@ TEST(LiteHemispheric, OriginalWorldDirectionPackAndExplicitScalarDirty)
     EXPECT_EQ(data[7], 0);
     p.intensity = 4;
     ASSERT_EQ(bl_setHemisphericLightProperties(light, &p), BL_OK);
-    EXPECT_EQ(native->dataVersion, 1u);
+    EXPECT_EQ(native->light.dataVersion, 1u);
     ASSERT_EQ(bl_markLightUboDirty(family), BL_OK);
-    EXPECT_EQ(native->dataVersion, 2u);
+    EXPECT_EQ(native->light.dataVersion, 2u);
     ASSERT_EQ(bl_setLightIntensity(family, 5), BL_OK);
-    EXPECT_EQ(native->dataVersion, 3u);
+    EXPECT_EQ(native->light.dataVersion, 3u);
     ASSERT_EQ(bl_setLightIntensity(family, 5), BL_OK);
-    EXPECT_EQ(native->dataVersion, 3u);
+    EXPECT_EQ(native->light.dataVersion, 3u);
     EXPECT_EQ(bl_setLightIntensity(family, std::numeric_limits<double>::infinity()), BL_INVALID_ARGUMENT);
     bl_Error error{};
     ASSERT_EQ(bl_getLastError(host.runtime, &error), BL_OK);

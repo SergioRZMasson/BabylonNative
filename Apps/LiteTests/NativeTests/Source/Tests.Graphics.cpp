@@ -1,5 +1,6 @@
 #include "TestRuntime.h"
 #include "LiteInternal.h"
+#include "DirectionalLightInternal.h"
 #include <babylon_lite_shader_compiler.h>
 #include <bgfx/bgfx.h>
 
@@ -380,6 +381,235 @@ TEST_F(LiteNativeGraphics, OriginalArcHemisphericStandardUsesRuntimeWGSLAndRealP
     ASSERT_EQ(bl_resizeMeshGeometry(engine, mesh, &colored), BL_OK);
     ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
     ASSERT_EQ(bl_freeGeometryData(runtime->runtime, &box), BL_OK);
+}
+
+TEST_F(LiteNativeGraphics, DirectionalOriginalLambertDirtyWorldIntensityAndSameFramePixels)
+{
+    const bl_DirectionalLightOptions options{{0, 0, 1}, {true, .25}};
+    bl_DirectionalLight light{};
+    ASSERT_EQ(bl_createDirectionalLight(runtime->runtime, &options, &light), BL_OK);
+    bl_DirectionalLightProperties p{};
+    ASSERT_EQ(bl_getDirectionalLightProperties(light, &p), BL_OK);
+    p.diffuse = {1, 0, 0};
+    p.specular = {};
+    ASSERT_EQ(bl_setDirectionalLightProperties(light, &p), BL_OK);
+    bl_Light family{};
+    bl_SceneNode node{};
+    ASSERT_EQ(bl_directionalLightAsLight(light, &family), BL_OK);
+    ASSERT_EQ(bl_lightNode(family, &node), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, node), BL_OK);
+    bl_StandardMaterial standard{};
+    ASSERT_EQ(bl_createStandardMaterial(runtime->runtime, &standard), BL_OK);
+    bl_Material materialFamily{};
+    ASSERT_EQ(bl_standardMaterialAsMaterial(standard, &materialFamily), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &mesh), BL_OK);
+    const bl_MeshProperties2 properties{materialFamily, {}, false};
+    ASSERT_EQ(bl_setMeshProperties2(mesh, &properties), BL_OK);
+    ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_NEAR(Center()[0], 64, 1);
+    EXPECT_EQ(Center()[1], 0);
+    auto* native = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, scene._id));
+    EXPECT_EQ(native->packedLightCount, 1u);
+    EXPECT_EQ(native->lightData[7], 1);
+    EXPECT_TRUE(std::isinf(native->lightData[11]) && native->lightData[11] > 0);
+    const auto red = Center();
+    ASSERT_EQ(bl_setNodePosition(node, {7, 8, 9}), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center(), red);
+    p.diffuse = {0, 0, 1};
+    ASSERT_EQ(bl_setDirectionalLightProperties(light, &p), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center(), red);
+    ASSERT_EQ(bl_markLightUboDirty(family), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_NEAR(Center()[2], 64, 1);
+    ASSERT_EQ(bl_setLightIntensity(family, .5), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_NEAR(Center()[2], 128, 1);
+    bl_TransformNode parent{};
+    ASSERT_EQ(bl_createTransformNode(runtime->runtime, {}, nullptr, &parent), BL_OK);
+    ASSERT_EQ(bl_setNodeParent(node, parent), BL_OK);
+    ASSERT_EQ(bl_setNodeScaling(parent, {2, 3, 4}), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_NEAR(Center()[2], 128, 1);
+    ASSERT_EQ(bl_setNodeRotation(parent, {0, 3.141592653589793, 0}), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_LT(Center()[2], 2);
+    ASSERT_EQ(bl_setNodeRotation(parent, {}), BL_OK);
+    struct Change { bl_DirectionalLight light; bl_Light family; } change{light, family};
+    bl_CallbackToken token{};
+    ASSERT_EQ(bl_onBeforeRender(scene, [](void* user, double) {
+        const auto& data = *static_cast<Change*>(user);
+        bl_DirectionalLightProperties p{};
+        EXPECT_EQ(bl_getDirectionalLightProperties(data.light, &p), BL_OK);
+        p.diffuse = {0, 1, 0};
+        EXPECT_EQ(bl_setDirectionalLightProperties(data.light, &p), BL_OK);
+        EXPECT_EQ(bl_markLightUboDirty(data.family), BL_OK);
+    }, &change, &token), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_NEAR(Center()[1], 128, 1);
+    EXPECT_LT(Center()[0], 2);
+    EXPECT_LT(Center()[2], 2);
+    ASSERT_EQ(bl_removeSceneCallback(scene, token), BL_OK);
+}
+
+TEST_F(LiteNativeGraphics, MixedDirectionalHemiCapOrderDuplicatesSwapVisibilityAndSharedOwnership)
+{
+    bl_StandardMaterial standard{};
+    ASSERT_EQ(bl_createStandardMaterial(runtime->runtime, &standard), BL_OK);
+    bl_Material materialFamily{};
+    ASSERT_EQ(bl_standardMaterialAsMaterial(standard, &materialFamily), BL_OK);
+    ASSERT_EQ(bl_createBox(engine, nullptr, &mesh), BL_OK);
+    const bl_MeshProperties2 properties{materialFamily, {}, false};
+    ASSERT_EQ(bl_setMeshProperties2(mesh, &properties), BL_OK);
+    ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
+    std::vector<bl_Light> families;
+    std::vector<bl_SceneNode> nodes;
+    bl_DirectionalLight first{};
+    for (unsigned i = 0; i < 17; ++i)
+    {
+        bl_Light family{};
+        if (i % 2)
+        {
+            bl_HemisphericLight light{};
+            ASSERT_EQ(bl_createHemisphericLight(runtime->runtime, nullptr, &light), BL_OK);
+            ASSERT_EQ(bl_hemisphericLightAsLight(light, &family), BL_OK);
+        }
+        else
+        {
+            bl_DirectionalLight light{};
+            const bl_DirectionalLightOptions options{{0, 0, 1}, {true, .01}};
+            ASSERT_EQ(bl_createDirectionalLight(runtime->runtime, &options, &light), BL_OK);
+            ASSERT_EQ(bl_directionalLightAsLight(light, &family), BL_OK);
+            if (!i) first = light;
+        }
+        bl_SceneNode node{};
+        ASSERT_EQ(bl_lightNode(family, &node), BL_OK);
+        ASSERT_EQ(bl_addToScene(scene, node), BL_OK);
+        families.push_back(family);
+        nodes.push_back(node);
+    }
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    auto* native = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, scene._id));
+    EXPECT_EQ(native->packedLightCount, 16u);
+    for (unsigned i = 0; i < 16; ++i)
+    {
+        EXPECT_EQ(native->lightIdentities[i], nodes[i]._id);
+        EXPECT_EQ(native->lightData[4 + i * 16 + 3], i % 2 ? 3 : 1);
+    }
+    const auto packedVersion = native->packedListVersion;
+    ASSERT_EQ(bl_setNodeVisible(nodes[0], false), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_EQ(native->packedLightCount, 16u);
+    EXPECT_EQ(native->lightIdentities[0], nodes[0]._id);
+    bl_SceneContext other{};
+    ASSERT_EQ(bl_createSceneContext(engine, &other), BL_OK);
+    bl_SceneProperties2 sceneProperties{};
+    ASSERT_EQ(bl_getSceneProperties2(scene, &sceneProperties), BL_OK);
+    ASSERT_EQ(bl_setSceneProperties2(other, &sceneProperties), BL_OK);
+    ASSERT_EQ(bl_addToScene(other, nodes[0]), BL_OK);
+    ASSERT_EQ(bl_addToScene(other, meshNode), BL_OK);
+    ASSERT_EQ(bl_registerScene(other), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    auto* second = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, other._id));
+    EXPECT_EQ(second->packedLightCount, 1u);
+    EXPECT_EQ(bl_disposeNode(nodes[0]), BL_BUSY);
+    ASSERT_EQ(bl_setLightIntensity(families[0], .2), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_FLOAT_EQ(native->lightData[8], .2f);
+    EXPECT_FLOAT_EQ(second->lightData[8], .2f);
+    ASSERT_EQ(bl_removeFromScene(scene, nodes[1]), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, nodes[0]), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_NE(native->packedListVersion, packedVersion);
+    EXPECT_EQ(native->lightIdentities[15], nodes[16]._id);
+    ASSERT_EQ(bl_removeFromScene(scene, nodes[16]), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_EQ(native->lightIdentities[15], nodes[0]._id);
+    ASSERT_EQ(bl_removeFromScene(scene, nodes[0]), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_EQ(second->packedLightCount, 1u);
+    EXPECT_EQ(bl_disposeNode(nodes[0]), BL_BUSY);
+    ASSERT_EQ(bl_disposeScene(other), BL_OK);
+    bl_DirectionalLightProperties p{};
+    EXPECT_EQ(bl_getDirectionalLightProperties(first, &p), BL_OK);
+    ASSERT_EQ(bl_disposeNode(nodes[0]), BL_OK);
+    EXPECT_EQ(bl_getDirectionalLightProperties(first, &p), BL_DISPOSED);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+}
+
+TEST_F(LiteNativeGraphics, DirectionalStandardColdReflectionFailureReleasesAndRetriesTransactionally)
+{
+    struct Compiler
+    {
+        bl_ShaderCompilerService original;
+        bl_ShaderCompileResult owned{};
+        std::vector<bl_ReflectedUniform> uniforms;
+        size_t releases{};
+        bool corrupt{true};
+    } state{runtime->runtime->compiler};
+    runtime->runtime->compiler.userData = &state;
+    runtime->runtime->compiler.compile = [](void* user, const bl_ShaderCompileRequest* request,
+        bl_ShaderCompileResult* result) {
+        auto& state = *static_cast<Compiler*>(user);
+        const auto status = state.original.compile(state.original.userData, request, result);
+        state.owned = *result;
+        if (status == BL_OK && state.corrupt)
+        {
+            state.uniforms.assign(result->uniforms, result->uniforms + result->uniformCount);
+            state.uniforms.at(0).nativeByteOffset = UINT32_MAX;
+            result->uniforms = state.uniforms.data();
+        }
+        return status;
+    };
+    runtime->runtime->compiler.release = [](void* user, bl_ShaderCompileResult* result) {
+        auto& state = *static_cast<Compiler*>(user);
+        ++state.releases;
+        state.original.release(state.original.userData, &state.owned);
+        *result = {};
+    };
+    const bl_DirectionalLightOptions options{{0, 0, 1}, {}};
+    bl_DirectionalLight light{};
+    ASSERT_EQ(bl_createDirectionalLight(runtime->runtime, &options, &light), BL_OK);
+    bl_Light family{};
+    bl_SceneNode node{};
+    ASSERT_EQ(bl_directionalLightAsLight(light, &family), BL_OK);
+    ASSERT_EQ(bl_lightNode(family, &node), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, node), BL_OK);
+    bl_StandardMaterial standard{};
+    ASSERT_EQ(bl_createStandardMaterial(runtime->runtime, &standard), BL_OK);
+    bl_Material materialFamily{};
+    ASSERT_EQ(bl_standardMaterialAsMaterial(standard, &materialFamily), BL_OK);
+    ASSERT_EQ(bl_createSphere(engine, nullptr, &mesh), BL_OK);
+    const bl_MeshProperties2 properties{materialFamily, {}, false};
+    ASSERT_EQ(bl_setMeshProperties2(mesh, &properties), BL_OK);
+    ASSERT_EQ(bl_meshNode(mesh, &meshNode), BL_OK);
+    ASSERT_EQ(bl_addToScene(scene, meshNode), BL_OK);
+    EXPECT_EQ(bl_registerScene(scene), BL_SHADER_ERROR);
+    EXPECT_EQ(state.releases, 1u);
+    auto* native = reinterpret_cast<L_Scene*>(l_peek(runtime->runtime, scene._id));
+    EXPECT_FALSE(native->registered);
+    state.corrupt = false;
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    EXPECT_EQ(state.releases, 2u);
+    runtime->runtime->compiler = state.original;
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    ASSERT_TRUE(Readback());
+    EXPECT_GT(Center()[0], 220);
 }
 
 TEST_F(LiteNativeGraphics, ArcControlAppendsOriginalPerFrameInertiaAfterUserPrepend)

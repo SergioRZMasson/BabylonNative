@@ -1,0 +1,37 @@
+{
+  "authority": "Unmodified phase1 compiled official TypeScript bodies, source pin2e064d88ec7422af946f8ec7f089ac6519f99295",
+  "originalUnits": "E:\\Github\\BabylonNative\\build\\lite-c99\\demo-scene2\\oracle\\original-source-units.json",
+  "seed": 1337,
+  "count": 200,
+  "modes": [
+    "F32",
+    "HPM"
+  ],
+  "inputDoublesPerCase": 16,
+  "inputLayout": [
+    "precise",
+    "direction3",
+    "parentEuler3",
+    "parentScale3",
+    "parentPosition3",
+    "position3"
+  ],
+  "output": "16F32 light UBO;16F64 values representing source world matrix",
+  "files": [
+    {
+      "file": "E:\\Github\\BabylonNative\\build\\lite-c99\\demo-scene2\\implementation-oracles\\directional-random-inputs.f64.bin",
+      "bytes": 25600,
+      "sha256": "17a5e0d5e0a92395a9ebe8f43d454567eaac8074b132a9cee9859b865828a61e"
+    },
+    {
+      "file": "E:\\Github\\BabylonNative\\build\\lite-c99\\demo-scene2\\implementation-oracles\\directional-random-data.f32.bin",
+      "bytes": 12800,
+      "sha256": "4cf0caed9023d81cd04086eba4e85fbd870c1e9383d5d8b6739352e8ae944d41"
+    },
+    {
+      "file": "E:\\Github\\BabylonNative\\build\\lite-c99\\demo-scene2\\implementation-oracles\\directional-random-world.f64.bin",
+      "bytes": 25600,
+      "sha256": "9d13b5fa8540a060d2407dd74d9edcb1e03bba19d2e4a2fefb0575b277bc166a"
+    }
+  ]
+}

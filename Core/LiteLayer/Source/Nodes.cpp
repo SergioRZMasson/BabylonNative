@@ -1,4 +1,4 @@
-#include "SceneInternal.h"
+#include "LightInternal.h"
 
 bool l_vec(bl_Vec3 p)
 {
@@ -103,6 +103,11 @@ bl_Status l_node(bl_SceneNode h, L_Node** out, bool disposedOK)
     if ((!p || p->disposed) && !disposedOK)
     {
         return L_FAIL(h._runtime, BL_DISPOSED, "Disposed node identity");
+    }
+    if (p && !p->disposed && kind == L_LIGHT)
+    {
+        L_Light* light;
+        L_TRY(l_lightFamily({h._runtime, h._id}, &light));
     }
     *out = (L_Node*)p;
     return BL_OK;

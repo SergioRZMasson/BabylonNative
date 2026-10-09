@@ -1,7 +1,8 @@
 # Babylon Lite native component
 
-`LiteLayer` is a handwritten C-style implementation of the Minecraft- and
-auxiliary native-cube/primitives-reached Babylon Lite 1.32.0 API, based on original TypeScript at
+`LiteLayer` is a handwritten C-style implementation of the Babylon Lite 1.32.0 API
+reached by Minecraft, original scene2 and auxiliary native-cube/primitives,
+based on original TypeScript at
 `2e064d88ec7422af946f8ec7f089ac6519f99295`. Its only public header is
 `Core/LiteLayer/Include/babylon_lite.h`; its direct link dependencies are `bgfx`
 and `bx`, plus explicitly optional `RmlUi::Core` when
@@ -19,9 +20,58 @@ are carried by the static target.
 
 ## Components
 
+### Original scene2 Directional slice
+
+The current single C99 header has **167 functions**. The five reviewed additions
+create/query/update a typed Directional light and perform checked conversions to/from
+the existing Light family. All 162 previous signatures and 94-record/504-witness
+layouts remain unchanged, including the older 160/93/498 and 122/72/389 snapshots.
+The new properties use the original **`diffuse` and `specular`** names, not Hemi
+color aliases. Options/direction are required; intensity defaults to 1. Finite
+negative colors/intensity and zero/nonunit directions remain valid. Public
+nonfinite data is rejected atomically.
+
+Private lights use a checked, two-case tagged POD prefix, not inheritance.
+Hemi getters/conversions cannot reinterpret a Directional record. Generic
+intensity/dirty/node operations validate the family; raw color/scalar writes
+still need explicit dirty notification. Directional world-linear direction
+normalization ignores translation and preserves the original type1 packing,
+including the intentional F32 `Number.MAX_VALUE` → positive-infinity range.
+The reusable Standard shader dispatches the original type1 Lambert/Blinn-Phong
+and type3 Hemi formulas through the existing four logical UBOs and arbitrary
+runtime WGSL compiler. Internal source point/spot arithmetic does **not** expose
+point/spot factories, shadows, filters, PBR or additional Standard features.
+
+`Apps/LiteTests/NativeScene2` projects the byte-preserved STANDARD user `main.cpp`
+through external C99 transports and bundles the unchanged **original corpus**
+`scene2.ts` with the thin native shim only. It is not an auxiliary sample.
+Both C++ and original-JS lanes retain the full default sphere (2,415 vertices,
+13,872 indices), red Directional diffuse/green specular, camera near1/far10000,
+attached controls and requested/default MSAA4.
+
+All nine original static/rotate/wheel/pan poses in each native lane have identical
+silhouettes to the frozen SDL GPU reference and RGB differences at most one LSB.
+These are actual GPU readbacks, not reconstructed CPU state. Additional JS GPU
+tests exercise readonly vector identity, mutable arrays, raw writes without
+automatic dirtying, equal bulk-vector notification and half-intensity behavior.
+Twelve original light-entry byte goldens, 200 original F32/HPM parent-transform
+oracles, allocator/churn/forgery tests, mixed-light GPU/cache/lifetime checks and
+cold reflection failure/retry tests pass. Fresh UI-on/off suites pass 19/13 tests;
+all ten native Minecraft tests pass across the original run and a targeted
+missing-reference retry. Fresh cube/primitives render/input/semantic regressions
+pass without modifying previous receipts or canonical hosts.
+
+Evidence is in the independent ignored `build/lite-c99/demo-scene2` tree.
+Effective child MSAA/device selection is not independently queried and remains
+explicitly unknown; requested flags, actual DLL paths and separate capability
+queries are retained. This establishes this source-reached slice, not all 295
+catalog entries or package-wide compatibility. The fresh 54-process comparison
+meets this demo's mean/P95 goal; it does not repair the earlier cube/primitives
+backend/tail results. See [LiteNativeScene2Performance.md](LiteNativeScene2Performance.md).
+
 ### Additional flat Ground/primitives slice
 
-The reviewed flat Ground addition brings the single C99 header to **162 functions**.
+The reviewed flat Ground addition brought the single C99 header to **162 functions**.
 All 160 pre-Ground signatures and record layouts are preserved, including the
 legacy 122 declarations and 72-record/389-witness ABI. `bl_createFlatGroundData`
 uses the original module-exported helper name; it is not a fabricated root
