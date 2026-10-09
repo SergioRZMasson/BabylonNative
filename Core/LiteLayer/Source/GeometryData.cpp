@@ -1,4 +1,5 @@
 #include "RuntimeInternal.h"
+#include <float.h>
 
 struct L_Data
 {
@@ -58,6 +59,112 @@ static bl_Status createData(bl_Runtime* r, size_t vertices, size_t indices, L_Da
 static double optional(bl_OptionalNumber number, double fallback)
 {
     return number.present ? number.value : fallback;
+}
+
+bl_Status l_groundCounts(bl_Runtime* r, const bl_GroundOptions* o, bool gpu, size_t* vertices,
+                         size_t* indices)
+{
+    double width = o ? optional(o->width, 1) : 1;
+    double height = o ? optional(o->height, 1) : 1;
+    double subdivisions = o ? optional(o->subdivisions, 1) : 1;
+    double u = o && o->hasUvScale ? o->uvScale.x : 1;
+    double v = o && o->hasUvScale ? o->uvScale.y : 1;
+    if (!isfinite(width) || !isfinite(height) || !isfinite(u) || !isfinite(v) ||
+        fabs(width / 2) > FLT_MAX || fabs(height / 2) > FLT_MAX || fabs(u) > FLT_MAX ||
+        fabs(v) > FLT_MAX || !isfinite(subdivisions) || subdivisions < 1 ||
+        floor(subdivisions) != subdivisions || subdivisions >= UINT32_MAX)
+    {
+        return L_FAIL(r, BL_INVALID_ARGUMENT, "Invalid finite Ground options");
+    }
+    double side = subdivisions + 1;
+    double vertexCount = side * side;
+    double indexCount = subdivisions * subdivisions * 6;
+    if (vertexCount > UINT32_MAX || vertexCount > (double)(SIZE_MAX / (3 * sizeof(float))) ||
+        indexCount > (double)(SIZE_MAX / sizeof(uint32_t)) ||
+        (gpu && (vertexCount > UINT32_MAX / (8 * sizeof(float)) ||
+                 indexCount > UINT32_MAX / sizeof(uint32_t))))
+    {
+        return L_FAIL(r, BL_INVALID_ARGUMENT, "Ground count or GPU byte budget overflow");
+    }
+    size_t vertexSize = (size_t)vertexCount;
+    size_t indexSize = (size_t)indexCount;
+    size_t positionBytes;
+    size_t uvBytes;
+    size_t indexBytes;
+    if (!l_size(vertexSize, 3 * sizeof(float), &positionBytes) ||
+        !l_size(vertexSize, 2 * sizeof(float), &uvBytes) ||
+        !l_size(indexSize, sizeof(uint32_t), &indexBytes) || !l_allocationFits(positionBytes) ||
+        !l_allocationFits(uvBytes) || !l_allocationFits(indexBytes))
+    {
+        return L_FAIL(r, BL_INVALID_ARGUMENT, "Ground allocation byte size overflow");
+    }
+    *vertices = vertexSize;
+    *indices = indexSize;
+    return BL_OK;
+}
+
+bl_Status bl_createFlatGroundData(bl_Runtime* r, const bl_GroundOptions* o, bl_GeometryData* out)
+{
+    L_TRY(l_check(r));
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    size_t vertices;
+    size_t indices;
+    L_TRY(l_groundCounts(r, o, false, &vertices, &indices));
+    double width = o ? optional(o->width, 1) : 1;
+    double height = o ? optional(o->height, 1) : 1;
+    double subdivisions = o ? optional(o->subdivisions, 1) : 1;
+    size_t columns = (size_t)subdivisions + 1;
+    L_Data* data;
+    L_TRY(createData(r, vertices, indices, &data));
+    size_t vertex = 0;
+    for (size_t row = 0; row < columns; ++row)
+    {
+        for (size_t col = 0; col < columns; ++col, ++vertex)
+        {
+            double x = -width / 2 + ((double)col / subdivisions) * width;
+            double z = -height / 2 + (1 - (double)row / subdivisions) * height;
+            data->data.positions[vertex * 3] = (float)x;
+            data->data.positions[vertex * 3 + 1] = 0;
+            data->data.positions[vertex * 3 + 2] = (float)z;
+            data->data.normals[vertex * 3] = 0;
+            data->data.normals[vertex * 3 + 1] = 1;
+            data->data.normals[vertex * 3 + 2] = 0;
+            data->data.uvs[vertex * 2] = (float)((double)col / subdivisions);
+            data->data.uvs[vertex * 2 + 1] = (float)(1 - (double)row / subdivisions);
+        }
+    }
+    double uScale = o && o->hasUvScale ? o->uvScale.x : 1;
+    double vScale = o && o->hasUvScale ? o->uvScale.y : 1;
+    if (uScale != 1 || vScale != 1)
+    {
+        for (size_t i = 0; i < vertices * 2; i += 2)
+        {
+            data->data.uvs[i] = (float)(data->data.uvs[i] * uScale);
+            data->data.uvs[i + 1] = (float)(data->data.uvs[i + 1] * vScale);
+        }
+    }
+    size_t index = 0;
+    for (size_t row = 0; row < columns - 1; ++row)
+    {
+        for (size_t col = 0; col < columns - 1; ++col)
+        {
+            uint32_t topLeft = (uint32_t)(row * columns + col);
+            uint32_t topRight = topLeft + 1;
+            uint32_t bottomLeft = (uint32_t)((row + 1) * columns + col);
+            uint32_t bottomRight = bottomLeft + 1;
+            data->data.indices[index++] = bottomRight;
+            data->data.indices[index++] = topRight;
+            data->data.indices[index++] = topLeft;
+            data->data.indices[index++] = bottomLeft;
+            data->data.indices[index++] = bottomRight;
+            data->data.indices[index++] = topLeft;
+        }
+    }
+    *out = data->data;
+    return BL_OK;
 }
 
 bl_Status bl_createBoxData(bl_Runtime* r, const bl_BoxOptions* o, bl_GeometryData* out)

@@ -2,6 +2,7 @@ set(SOURCES
     "Source/ContractC99.c"
     "Source/TestRuntime.h"
     "Source/Tests.Geometry.cpp"
+    "Source/Tests.Ground.cpp"
     "Source/Tests.Nodes.cpp"
     "Source/Tests.ArcLight.cpp"
     "Source/Tests.Audio.cpp"

@@ -268,13 +268,18 @@ bl_Status l_check(bl_Runtime* r)
     return BL_OK;
 }
 
+bool l_allocationFits(size_t bytes)
+{
+    return bytes <= SIZE_MAX - sizeof(L_Allocation);
+}
+
 void* l_alloc(bl_Runtime* r, size_t bytes)
 {
     if (!bytes)
     {
         return NULL;
     }
-    if (bytes > SIZE_MAX - sizeof(L_Allocation))
+    if (!l_allocationFits(bytes))
     {
         l_error(r, BL_OUT_OF_MEMORY, "allocate", "Allocation size overflow");
         return NULL;

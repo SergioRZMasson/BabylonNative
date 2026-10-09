@@ -346,6 +346,31 @@ bl_Status bl_createSphere(bl_EngineContext e, const bl_SphereOptions* o, bl_Mesh
     return s;
 }
 
+bl_Status bl_createGround(bl_EngineContext e, const bl_GroundOptions* o, bl_Mesh* out)
+{
+    L_GET(e, L_ENGINE, L_Engine, engine);
+    (void)engine;
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    size_t vertices;
+    size_t indices;
+    L_TRY(l_groundCounts(e._runtime, o, true, &vertices, &indices));
+    bl_GeometryData data;
+    L_TRY(bl_createFlatGroundData(e._runtime, o, &data));
+    bl_MeshGeometry geometry = {{data.positions, vertices * 3},
+                                {data.normals, vertices * 3},
+                                {data.indices, indices},
+                                {data.uvs, vertices * 2},
+                                {},
+                                {},
+                                {}};
+    bl_Status status = bl_createMeshFromData(e, {"ground", 6}, &geometry, out);
+    bl_freeGeometryData(e._runtime, &data);
+    return status;
+}
+
 bl_Status bl_getMeshProperties(bl_Mesh h, bl_MeshProperties* out)
 {
     L_GET(h, L_MESH, L_Mesh, m);

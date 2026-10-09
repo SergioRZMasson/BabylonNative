@@ -95,6 +95,9 @@ bl_Status l_error(bl_Runtime* r, bl_Status status, const char* operation, const 
 void* l_alloc(bl_Runtime* r, size_t bytes);
 void l_free(bl_Runtime* r, void* p);
 bool l_size(size_t a, size_t b, size_t* out);
+bool l_allocationFits(size_t bytes);
+bl_Status l_groundCounts(bl_Runtime* r, const bl_GroundOptions* options, bool gpu, size_t* vertices,
+                         size_t* indices);
 bool l_span(const void* p, size_t n);
 bool l_typedSpan(const void* p, size_t n, size_t alignment);
 bool l_string(bl_String s);

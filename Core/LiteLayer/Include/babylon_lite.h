@@ -1099,6 +1099,15 @@ typedef struct bl_SphereOptions
     bl_OptionalNumber diameterZ;
 } bl_SphereOptions;
 
+typedef struct bl_GroundOptions
+{
+    bl_OptionalNumber width;
+    bl_OptionalNumber height;
+    bl_OptionalNumber subdivisions;
+    bool hasUvScale;
+    bl_Vec2 uvScale;
+} bl_GroundOptions;
+
 typedef struct bl_MeshProperties
 {
     bl_ShaderMaterial material;    /* Original default null, assigned before rendering. */
@@ -1131,11 +1140,14 @@ bl_Status bl_createBoxData(bl_Runtime* runtime, const bl_BoxOptions* options,
                            bl_GeometryData* data);
 bl_Status bl_createSphereData(bl_Runtime* runtime, const bl_SphereOptions* options,
                               bl_GeometryData* data);
+bl_Status bl_createFlatGroundData(bl_Runtime* runtime, const bl_GroundOptions* options,
+                                  bl_GeometryData* data);
 bl_Status bl_freeGeometryData(bl_Runtime* runtime, bl_GeometryData* data);
 bl_Status bl_createMeshFromData(bl_EngineContext engine, bl_String name,
                                 const bl_MeshGeometry* geometry, bl_Mesh* mesh);
 bl_Status bl_createBox(bl_EngineContext engine, const bl_BoxOptions* options, bl_Mesh* mesh);
 bl_Status bl_createSphere(bl_EngineContext engine, const bl_SphereOptions* options, bl_Mesh* mesh);
+bl_Status bl_createGround(bl_EngineContext engine, const bl_GroundOptions* options, bl_Mesh* mesh);
 bl_Status bl_getMeshProperties(bl_Mesh mesh, bl_MeshProperties* properties);
 bl_Status bl_setMeshProperties(bl_Mesh mesh, const bl_MeshProperties* properties);
 bl_Status bl_updateMeshGeometry(bl_EngineContext engine, bl_Mesh mesh,
@@ -1193,6 +1205,20 @@ bl_Status bl_invalidateRenderBundles(bl_EngineContext engine);
  * finite integral input in this native contract. 16 segments/diameter=4000
  * produces the demo sky, not a simplified proxy. Fresh mutable CPU arrays are
  * never shared across primitive factory calls. freeGeometryData zeroes data.
+ * Ground maps the original module-exported createFlatGroundData helper and root
+ * createGround factory, not a fictitious root createGroundData. NULL/zero options
+ * default width=height=subdivisions=1 and uvScale=(1,1). Selected dimensions/scales
+ * must be finite with finite generated F32 output; zero/negative values remain
+ * valid. subdivisions must be a finite integral >=1 (explicit native safety
+ * restriction, not a source clamp). Heightmap-only minHeight/maxHeight are omitted
+ * because flat creation ignores them. Rows run +Z to -Z, columns -X to +X;
+ * (s+1)^2 vertices, 6*s*s indices, Y=0, normals=(0,1,0). Quad indices preserve
+ * (bottomRight,topRight,topLeft),(bottomLeft,bottomRight,topLeft). UV fractions
+ * first round to F32, then multiply double scales and round again, including
+ * signed zero. Data creation is CPU-only; mesh creation copies/uploads data,
+ * sets name "ground", releases staging, and inserts no scene/material. Checked
+ * count/byte/allocator/index-address and mesh GPU budgets precede allocation;
+ * overflow is INVALID_ARGUMENT, allocation failure OUT_OF_MEMORY, outputs unchanged.
  *
  * updateMeshGeometry requires same counts/optional layout, refreshes retained
  * CPU data and bounds, and preserves GPU buffer identity. resizeMeshGeometry

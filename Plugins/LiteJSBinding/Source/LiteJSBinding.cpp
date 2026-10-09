@@ -586,6 +586,28 @@ namespace Babylon::Plugins::LiteJSBinding
                 Optional(options, "diameterY"), Optional(options, "diameterZ")};
         }
 
+        bl_GroundOptions GroundOptions(Napi::Value value)
+        {
+            const auto options = Options(value);
+            bl_GroundOptions result{};
+            result.width = Optional(options, "width");
+            result.height = Optional(options, "height");
+            result.subdivisions = Optional(options, "subdivisions");
+            const auto scale = options.Get("uvScale");
+            if (!scale.IsNull() && !scale.IsUndefined())
+            {
+                const auto tuple = scale.As<Napi::Object>();
+                if (tuple.Get("length").As<Napi::Number>().Uint32Value() != 2)
+                {
+                    throw Napi::TypeError::New(value.Env(), "Ground uvScale requires two numbers.");
+                }
+                result.hasUvScale = true;
+                result.uvScale = {tuple.Get(uint32_t(0)).As<Napi::Number>().DoubleValue(),
+                    tuple.Get(uint32_t(1)).As<Napi::Number>().DoubleValue()};
+            }
+            return result;
+        }
+
         std::vector<double> Numbers(Napi::Value value)
         {
             if (value.IsUndefined())
@@ -617,10 +639,15 @@ namespace Babylon::Plugins::LiteJSBinding
             return result;
         }
 
-        Napi::Value Geometry(State& state, const Napi::CallbackInfo& info, bool sphere)
+        Napi::Value Geometry(State& state, const Napi::CallbackInfo& info, unsigned kind)
         {
             bl_GeometryData data{};
-            if (sphere)
+            if (kind == 2)
+            {
+                const auto options = GroundOptions(info[0]);
+                state.Check(info.Env(), bl_createFlatGroundData(state.options.runtime, &options, &data));
+            }
+            else if (kind == 1)
             {
                 const auto options = SphereOptions(info[0]);
                 state.Check(info.Env(), bl_createSphereData(state.options.runtime, &options, &data));
@@ -2226,6 +2253,13 @@ namespace Babylon::Plugins::LiteJSBinding
         });
         Bind(api, state, "createBoxData", [](State& s, const auto& i) { return Geometry(s, i, false); });
         Bind(api, state, "createSphereData", [](State& s, const auto& i) { return Geometry(s, i, true); });
+        Bind(api, state, "createFlatGroundData", [](State& s, const auto& i) { return Geometry(s, i, 2); });
+        Bind(api, state, "createGround", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            const auto options = GroundOptions(i[1]);
+            bl_Mesh mesh{};
+            s.Check(i.Env(), bl_createGround(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), &options, &mesh));
+            return s.Wrap(i.Env(), mesh, Kind::Mesh);
+        });
         Bind(api, state, "createBox", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
             const auto options = BoxOptions(i[1]);
             bl_Mesh mesh{};

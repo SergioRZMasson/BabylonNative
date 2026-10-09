@@ -33,6 +33,10 @@ int main()
     assert(bl_createBoxData(runtime, nullptr, &box) == BL_OK);
     assert(bl_createSphereData(runtime, nullptr, &sphere) == BL_OK);
     assert(box.vertexCount == 24 && sphere.vertexCount == 2415);
+    bl_GeometryData ground = {};
+    assert(bl_createFlatGroundData(runtime, nullptr, &ground) == BL_OK);
+    assert(ground.vertexCount == 4 && ground.indexCount == 6);
+    assert(bl_freeGeometryData(runtime, &ground) == BL_OK);
     const bl_VertexSemantic attribute = BL_ATTRIBUTE_POSITION;
     const bl_ShaderUniformDecl uniform = {{"value", 5}, BL_UNIFORM_F32, {}, false};
     bl_ShaderMaterialOptions materialOptions = {};

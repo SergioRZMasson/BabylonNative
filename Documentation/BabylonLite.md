@@ -1,7 +1,7 @@
 # Babylon Lite native component
 
 `LiteLayer` is a handwritten C-style implementation of the Minecraft- and
-auxiliary native-cube-reached Babylon Lite 1.32.0 API, based on original TypeScript at
+auxiliary native-cube/primitives-reached Babylon Lite 1.32.0 API, based on original TypeScript at
 `2e064d88ec7422af946f8ec7f089ac6519f99295`. Its only public header is
 `Core/LiteLayer/Include/babylon_lite.h`; its direct link dependencies are `bgfx`
 and `bx`, plus explicitly optional `RmlUi::Core` when
@@ -19,9 +19,54 @@ are carried by the static target.
 
 ## Components
 
+### Additional flat Ground/primitives slice
+
+The reviewed flat Ground addition brings the single C99 header to **162 functions**.
+All 160 pre-Ground signatures and record layouts are preserved, including the
+legacy 122 declarations and 72-record/389-witness ABI. `bl_createFlatGroundData`
+uses the original module-exported helper name; it is not a fabricated root
+`createGroundData` API. `bl_createGround` is the original root mesh factory.
+The minimal `bl_GroundOptions` exposes width, height, subdivisions and optional
+UV scale. Heightmap-only minHeight/maxHeight are deliberately omitted because
+the original flat factories ignore them; heightmap/image creation is not supported.
+
+The handwritten data factory is renderer/compiler/VM-independent. It preserves
+independent mutable Float32 position/normal/UV arrays, Uint32 indices, the original
+winding and double-to-Float32 arithmetic, including two-pass UV rounding and
+signed zero. Null/zero options retain the original 1×1, one-subdivision defaults.
+Finite zero/negative dimensions and UV scales are retained. Finite integral
+subdivisions ≥1 and finite generated Float32 output are explicit native safety
+restrictions; invalid values are rejected rather than clamped or wrapped.
+Counts, byte sizes, allocator overhead and mesh GPU budgets are checked before
+allocation. The mesh factory uses existing copy/upload/identity/bounds/retirement
+paths, sets name `ground`, and creates no material or scene membership.
+
+`Apps/LiteTests/NativePrimitives` projects the unchanged STANDARD primitives user
+translation unit and separately bundles unchanged `examples/primitives.ts` with
+only the native shim. This is a **bblitec-owned auxiliary example**, not an original
+Babylon Lite corpus demo or a claim that all primitive factories are supported.
+Its external user-ABI transport stores independent mesh and camera identities;
+it does not reuse the native-cube adapter's one-mesh storage. Both box and Ground
+retain separate material/geometry state. Platform event/listener/pointer capture
+work stays outside Core; gesture and inertia algorithms remain native.
+
+Original-source Ground byte fixtures, allocation-failure/churn and guard tests
+exercise CPU ownership. Ground GPU tests cover independent buffers, copied data,
+GPU-only versus complete geometry updates and bounds. Static frames 1/61/121 and
+rotate/wheel/pan frames 12/61 in both C++ and original-JS lanes have identical
+silhouettes to frozen STANDARD SDL GPU captures. Static pixels are byte-identical;
+input-pose RGB differences are at most one LSB. The actual first zero delta and
+queued replay alignment are retained. All evidence/builds live in the new ignored
+`build/lite-c99/demo-primitives` tree; earlier measured baselines remain immutable.
+Performance is a separate matched complete-host comparison, not a claim inferred
+from the smaller C99 Core bracket or from Minecraft/cube timings.
+The final fresh 45-process comparison improves C++ average time by 10.03% but regresses
+P95 by 10.92%; the combined performance goal remains unmet. See
+[LiteNativePrimitivesPerformance.md](LiteNativePrimitivesPerformance.md).
+
 ### Additional native-cube slice (2026-10-08)
 
-The reviewed additive contract now has **160 functions**: the unchanged 122
+The cube's reviewed additive contract introduced **160 functions**: the unchanged 122
 engine/optional-UI declarations plus 38 camera/control/light/material transports.
 All 122 legacy signatures and public record field declarations are preserved.
 Strict-C99 binary witnesses also match all 389 sizes/offsets of the 72 legacy

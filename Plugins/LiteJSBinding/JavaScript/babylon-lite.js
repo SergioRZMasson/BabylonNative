@@ -377,6 +377,8 @@ export const rebuildSceneRenderables = scene => native.rebuildSceneRenderables(t
 export const createTransformNode = name => node(native.createTransformNode(name));
 export const createBoxData = options => native.createBoxData(options);
 export const createSphereData = options => native.createSphereData(options);
+export const createFlatGroundData = options => native.createFlatGroundData(options);
+export const createGround = (engine, options) => mesh(native.createGround(token(engine), options));
 export const createBox = (engine, options) => mesh(native.createBox(token(engine), options));
 export const createMeshFromData = (engine, name, ...streams) => mesh(native.createMeshFromData(token(engine), name, ...streams));
 export const createShaderMaterial = options => identity(native.createShaderMaterial(options));

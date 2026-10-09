@@ -1,0 +1,182 @@
+{
+  "package": "@babylonjs/lite",
+  "version": "1.32.0",
+  "sourcePin": "2e064d88ec7422af946f8ec7f089ac6519f99295",
+  "authority": "Original package module and its original TypeScript sourcesContent, not compiler-generated engine",
+  "originalSourceMapSha256": "98413cd4f484a5f62870f7875782043b344718e579daae13edd536acf5b30867",
+  "license": "Apache-2.0; existing fixture/source LICENSE retained",
+  "cases": {
+    "default": {},
+    "primitives-8x8": {
+      "width": 8,
+      "height": 8
+    },
+    "subdiv-2": {
+      "width": 3,
+      "height": 5,
+      "subdivisions": 2
+    },
+    "subdiv-3-uv": {
+      "width": 2.5,
+      "height": 7.3,
+      "subdivisions": 3,
+      "uvScale": [
+        1.3,
+        -2.2
+      ]
+    },
+    "zero-width": {
+      "width": 0
+    },
+    "negative-width": {
+      "width": -2,
+      "height": 3
+    },
+    "ignored-heightmap-only": {
+      "minHeight": 9,
+      "maxHeight": -4
+    }
+  },
+  "files": [
+    {
+      "file": "ground-default-positions.bin",
+      "sha256": "7e31618089184e9fecd11c5d94f527deed16d524a0a8844333af0f320407c6f4",
+      "bytes": 48
+    },
+    {
+      "file": "ground-default-normals.bin",
+      "sha256": "e1812a32d71ab746aa25aee896a1790138ef313625fb873f2be3ec50e9191e2d",
+      "bytes": 48
+    },
+    {
+      "file": "ground-default-uvs.bin",
+      "sha256": "f3a0a46301c6859e5b64beadee234c4eeec1dec8c4735dc7bf40ea09e762e189",
+      "bytes": 32
+    },
+    {
+      "file": "ground-default-indices.bin",
+      "sha256": "e510aaec1ed8104d14d7e26819068a6a54c496f2e01cafda1400e9c4ef382c42",
+      "bytes": 24
+    },
+    {
+      "file": "ground-primitives-8x8-positions.bin",
+      "sha256": "f680ff2bffb8d4eb5e08bd397f698ab2933f6c04012d70bed0eabbf5dbaee995",
+      "bytes": 48
+    },
+    {
+      "file": "ground-primitives-8x8-normals.bin",
+      "sha256": "e1812a32d71ab746aa25aee896a1790138ef313625fb873f2be3ec50e9191e2d",
+      "bytes": 48
+    },
+    {
+      "file": "ground-primitives-8x8-uvs.bin",
+      "sha256": "f3a0a46301c6859e5b64beadee234c4eeec1dec8c4735dc7bf40ea09e762e189",
+      "bytes": 32
+    },
+    {
+      "file": "ground-primitives-8x8-indices.bin",
+      "sha256": "e510aaec1ed8104d14d7e26819068a6a54c496f2e01cafda1400e9c4ef382c42",
+      "bytes": 24
+    },
+    {
+      "file": "ground-subdiv-2-positions.bin",
+      "sha256": "f4b296dbf20b828e4c78c8f97af983fdd1a79f773c24ab9b4c513d5f818d2471",
+      "bytes": 108
+    },
+    {
+      "file": "ground-subdiv-2-normals.bin",
+      "sha256": "bf6ab69c850386f9de76e117bfaa5282f5656fc60bc8bdc73216bcdbb3c737bf",
+      "bytes": 108
+    },
+    {
+      "file": "ground-subdiv-2-uvs.bin",
+      "sha256": "f8ebb1ff6ed2fe706b993effcd31577493c43e63c0d246d1ae523953c27029d4",
+      "bytes": 72
+    },
+    {
+      "file": "ground-subdiv-2-indices.bin",
+      "sha256": "029e5e72e889018ab2ef4ced3125a6cf2187e55331519ea4f98ae8d1f625b836",
+      "bytes": 96
+    },
+    {
+      "file": "ground-subdiv-3-uv-positions.bin",
+      "sha256": "c028399fcbfc515cace87365141309a0d36e10b295671f8c171ef43fa73d308e",
+      "bytes": 192
+    },
+    {
+      "file": "ground-subdiv-3-uv-normals.bin",
+      "sha256": "6caabc59f50f19f37ee6daf281d47e5ccbfc490a5e3f8b5ca98d84eb222c84ed",
+      "bytes": 192
+    },
+    {
+      "file": "ground-subdiv-3-uv-uvs.bin",
+      "sha256": "0b45a76670b90dfec9cb1afcbf94b8f9df8f889d31662a1f18bca735cf8d1256",
+      "bytes": 128
+    },
+    {
+      "file": "ground-subdiv-3-uv-indices.bin",
+      "sha256": "2d7df6c5d281de93d48e6c3ed5667dd6ac87345c63a4ee3c9cb305865a61e599",
+      "bytes": 216
+    },
+    {
+      "file": "ground-zero-width-positions.bin",
+      "sha256": "f392c2564fc915fbaa37e8015e6af652c1eb19ac36da0c7301b2675044c4cc97",
+      "bytes": 48
+    },
+    {
+      "file": "ground-zero-width-normals.bin",
+      "sha256": "e1812a32d71ab746aa25aee896a1790138ef313625fb873f2be3ec50e9191e2d",
+      "bytes": 48
+    },
+    {
+      "file": "ground-zero-width-uvs.bin",
+      "sha256": "f3a0a46301c6859e5b64beadee234c4eeec1dec8c4735dc7bf40ea09e762e189",
+      "bytes": 32
+    },
+    {
+      "file": "ground-zero-width-indices.bin",
+      "sha256": "e510aaec1ed8104d14d7e26819068a6a54c496f2e01cafda1400e9c4ef382c42",
+      "bytes": 24
+    },
+    {
+      "file": "ground-negative-width-positions.bin",
+      "sha256": "be62d0c5b1df5f9ab548b63e9f482b955a72bfd4a39565d04ab7b77c00327f86",
+      "bytes": 48
+    },
+    {
+      "file": "ground-negative-width-normals.bin",
+      "sha256": "e1812a32d71ab746aa25aee896a1790138ef313625fb873f2be3ec50e9191e2d",
+      "bytes": 48
+    },
+    {
+      "file": "ground-negative-width-uvs.bin",
+      "sha256": "f3a0a46301c6859e5b64beadee234c4eeec1dec8c4735dc7bf40ea09e762e189",
+      "bytes": 32
+    },
+    {
+      "file": "ground-negative-width-indices.bin",
+      "sha256": "e510aaec1ed8104d14d7e26819068a6a54c496f2e01cafda1400e9c4ef382c42",
+      "bytes": 24
+    },
+    {
+      "file": "ground-ignored-heightmap-only-positions.bin",
+      "sha256": "7e31618089184e9fecd11c5d94f527deed16d524a0a8844333af0f320407c6f4",
+      "bytes": 48
+    },
+    {
+      "file": "ground-ignored-heightmap-only-normals.bin",
+      "sha256": "e1812a32d71ab746aa25aee896a1790138ef313625fb873f2be3ec50e9191e2d",
+      "bytes": 48
+    },
+    {
+      "file": "ground-ignored-heightmap-only-uvs.bin",
+      "sha256": "f3a0a46301c6859e5b64beadee234c4eeec1dec8c4735dc7bf40ea09e762e189",
+      "bytes": 32
+    },
+    {
+      "file": "ground-ignored-heightmap-only-indices.bin",
+      "sha256": "e510aaec1ed8104d14d7e26819068a6a54c496f2e01cafda1400e9c4ef382c42",
+      "bytes": 24
+    }
+  ]
+}

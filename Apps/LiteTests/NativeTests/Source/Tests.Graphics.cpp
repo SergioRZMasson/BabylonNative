@@ -784,6 +784,114 @@ TEST_F(LiteNativeGraphics, GeometryFailuresPreserveCPUAndGPUIdentityAndPartialUp
     ASSERT_EQ(bl_freeGeometryData(runtime->runtime, &data), BL_OK);
 }
 
+TEST_F(LiteNativeGraphics, GroundFactoryCopiesIndependentDataAndPreservesUpdateContracts)
+{
+    bl_GroundOptions options{};
+    options.width = {true, 8};
+    options.height = {true, 8};
+    bl_Mesh first{};
+    bl_Mesh second{};
+    ASSERT_EQ(bl_createGround(engine, &options, &first), BL_OK);
+    ASSERT_EQ(bl_createGround(engine, &options, &second), BL_OK);
+    auto* a = reinterpret_cast<L_Mesh*>(l_peek(runtime->runtime, first._id));
+    auto* b = reinterpret_cast<L_Mesh*>(l_peek(runtime->runtime, second._id));
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(a->geometry.vertices, 4u);
+    EXPECT_EQ(a->geometry.indexCount, 6u);
+    EXPECT_NE(a->geometry.streams[0], b->geometry.streams[0]);
+    EXPECT_NE(a->geometry.vertexBuffer.idx, b->geometry.vertexBuffer.idx);
+    EXPECT_EQ(a->geometry.minimum.x, -4);
+    EXPECT_EQ(a->geometry.maximum.z, 4);
+    bl_SceneNode node{};
+    ASSERT_EQ(bl_meshNode(first, &node), BL_OK);
+    bl_String name{};
+    ASSERT_EQ(bl_getNodeName(node, &name), BL_OK);
+    EXPECT_EQ(std::string(name.data, name.length), "ground");
+    bl_MeshProperties2 properties{};
+    ASSERT_EQ(bl_getMeshProperties2(first, &properties), BL_OK);
+    EXPECT_EQ(properties.material._id, 0u);
+    EXPECT_FALSE(properties.receiveShadows);
+    bl_GeometryData data{};
+    ASSERT_EQ(bl_createFlatGroundData(runtime->runtime, &options, &data), BL_OK);
+    data.positions[0] = -8;
+    EXPECT_EQ(a->geometry.streams[0][0], -4);
+    const auto vertexBuffer = a->geometry.vertexBuffer.idx;
+    ASSERT_EQ(bl_updateMeshPositions(engine, first, {data.positions, 12}, 0, nullptr, 0), BL_OK);
+    EXPECT_EQ(a->geometry.streams[0][0], -4);
+    EXPECT_EQ(a->geometry.minimum.x, -4);
+    bl_MeshGeometry geometry{{data.positions, 12}, {data.normals, 12}, {data.indices, 6},
+                            {data.uvs, 8}, {}, {}, {}};
+    ASSERT_EQ(bl_updateMeshGeometry(engine, first, &geometry), BL_OK);
+    EXPECT_EQ(a->geometry.minimum.x, -8);
+    EXPECT_EQ(a->geometry.vertexBuffer.idx, vertexBuffer);
+    EXPECT_EQ(b->geometry.minimum.x, -4);
+    ASSERT_EQ(bl_freeGeometryData(runtime->runtime, &data), BL_OK);
+    bl_Mesh sentinel{nullptr, 123};
+    options.subdivisions = {true, 20000};
+    EXPECT_EQ(bl_createGround(engine, &options, &sentinel), BL_INVALID_ARGUMENT);
+    EXPECT_EQ(sentinel._id, 123u);
+    EXPECT_EQ(bl_createGround(engine, nullptr, nullptr), BL_INVALID_ARGUMENT);
+    EXPECT_EQ(bl_createGround({first._runtime, first._id}, nullptr, &sentinel), BL_INVALID_HANDLE);
+    ASSERT_EQ(bl_disposeNode(node), BL_OK);
+    EXPECT_EQ(bl_createGround({engine._runtime, first._id}, nullptr, &sentinel), BL_INVALID_HANDLE);
+}
+
+TEST_F(LiteNativeGraphics, GroundFactoryAllocationFailuresNeverPublishPartialMeshOrData)
+{
+    struct Failure
+    {
+        bl_Allocator original;
+        size_t calls{};
+        size_t fail{};
+    };
+    const auto live = [&] {
+        size_t count{};
+        for (size_t i = 0; i < runtime->runtime->count; ++i)
+        {
+            const auto* record = runtime->runtime->records[i];
+            count += record && !record->disposed;
+        }
+        return count;
+    };
+    for (size_t fail = 1; fail <= 24; ++fail)
+    {
+        Failure state{runtime->runtime->allocator, 0, fail};
+        const size_t before = live();
+        runtime->runtime->allocator = {&state,
+            [](void* user, size_t bytes, size_t alignment) -> void* {
+                auto& value = *static_cast<Failure*>(user);
+                if (++value.calls == value.fail)
+                {
+                    return nullptr;
+                }
+                return value.original.allocate(value.original.userData, bytes, alignment);
+            },
+            [](void* user, void* memory, size_t bytes, size_t alignment) {
+                auto& value = *static_cast<Failure*>(user);
+                value.original.deallocate(value.original.userData, memory, bytes, alignment);
+            }};
+        bl_Mesh candidate{nullptr, 123};
+        const auto status = bl_createGround(engine, nullptr, &candidate);
+        runtime->runtime->allocator = state.original;
+        if (state.calls >= fail)
+        {
+            EXPECT_EQ(status, BL_OUT_OF_MEMORY);
+            EXPECT_EQ(candidate._id, 123u);
+            EXPECT_EQ(candidate._runtime, nullptr);
+            EXPECT_EQ(live(), before);
+        }
+        else
+        {
+            ASSERT_EQ(status, BL_OK);
+            bl_SceneNode node{};
+            ASSERT_EQ(bl_meshNode(candidate, &node), BL_OK);
+            ASSERT_EQ(bl_disposeNode(node), BL_OK);
+            EXPECT_EQ(live(), before);
+        }
+    }
+}
+
 TEST_F(LiteNativeGraphics, CompilerPartialFailureReleasesExactlyOnceAndCanRetry)
 {
     struct CompilerCalls
