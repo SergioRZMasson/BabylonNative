@@ -274,6 +274,25 @@ only independently host-initialized bgfx, never Lite-owned initialization.
 The host serializes lifecycle operations. Borrowed hosts grant exclusive view
 ranges and provide a real submitted-work synchronization callback.
 
+### Deferred per-sampler anisotropy
+
+Exact `maxAnisotropy` support is deferred so it does not block implementing and
+evaluating more scenes (user decision, 2026-10-13). The pinned bgfx D3D11 path
+offers a global off/maximum selection, not the original glTF loader's
+per-sampler value of 4. We will discuss the appropriate API/backend support
+with bgfx maintainers later; no dependency patch or global setting change is
+being made now.
+
+Scene35 currently uses constant 1x1 material factor textures, with source-requested
+anisotropy 4 and observed native anisotropy 1. Implementation can proceed with
+a documented sampling-equivalence check for those textures, not an exact
+sampler-descriptor claim. Preserve requested/effective settings in qualification
+receipts. Future nonconstant textured scenes need their own quality comparisons;
+this decision does not establish equal filtering quality for them.
+HDR bit-exact resource checks and the remaining framebuffer, lifetime and
+performance qualification gates stay unchanged. Scene35 remains work in progress,
+not a completed benchmark or full glTF/PBR support claim.
+
 ## Building
 
 ### Contributor style checks

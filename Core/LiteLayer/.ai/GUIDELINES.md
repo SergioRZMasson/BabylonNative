@@ -183,6 +183,17 @@ Do not disable the checks or bypass them with formatting-off markers.
   updates, buffer identity and deferred buffer retirement.
 - Texture color space, filters, addressing, alpha and bounds are real semantics,
   not tuning knobs to change silently for a better benchmark.
+- User-approved deferral (2026-10-13): exact per-sampler `maxAnisotropy` support
+  is future bgfx integration work, not a blocker for continued scene coverage.
+  Use the existing supported sampler path and record source-requested versus
+  effective anisotropy explicitly. Scene35's constant 1x1 factor textures may
+  proceed with effective 1 rather than requested 4 after sampling-equivalence
+  checks; do not claim exact descriptor parity. Nonconstant textures require
+  their own rendering/quality evidence, not inferred equivalence. Keep other
+  sampler, HDR, resource, ownership and workload checks intact. Do not enable
+  global maximum anisotropy, inject platform sampler overrides or modify bgfx
+  without a separately reviewed change. Discuss exact per-sampler support with
+  bgfx maintainers in future work; this deferral authorizes no outreach.
 - Audio Core manages original routing/volume/ramp/retry semantics over actual
   host primitives. No host means explicit unavailability; offline output is
   not a claim of audibility.
