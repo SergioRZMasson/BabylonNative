@@ -48,6 +48,13 @@ or glTF rendering feature**. For example, Avocado currently reports unsupported
 normal/occlusion material inputs instead of silently displaying an incomplete
 material.
 
+The first isolated compiler-output cache and same-pin reduced-Tint measurements
+are recorded in [the runtime shader investigation](LiteRuntimeShaderInvestigation.md).
+They show less repeated compiler work and a smaller linked probe, not a new
+production compiler or full model-load/first-frame performance result. A
+diagnostic-context cache-key gap is explicitly tracked; direct Tint HLSL remains
+a separate compatibility experiment.
+
 ### Scene35 asset slice (qualification in progress)
 
 The single C99 header now contains **199 functions**: the frozen 181-function
