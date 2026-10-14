@@ -267,7 +267,10 @@ static void descriptors(J_Result* storage, const Json& json, bl_Bytes binary,
     out->buffers = bufferData;
     out->bufferCount = buffers.size();
     uint8_t* ownedBinary = (uint8_t*)allocate(storage, binary.count, 1);
-    memcpy(ownedBinary, binary.data, binary.count);
+    if (binary.count)
+    {
+        memcpy(ownedBinary, binary.data, binary.count);
+    }
     for (size_t i = 0; i < buffers.size(); ++i)
     {
         const Json& item = buffers[i];
@@ -869,18 +872,28 @@ static bl_Status parseGltfCommon(void* user, bl_Bytes bytes, bl_String base, bl_
             fail("Invalid GLB JSON range");
         }
         size_t binHeader = 20 + jsonBytes;
-        if (bytes.count - binHeader < 8 ||
-            little32(bytes.data + binHeader + 4) != UINT32_C(0x004e4942))
+        bool hasBin = binHeader != bytes.count;
+        bl_Bytes binary = {};
+        if (hasBin)
+        {
+            if (bytes.count - binHeader < 8 ||
+                little32(bytes.data + binHeader + 4) != UINT32_C(0x004e4942))
+            {
+                fail("GLB BIN chunk missing", 165);
+            }
+            size_t binBytes = little32(bytes.data + binHeader);
+            if ((binBytes & 3) || binBytes != bytes.count - binHeader - 8)
+            {
+                fail("Invalid GLB BIN range");
+            }
+            binary = {bytes.data + binHeader + 8, binBytes};
+        }
+        Json json = Json::parse(bytes.data + 20, bytes.data + 20 + jsonBytes);
+        if (!hasBin && !array(json, "buffers").empty())
         {
             fail("GLB BIN chunk missing", 165);
         }
-        size_t binBytes = little32(bytes.data + binHeader);
-        if ((binBytes & 3) || binBytes != bytes.count - binHeader - 8)
-        {
-            fail("Invalid GLB BIN range");
-        }
-        Json json = Json::parse(bytes.data + 20, bytes.data + 20 + jsonBytes);
-        descriptors(storage, json, {bytes.data + binHeader + 8, binBytes}, out);
+        descriptors(storage, json, binary, out);
         if (extended)
         {
             textureDescriptors(storage, json, extended);

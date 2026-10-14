@@ -103,11 +103,11 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
     {
         return BL_INVALID_ARGUMENT;
     }
-    if (data->unsupportedFeatures || data->bufferCount != 1)
+    if (data->unsupportedFeatures || data->bufferCount > 1)
     {
-        return unsupported(reason,
-                           "Use a self-contained GLB2 with one BIN buffer and no unsupported "
-                           "extensions or external buffer URIs");
+        return unsupported(
+            reason, "Use a self-contained GLB2 with at most one BIN buffer and no unsupported "
+                    "extensions or external buffer URIs");
     }
     if (data->animationCount || data->skinCount)
     {
@@ -148,22 +148,31 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
             return unsupported(reason, "Unsupported extensionsRequired entry");
         }
     }
-    const bl_AssetBuffer* buffer = data->buffers;
-    if (!assetSpan(buffer->bytes.data, buffer->bytes.count, 1, 1) || !l_string(buffer->uri) ||
-        buffer->declaredByteLength > buffer->bytes.count ||
-        (uintptr_t)buffer->bytes.data > UINTPTR_MAX - buffer->declaredByteLength)
+    for (size_t i = 0; i < data->bufferCount; ++i)
     {
-        return BL_INVALID_ARGUMENT;
-    }
-    if (buffer->uri.length)
-    {
-        return unsupported(reason, "External/data buffer URIs are unsupported; use GLB BIN data");
+        const bl_AssetBuffer* buffer = data->buffers + i;
+        if (!assetSpan(buffer->bytes.data, buffer->bytes.count, 1, 1) || !l_string(buffer->uri) ||
+            buffer->declaredByteLength > buffer->bytes.count ||
+            (uintptr_t)buffer->bytes.data > UINTPTR_MAX - buffer->declaredByteLength)
+        {
+            return BL_INVALID_ARGUMENT;
+        }
+        if (buffer->uri.length)
+        {
+            return unsupported(reason,
+                               "External/data buffer URIs are unsupported; use GLB BIN data");
+        }
     }
     for (size_t i = 0; i < data->bufferViewCount; ++i)
     {
         const bl_AssetBufferView* view = data->bufferViews + i;
         size_t offset = l_assetViewOffset(data, (uint32_t)i, full);
-        if (view->buffer != 0 || offset > buffer->declaredByteLength ||
+        if (view->buffer >= data->bufferCount)
+        {
+            return BL_INVALID_ARGUMENT;
+        }
+        const bl_AssetBuffer* buffer = data->buffers + view->buffer;
+        if (offset > buffer->declaredByteLength ||
             view->byteLength > buffer->declaredByteLength - offset ||
             (full && full->bufferViewInputs[i].target.present &&
              full->bufferViewInputs[i].target.value != 34962 &&

@@ -133,6 +133,18 @@ and backgrounds fail explicitly. Authored glTF cameras are ignored for rendering
 not a loading blocker: camera counts/reference validation remain, camera-bearing
 node transforms/meshes/children/membership remain, and the sandbox uses native
 auto-framed orbit controls rather than instantiating or selecting authored cameras.
+Empty/no-buffer GLBs, including legal JSON-only containers without a BIN chunk,
+are accepted through raw services 2/3/4. Declared BIN buffers still require their
+complete payload and valid references; external/multiple buffers remain unsupported.
+Empty and camera-only selected scenes retain the source root/node hierarchy.
+The sandbox distinguishes selected-scene primitives from file-level unused meshes,
+replaces prior geometry with a zero-draw clear frame and uses an explicit finite
+host empty-scene orbit camera (origin, radius 1, near .01, far 1000). Nonempty
+auto-framing and the public `bl_createDefaultCamera` contract remain unchanged.
+Optional-BIN acceptance is an intentional glTF 2.0 correctness correction to
+Lite 1.32.0's GLB parser, which assumes a BIN header exists. It does not change
+the reviewed C99 layouts, source selected-root/reflection semantics or the
+original default-camera algorithm.
 Complete authored RGBD environments still
 require an explicit BRDF resource.
 Environment skip flags default to false; the source scene explicitly skips both

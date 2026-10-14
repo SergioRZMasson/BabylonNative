@@ -9,6 +9,7 @@
 #include <babylon_lite_asset_decoder.h>
 #include <babylon_lite_shader_compiler.h>
 #include "AssetIO.h"
+#include "SceneCamera.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -194,6 +195,10 @@ struct Model
     size_t sourcePrimitives = 0;
     size_t sourceVertices = 0;
     size_t sourceMaterials = 0;
+    size_t selectedPrimitives = 0;
+    size_t selectedNodes = 0;
+    uint32_t selectedScene = 0;
+    bool emptyCamera = false;
 };
 
 struct Host
@@ -222,12 +227,19 @@ static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_Par
 {
     auto* host = static_cast<Host*>(user);
     bl_Status status = host->decoderService.parseGltf(host->decoderService.userData, bytes, base, out);
-    if (status == BL_OK)
+    if (status != BL_OK)
+    {
+        return status;
+    }
+    try
     {
         host->parsedCounts.sourceMeshes = out->meshCount;
         host->parsedCounts.sourceMaterials = out->materialCount;
         host->parsedCounts.sourcePrimitives = 0;
         host->parsedCounts.sourceVertices = 0;
+        host->parsedCounts.selectedScene = out->defaultScene.present ? out->defaultScene.value : 0;
+        host->parsedCounts.selectedPrimitives = 0;
+        host->parsedCounts.selectedNodes = 0;
         for (size_t i = 0; i < out->meshCount; ++i)
         {
             const auto& mesh = out->meshes[i];
@@ -247,6 +259,45 @@ static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_Par
                 }
             }
         }
+        // Core validates all references; host counts only the selected scene for its camera policy.
+        std::vector<uint32_t> pending;
+        std::vector<bool> seen(out->nodeCount, false);
+        if (host->parsedCounts.selectedScene < out->sceneCount)
+        {
+            const auto& scene = out->scenes[host->parsedCounts.selectedScene];
+            for (size_t i = 0; i < scene.rootCount; ++i)
+            {
+                pending.push_back(scene.roots[i]);
+            }
+        }
+        while (!pending.empty())
+        {
+            uint32_t index = pending.back();
+            pending.pop_back();
+            if (index >= out->nodeCount || seen[index])
+            {
+                continue;
+            }
+            seen[index] = true;
+            ++host->parsedCounts.selectedNodes;
+            const auto& node = out->nodes[index];
+            if (node.mesh.present && node.mesh.value < out->meshCount)
+            {
+                host->parsedCounts.selectedPrimitives += out->meshes[node.mesh.value].primitiveCount;
+            }
+            for (size_t i = 0; i < node.childCount; ++i)
+            {
+                pending.push_back(node.children[i]);
+            }
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    catch (...)
+    {
+        return BL_HOST_ERROR;
     }
     return status;
 }
@@ -357,6 +408,10 @@ static void loadModel(Host& host, const std::wstring& path)
     }
     if (status == BL_OK)
     {
+        candidate.emptyCamera = host.parsedCounts.selectedPrimitives == 0;
+    }
+    if (status == BL_OK && !candidate.emptyCamera)
+    {
         bl_EnvironmentOptions options = {};
         options.brdfUrl = span(brdf);
         options.skipGround = BL_BOOL_TRUE;
@@ -365,7 +420,7 @@ static void loadModel(Host& host, const std::wstring& path)
     }
     if (status == BL_OK)
     {
-        status = bl_createDefaultCamera(candidate.scene, &candidate.camera);
+        status = sandboxSceneCamera(candidate.scene, candidate.emptyCamera, &candidate.camera);
     }
     if (status == BL_OK)
     {
@@ -390,9 +445,13 @@ static void loadModel(Host& host, const std::wstring& path)
     if (status == BL_OK)
     {
         status = bl_getEngineStats(host.engine, &stats);
-        if (status == BL_OK && !stats.drawCallCount)
+        if (status == BL_OK && !candidate.emptyCamera && !stats.drawCallCount)
         {
             status = BL_UNSUPPORTED;
+        }
+        else if (status == BL_OK && candidate.emptyCamera && stats.drawCallCount)
+        {
+            status = BL_HOST_ERROR;
         }
     }
     host.loadStatus = status;
@@ -416,12 +475,16 @@ static void loadModel(Host& host, const std::wstring& path)
     candidate.sourcePrimitives = host.parsedCounts.sourcePrimitives;
     candidate.sourceVertices = host.parsedCounts.sourceVertices;
     candidate.sourceMaterials = host.parsedCounts.sourceMaterials;
+    candidate.selectedPrimitives = host.parsedCounts.selectedPrimitives;
+    candidate.selectedNodes = host.parsedCounts.selectedNodes;
+    candidate.selectedScene = host.parsedCounts.selectedScene;
     host.model = std::move(candidate);
     ++host.successfulDrops;
     title(host, "Loaded " + utf8(std::filesystem::path(path).filename().wstring()) + " | " +
                     std::to_string(host.model.sourceMeshes) + " source meshes / " +
                     std::to_string(host.model.sourceVertices) + " vertices / " +
                     std::to_string(host.model.sourceMaterials) + " materials / " +
+                    std::to_string(host.model.selectedPrimitives) + " selected primitives / " +
                     std::to_string(stats.drawCallCount) +
                     " actual draws | left-drag orbit, wheel zoom | drop another GLB");
 }
@@ -758,6 +821,10 @@ int wmain(int argc, wchar_t** argv)
                        << ",\"sourcePrimitives\":" << host.model.sourcePrimitives
                        << ",\"sourceVertices\":" << host.model.sourceVertices
                        << ",\"sourceMaterials\":" << host.model.sourceMaterials
+                       << ",\"selectedScene\":" << host.model.selectedScene
+                       << ",\"selectedNodes\":" << host.model.selectedNodes
+                       << ",\"selectedPrimitives\":" << host.model.selectedPrimitives
+                       << ",\"emptySceneCamera\":" << (host.model.emptyCamera ? "true" : "false")
                        << ",\"visible\":" << (IsWindowVisible(host.window) ? "true" : "false")
                        << ",\"allocatorLiveBytes\":" << host.memory.bytes << "}\n";
                 report.flush();

@@ -61,6 +61,22 @@ Accessor ranges end at the final element, not at a full trailing stride: a singl
 elements need no extra trailing padding. Stride limits and checked overruns remain.
 v2/v3 defaults/layouts remain unchanged and still reject sparse inputs explicitly.
 Camera and texture behavior is retained across v4; environment parsing stays v2.
+Legal JSON-only GLBs need no BIN chunk when they declare no buffer. Empty assets,
+absent scenes and camera-only scenes load successfully; a declared buffer still
+requires its complete BIN payload, and invalid references/ranges remain errors.
+Core retains the synthetic root and selected-node names/TRS/children even when
+there are no renderable meshes. v4's already supported implicit-zero accessor
+path also works without a buffer; this does not invent missing declared data.
+
+The host counts primitives reachable from the selected scene separately from
+file-level meshes, including unused meshes or other scenes. A selected scene
+without primitives replaces the previous model and renders only its clear color,
+with **zero actual draws**, not a placeholder. It needs no PBR lighting upload.
+Its explicit host camera policy is an orbit camera centered at `(0,0,0)`, radius
+`1`, alpha `-pi/2`, beta `pi/2`, near `0.01`, far `1000`. Native controls remain
+attached. Nonempty scenes still use `bl_createDefaultCamera`; its public/source
+contract is unchanged, and other camera/render failures still propagate.
+
 Missing normals keep the original generated CPU storage, but imported PBR derives
 flat face normals, including its mapped-normal fallback. Authored tangents are
 ignored for shading when NORMAL is absent. Shared materials select per-mesh
@@ -191,6 +207,16 @@ reference has no upstream GLB variant; its test GLB is labeled a container adapt
 with only BIN URI removal, container encoding and padding, not an unchanged real GLB.
 `GenerateCameraFixtures.py` covers ignored perspective/orthographic definitions,
 camera-bearing transformed mesh hierarchies and camera-free equivalents.
+`GenerateEmptyFixtures.py` creates independent labeled empty/no-BIN, camera-only,
+selected-empty/unused-mesh, implicit-zero and malformed resource/reference cases.
+Run `LiteAssetEmptyTests <fixture-directory>` for raw services 2/3/4, URI/BYTES,
+metadata/root/TRS, ownership/stale identity, partial-result and OOM checks without
+initializing graphics. Run
+`LiteAssetEmptyGpuTests <fixture-directory> <lighting-directory> <fresh-output>`
+for actual clear/readback, nonempty recovery, faults and repeated replacement
+with real submitted-work retirement. `VerifyEmptyCaptures.py <smoke-output>
+<expected-json>` checks every visible drop's selected identity/counts, complete
+empty clear, nonempty pixels and byte-exact failure retention.
 
 Build
 `LiteAssetTextureTests` and run it with an unchanged embedded JPEG-plus-PNG GLB
@@ -215,5 +241,7 @@ The UTF-8 list contains one absolute file path per line. Smoke mode creates real
 Win32 `WM_DROPFILES` payloads, uses the same drop handler and native API, captures
 actual GPU BGRA frames, and exits after the list. `events.jsonl` records outcomes,
 active model identity, source counts, visible-window status and draw counts;
+selected-scene/node/primitive counts and the explicit empty-scene camera path
+are recorded separately from file-level counts;
 `teardown.json` records runtime/decoder allocator cleanup. These checks are not
 pixel-perfect source qualification or performance measurements.
