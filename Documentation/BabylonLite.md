@@ -20,9 +20,21 @@ are carried by the static target.
 
 ## Components
 
-### Current priority: runtime GLB loading and manual sandbox
+### Current priority: broad native GLB compatibility
 
-The immediate deliverable is the minimum reusable native GLB loading API and
+User decision, 2026-10-14: focus **100% on GLB loading implementation** and do
+not resume shader-compilation investigation until broad valid-GLB loading is
+complete. The implemented static-model subset below is a starting milestone,
+not completion. Work now expands materials/alpha, accessors and geometry,
+resources, skins/animation/morphs, compression and extension coverage in
+individually reviewed batches, retaining explicit failure/lifetime behavior.
+Existing compiler/cache/direct-Tint experiment artifacts are preserved and
+paused; the current production shader service remains in use. Material WGSL
+needed for a loading feature is in scope, compiler-strategy research is not.
+
+### Implemented baseline: runtime GLB loading and manual sandbox
+
+The initial deliverable was the minimum reusable native GLB loading API and
 a visible, interactive native sandbox that accepts arbitrary `.glb` file paths
 by drag and drop (user decision, 2026-10-13). It must load raw model data at
 runtime, frame the model automatically, permit repeated model replacement and
@@ -35,8 +47,8 @@ and extensions must be listed explicitly. This is not a claim of every glTF
 extension, animation or compressed format. Pixel-perfect scene35 rendering,
 full camera controls and comparative benchmarks are deferred, not blockers.
 Native memory/resource safety remains required. The existing shader compiler is
-an interim implementation; shader-translation options will be evaluated after
-the native loader and manual testing application are working.
+an interim implementation; further shader-translation investigation now waits
+for the expanded loader goal, not merely a usable static-model sandbox.
 
 The first common-static-model loader/sandbox milestone is now implemented:
 [`Apps/LiteTests/LiteSandbox/README.md`](../Apps/LiteTests/LiteSandbox/README.md)

@@ -281,18 +281,26 @@ For measurements and interaction with host agents:
 
 ## 8. Test-driven implementation and rewrite workflow
 
-Current milestone priority (user decision, 2026-10-13): finish the minimum
-reusable **native runtime GLB loader**, then a visible native application for
-drag-and-drop testing of different GLBs. Pixel-perfect scene35 images and full
-camera-control implementation are not acceptance prerequisites for this milestone.
-Preserve their existing results; stop expanding those diagnostics. Keep parsing,
-typed-handle, allocation, failure, ownership and GPU-retirement safety checks.
+Current priority (user decision, 2026-10-14): **focus 100% on native GLB loading
+implementation until broad valid-GLB compatibility is complete**. The minimum
+static-model loader and visible drag-and-drop sandbox are implemented, not the
+finish line. Expand real material, geometry/accessor, resource, deformation,
+animation, compression and extension coverage in separately reviewed feature
+batches. Preserve native allocation, identity, failure, ownership and actual
+GPU-retirement safety throughout.
+
+All shader-compilation strategy investigation is paused: no compiler comparison,
+cache/direct-Tint adoption, compiler-closure optimization or shader benchmarking.
+Use the current working production shader service provisionally. Material WGSL
+and interface changes strictly necessary to implement a GLB feature are loader
+implementation, not permission to restart compiler research.
+
 Load raw files/bytes at runtime without asset-name/hash/count specialization or
-regeneration. Exercise varied models and record the exact supported features;
-unsupported data must produce actionable errors, not silent substitutions.
-The sandbox is an outside-Core host, not a browser or new engine framework.
-Use the current working shader service provisionally; evaluating a replacement
-shader-translation strategy comes after the loader is usable for manual testing.
+regeneration, and use the native sandbox for varied-model testing. Record exact
+feature/required-extension coverage and remaining failures; do not claim "any
+valid GLB" from a passing subset or silently ignore unsupported required features.
+The sandbox remains an outside-Core host. Pixel-perfect scene35 diagnostics,
+exact anisotropy and full camera controls remain deferred, not new prerequisites.
 
 1. Read this policy, the entire relevant public contract, original TS bodies,
    existing native tests and the performance report before designing changes.
