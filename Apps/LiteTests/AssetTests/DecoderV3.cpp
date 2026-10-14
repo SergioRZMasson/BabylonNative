@@ -79,7 +79,8 @@ int main()
         R"("textures":[{"source":0,"sampler":0}],)"
         R"("samplers":[{},{"wrapS":10497,"wrapT":33071,"minFilter":9985,"magFilter":9728}],)"
         R"("materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0},)"
-        R"("baseColorFactor":[0.1234567890123456,1,1,1],"metallicRoughnessTexture":{"index":0,"texCoord":1}},)"
+        R"("baseColorFactor":[0.1234567890123456,1,1,0.4999],"metallicRoughnessTexture":{"index":0,"texCoord":1}},)"
+        R"("alphaMode":"MASK","alphaCutoff":1.5,)"
         R"("normalTexture":{"index":0,"scale":0},"occlusionTexture":{"index":0,"strength":0},)"
         R"("emissiveTexture":{"index":0}}]})";
     auto bytes = glb(source);
@@ -96,7 +97,11 @@ int main()
     old.structSize = sizeof(old);
     old.version = BL_ASSET_DOCUMENT_VERSION;
     require(legacy.parseGltf(legacy.userData, {bytes.data(), bytes.size()}, {}, &old) == BL_OK &&
-                old.imageCount == 1 && old.materialCount == 1, "legacy raw counts protocol still works");
+                old.imageCount == 1 && old.materialCount == 1 &&
+                old.materials[0].alphaMode == BL_ASSET_ALPHA_MASK &&
+                old.materials[0].alphaCutoff == 1.5 &&
+                old.materials[0].baseColorFactor.a == 0.4999,
+            "legacy raw counts and existing exact alpha fields still work");
     legacy.releaseGltf(legacy.userData, &old);
     auto parsed = result();
     require(current.parseGltf(current.userData, {bytes.data(), bytes.size()}, {},
@@ -118,6 +123,12 @@ int main()
     require(parsed.document.materials[0].hasBaseColorFactor &&
                 parsed.document.materials[0].baseColorFactor.r == 0.1234567890123456,
             "source double factor precision retained");
+    require(parsed.document.materials[0].baseColorFactor.a == 0.4999 &&
+                parsed.document.materials[0].hasAlphaMode &&
+                parsed.document.materials[0].alphaMode == BL_ASSET_ALPHA_MASK &&
+                parsed.document.materials[0].hasAlphaCutoff &&
+                parsed.document.materials[0].alphaCutoff == 1.5,
+            "alpha source presence, factor precision and cutoff above one retained");
     require(parsed.materialInputs[0].normal.present && parsed.materialInputs[0].emissive.present &&
                 parsed.document.materials[0].textureInfoFields == 31,
             "unimplemented image slots returned as raw data rather than ignored");

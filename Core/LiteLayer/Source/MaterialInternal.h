@@ -82,6 +82,7 @@ struct L_Material
     bl_Texture2D pbrEmissiveTexture;
     bl_Vec3 pbrEmissiveFactor;
     double pbrNormalScale;
+    double pbrAlphaCutoff;
     bool pbrNormalUv1;
     bool pbrOcclusionUv1;
     bool pbrEmissiveUv1;

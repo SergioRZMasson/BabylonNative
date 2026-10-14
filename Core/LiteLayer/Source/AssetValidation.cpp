@@ -215,17 +215,18 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         if ((material->hasMetallicFactor && !isfinite(material->metallicFactor)) ||
             (material->hasRoughnessFactor && !isfinite(material->roughnessFactor)) ||
             (material->hasEmissiveFactor && !l_vec(material->emissiveFactor)) ||
-            (material->hasAlphaCutoff && !isfinite(material->alphaCutoff)) ||
+            (material->hasAlphaCutoff &&
+             (!isfinite(material->alphaCutoff) || material->alphaCutoff < 0)) ||
             (material->hasBaseColorFactor &&
              (!isfinite(material->baseColorFactor.r) || !isfinite(material->baseColorFactor.g) ||
-              !isfinite(material->baseColorFactor.b) || !isfinite(material->baseColorFactor.a))))
+              !isfinite(material->baseColorFactor.b) || !isfinite(material->baseColorFactor.a) ||
+              material->baseColorFactor.a < 0 || material->baseColorFactor.a > 1)))
         {
             return BL_INVALID_ARGUMENT;
         }
-        if (material->unsupportedFeatures || (!extended && material->textureInfoFields) ||
-            (material->hasAlphaMode && material->alphaMode != BL_ASSET_ALPHA_OPAQUE))
+        if (material->unsupportedFeatures || (!extended && material->textureInfoFields))
         {
-            return unsupported(reason, "Material requires unsupported texture inputs, alpha mode, "
+            return unsupported(reason, "Material requires unsupported texture inputs "
                                        "or material extension");
         }
     }

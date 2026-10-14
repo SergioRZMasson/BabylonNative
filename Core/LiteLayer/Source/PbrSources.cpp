@@ -13,7 +13,7 @@ struct SceneUniforms {
 struct MeshUniforms {world:mat4x4f,lc:u32,li:array<vec4u,4>};
 struct MaterialUniforms {
  environmentIntensity:f32,directIntensity:f32,reflectance:f32,materialAlpha:f32,
- metallicFactor:f32,roughnessFactor:f32,normalScale:f32,lightFalloffMode:f32
+ metallicFactor:f32,roughnessFactor:f32,normalScale:f32,alphaCutoff:f32
 };
 @group(0)@binding(0)var<uniform>scene:SceneUniforms;
 @group(1)@binding(0)var<uniform>mesh:MeshUniforms;
@@ -240,8 +240,8 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
     }
     if (baseImage || extra)
     {
-        const char* needle = "normalScale:f32,lightFalloffMode:f32";
-        const char* replacement = "normalScale:f32,lightFalloffMode:f32,baseColorFactor:vec4f";
+        const char* needle = "normalScale:f32,alphaCutoff:f32";
+        const char* replacement = "normalScale:f32,alphaCutoff:f32,baseColorFactor:vec4f";
         if (!replacePbrText(runtime, vertex, needle, replacement) ||
             !replacePbrText(runtime, fragment, needle, replacement))
         {
@@ -345,6 +345,22 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
                          "emissiveSampler,input.uv2")))
     {
         return BL_OUT_OF_MEMORY;
+    }
+    if (material)
+    {
+        // Factor textures retain source RGB bytes, but never quantize alpha classification.
+        if ((!baseImage || (!material->testing && !material->blending)) &&
+            !replacePbrText(runtime, fragment, "var alpha=baseColorSample.a;", "var alpha=1.0;"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+        if (material->testing &&
+            !replacePbrText(runtime, fragment, "return vec4f(color,alpha*material.materialAlpha);",
+                            "if(alpha*material.materialAlpha<material.alphaCutoff){discard;}"
+                            "return vec4f(color,1.0);"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
     }
     return BL_OK;
 }

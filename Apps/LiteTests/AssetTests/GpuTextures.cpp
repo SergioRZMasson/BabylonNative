@@ -280,6 +280,13 @@ int main(int argc, char** argv)
                     publicInfo.occlusionStrength ==
                         (inputs[3]->present ? (inputs[3]->hasStrength ? inputs[3]->strength : 1) : 0),
                 "existing public occlusionStrength reports authored/default/absent value");
+        bool blend = parsed.document.materials[0].hasAlphaMode &&
+                     parsed.document.materials[0].alphaMode == BL_ASSET_ALPHA_BLEND;
+        bool mask = parsed.document.materials[0].hasAlphaMode &&
+                    parsed.document.materials[0].alphaMode == BL_ASSET_ALPHA_MASK;
+        require(publicInfo.alphaBlend == blend && material->blending == blend &&
+                    material->testing == mask && material->depthWrite == !blend,
+                "actual imported mode controls material bucket and depth write state");
         for (unsigned i = 0; i < 5; ++i)
         {
             if (!inputs[i]->present)

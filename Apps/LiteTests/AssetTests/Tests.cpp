@@ -230,6 +230,32 @@ static void hierarchy()
     require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "nonfinite raw factor before feature dispatch");
     factor.emissiveFactor.x = 1;
     require(l_validateAsset(&data) == BL_OK, "finite emissive factor in legacy raw document");
+    for (unsigned mode = 0; mode <= BL_ASSET_ALPHA_BLEND; ++mode)
+    {
+        factor.hasAlphaMode = true;
+        factor.alphaMode = (bl_AssetAlphaMode)mode;
+        factor.hasAlphaCutoff = true;
+        factor.alphaCutoff = 0.5;
+        factor.hasBaseColorFactor = true;
+        factor.baseColorFactor = {1, 1, 1, 0.4999};
+        require(l_validateAsset(&data) == BL_OK, "all core alpha modes in legacy raw document");
+        factor.alphaCutoff = NAN;
+        require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "nonfinite raw alpha cutoff");
+        factor.alphaCutoff = -0.001;
+        require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "negative raw alpha cutoff");
+        factor.alphaCutoff = 1.5;
+        require(l_validateAsset(&data) == BL_OK, "cutoff above one is valid and rejects all");
+        factor.baseColorFactor.a = 1.001;
+        require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "raw alpha factor above one");
+        factor.baseColorFactor.a = -0.001;
+        require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "negative raw alpha factor");
+    }
+    factor.hasBaseColorFactor = false;
+    factor.hasAlphaCutoff = false;
+    factor.alphaMode = (bl_AssetAlphaMode)3;
+    require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "unknown raw alpha enum");
+    factor.hasAlphaMode = false;
+    require(l_validateAsset(&data) == BL_OK, "absent alpha fields ignore unused storage");
     data.materials = NULL;
     data.materialCount = 0;
     nodes[0].hasMatrix = true;
@@ -610,6 +636,7 @@ static void materialSourcesAndFaults()
             allocations.failAt = allocations.calls + fault;
         }
         L_Material material = {};
+        material.testing = true;
         material.pbrExtra = true;
         material.pbrNormalTexture = {r, 1};
         material.pbrOcclusionTexture = {r, 2};
@@ -629,9 +656,13 @@ static void materialSourcesAndFaults()
                         strstr(fragment.data, "occlusionSampler_,input.uv2") &&
                         strstr(fragment.data, "emissiveSampler,input.uv2") &&
                         strstr(fragment.data, "surfaceFactors:vec4f") &&
+                        strstr(fragment.data, "alpha*material.materialAlpha<material.alphaCutoff") &&
                         strstr(fragment.data, "horizonTemp*horizonTemp") &&
                         strstr(fragment.data, "if(front!=mirrored){N=-N;}"),
                     "source-derived all-role instanced tangent/UV/factor/horizon interface");
+            require(strstr(fragment.data, "discard;") >
+                        strstr(fragment.data, "textureSample(brdfLUT"),
+                    "mask discard follows all implicit derivatives without validation suppression");
         }
         else
         {

@@ -24,8 +24,18 @@ static bl_Status compileMaterialOracle(void* user, const bl_ShaderCompileRequest
     try
     {
         std::string fragment(request->base.fragment.wgsl.data, request->base.fragment.wgsl.length);
-        const std::string final = "return vec4f(color,alpha*material.materialAlpha);";
+        std::string final = "return vec4f(color,alpha*material.materialAlpha);";
         size_t offset = fragment.find(final);
+        if (offset == std::string::npos)
+        {
+            final = "return vec4f(color,1.0);";
+            offset = fragment.find(final);
+        }
+        if (offset == std::string::npos &&
+            fragment.find("struct MaterialUniforms") != std::string::npos)
+        {
+            return BL_SHADER_ERROR;
+        }
         if (offset != std::string::npos)
         {
             std::ofstream source(oracle->output / ("production-" + std::to_string(oracle->calls) + ".wgsl"));

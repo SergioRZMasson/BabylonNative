@@ -65,7 +65,9 @@ or glTF rendering feature**. The next material batch now supports native normal,
 occlusion and emissive textures/factors: Avocado's authored tangent normal map
 and BoomBox's five roles render through the same API. The pinned Avocado has no
 occlusion texture; BoomBox supplies the real shared metallic/roughness/occlusion
-case. Alpha modes, deformation/animation, other resources and extensions remain
+case. Core glTF OPAQUE/MASK/BLEND alpha modes now use actual image alpha and precise
+factor-only alpha, default/equality cutoff handling and the existing ordered
+source-over transparent path. Deformation/animation, other resources and extensions remain
 pending, not silently ignored.
 
 The first isolated compiler-output cache and same-pin reduced-Tint measurements
@@ -97,13 +99,15 @@ hierarchy/root reflection, copied instance slabs, factors, PBR shaders, HDR
 resources and camera bounds.
 
 The legacy raw-service v2 domain retains self-contained GLB, ordinary transforms,
-EXT instancing and opaque factor-only PBR. The additive service/document v3
+EXT instancing and factor-only PBR (including the existing raw alpha fields).
+The additive service/document v3
 protocol keeps all 199 function signatures and prior record layouts unchanged,
 and exposes encoded images, textures, samplers and material inputs as raw POD.
 The current native loader supports multiple meshes/primitives/materials,
 packed/interleaved FLOAT attributes, normalized U8/U16 UVs, U8/U16/U32 or generated
 indices, native-generated missing normals, mirrored ordinary nodes and opaque
-double-sided PBR. Embedded PNG/JPEG base-color, metallic/roughness, normal,
+double-sided PBR, plus core glTF MASK and straight-alpha source-over BLEND.
+Embedded PNG/JPEG base-color, metallic/roughness, normal,
 occlusion and emissive inputs use real sRGB/linear resources, UV0/1, native mip
 chains and writable pixel updates. Normal scale, authored tangents/cotangent
 fallback, occlusion strength and emissive factors retain their source semantics.

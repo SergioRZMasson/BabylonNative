@@ -73,10 +73,17 @@ bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDe
     L_Material* material = (L_Material*)record;
     material->programIndex = BL_INVALID_BGFX_HANDLE;
     material->culling = !(source && source->hasDoubleSided && source->doubleSided);
-    material->depthWrite = true;
+    bl_AssetAlphaMode alphaMode =
+        source && source->hasAlphaMode ? source->alphaMode : BL_ASSET_ALPHA_OPAQUE;
+    material->blending = alphaMode == BL_ASSET_ALPHA_BLEND;
+    material->testing = alphaMode == BL_ASSET_ALPHA_MASK;
+    material->depthWrite = !material->blending;
     material->pbrInfo = {base, orm, false, {1, 1, 1, 1}, 1,     1,   0.04, 1,
                          1,    1,   0,     false,        false, true};
     material->pbrInfo.doubleSided = !material->culling;
+    material->pbrInfo.alphaBlend = material->blending;
+    material->pbrInfo.alpha = alphaMode == BL_ASSET_ALPHA_OPAQUE ? 1 : factor.a;
+    material->pbrAlphaCutoff = source && source->hasAlphaCutoff ? source->alphaCutoff : 0.5;
     material->pbrNormalScale = 1;
     material->pbrEmissiveFactor =
         source && source->hasEmissiveFactor ? source->emissiveFactor : bl_Vec3{};

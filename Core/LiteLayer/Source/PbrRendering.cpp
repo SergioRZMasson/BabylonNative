@@ -240,6 +240,7 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     materialData[4] = (float)info->metallicFactor;
     materialData[5] = (float)info->roughnessFactor;
     materialData[6] = (float)material->pbrNormalScale;
+    materialData[7] = (float)material->pbrAlphaCutoff;
     materialData[8] = (float)info->baseColorFactor.r;
     materialData[9] = (float)info->baseColorFactor.g;
     materialData[10] = (float)info->baseColorFactor.b;
@@ -340,11 +341,33 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
         (double)meshData[0] * (meshData[5] * meshData[10] - meshData[6] * meshData[9]) -
         (double)meshData[4] * (meshData[1] * meshData[10] - meshData[2] * meshData[9]) +
         (double)meshData[8] * (meshData[1] * meshData[6] - meshData[2] * meshData[5]);
-    uint64_t cull = determinant > 0 ? BGFX_STATE_CULL_CCW : BGFX_STATE_CULL_CW;
-    bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
-                   BGFX_STATE_DEPTH_TEST_GEQUAL | (material->culling ? cull : UINT64_C(0)) |
-                   BGFX_STATE_MSAA);
+    bgfx::setState(l_pbrDrawState(material, determinant,
+                                  scene->engine->native.target.depthFormat != BL_DEPTH_NONE));
     bgfx::submit(viewId, packet->pipeline.program);
     ++scene->engine->stats.drawCallCount;
     return BL_OK;
+}
+
+uint64_t l_pbrDrawState(const L_Material* material, double determinant, bool depth)
+{
+    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_MSAA;
+    if (depth)
+    {
+        state |= BGFX_STATE_DEPTH_TEST_GEQUAL;
+        if (material->depthWrite)
+        {
+            state |= BGFX_STATE_WRITE_Z;
+        }
+    }
+    if (material->culling)
+    {
+        state |= determinant > 0 ? BGFX_STATE_CULL_CCW : BGFX_STATE_CULL_CW;
+    }
+    if (material->blending)
+    {
+        state |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA, BGFX_STATE_BLEND_ONE,
+            BGFX_STATE_BLEND_INV_SRC_ALPHA);
+    }
+    return state;
 }

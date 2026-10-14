@@ -36,7 +36,7 @@ The executable loads raw self-contained GLB2 files through `bl_loadGltf`, with
 arbitrary file paths and names. `--memory` exercises the same loader's raw byte-source
 route. There is no asset-name/hash/count dispatch or regeneration step.
 
-Implemented static geometry includes multiple nodes, meshes, primitives and opaque
+Implemented static geometry includes multiple nodes, meshes, primitives and
 PBR materials; ordinary TRS and locked affine matrices; mirrored-node winding;
 double-sided surfaces; tightly packed/interleaved FLOAT attributes; normalized
 U8/U16 UVs; U8/U16/U32 indices and nonindexed triangles. Missing normals are generated
@@ -52,6 +52,27 @@ image). Normal mapping preserves authored tangent handedness; absent tangents us
 the original source cotangent-derivative frame. Geometric/shading normals both
 follow double-sided face correction, and mapped normals enable source IBL horizon
 occlusion.
+Core glTF alpha modes are implemented. Absent `alphaMode` means OPAQUE, which ignores
+base-color alpha and writes fully opaque output. MASK defaults to cutoff 0.5, discards
+only when image alpha times factor is strictly below cutoff, and writes depth/opaque
+alpha for survivors. Factor-only MASK/BLEND uses the source factor through a Float32
+uniform, not its generated RGBA8 texture's quantized alpha. Authored image alpha remains
+linear even in sRGB textures, and its factor is applied exactly once. This intentionally
+corrects the original Lite glTF builder's factor-texture alpha quantization and possible
+double factor multiplication, without changing manual ShaderMaterial/StandardMaterial APIs.
+
+BLEND emits straight RGB/alpha and uses source-over color (`srcAlpha`, `1-srcAlpha`)
+and alpha (`one`, `1-srcAlpha`) factors. It depth-tests against opaque/MASK surfaces
+without writing depth. Existing opaque-before-transparent and stable view-space
+translation depth-before-renderOrder ordering remains authoritative; bgfx uses sequential
+submission. Transparent intersecting geometry and individual instances are not independently
+sorted: these retain the existing per-mesh translation ordering contract.
+The alpha-channel association intentionally uses source-over rather than original
+Lite PBR's additive destination-alpha factor; emitted RGB remains straight, not
+premultiplied. glTF coverage uses base-color alpha only, without Lite's optional
+specular-luminance opacity inflation. MASK discard is emitted after all implicit
+samples/normal derivatives
+so the existing production WGSL validator remains enabled and succeeds.
 UV0/UV1 selection, nearest/linear/mipmap filtering, repeat/clamp/mirror addressing and
 non-mip LOD0 clamping are retained. Core uploads a complete native-generated mip chain;
 the existing pixel-update API refreshes its levels. Exact per-sampler anisotropy remains
@@ -67,7 +88,7 @@ current executable does not yet implement animations.
 
 Skins, animation playback, morph targets, compressed geometry/images, external/data
 buffer or image URIs, unsupported vertex semantics, imported cameras, non-triangle
-modes, unsupported material extensions/alpha modes, and mirrored instancing scales
+modes, unsupported material extensions, and mirrored instancing scales
 produce explicit errors rather than dropping parts or substituting models.
 
 The existing runtime shader compiler and PBR/environment path are provisional.
@@ -101,6 +122,26 @@ capture checks, distinct/shared-role GPU resources and update/fault/churn checks
 Fresh visible disk and memory lists each produced seventeen successful loads
 and five expected retained-model errors, with zero tracked bytes at teardown.
 The public 199-function header is byte-identical to the accepted baseline.
+The alpha batch also displays the unchanged `AlphaBlendModeTest` sample
+(nine source meshes, six materials; OPAQUE, BLEND and MASK cutoffs .25/.5/.75).
+It is CC-BY-4.0 at the same glTF-Sample-Assets revision listed below; preserve
+its license, metadata and contributor attribution. Synthetic fixtures are
+explicitly separated from these unchanged real-model checks.
+
+`GenerateAlphaFixtures.py` and `LiteAssetAlphaTests` exercise labeled synthetic
+MASK/BLEND inputs through the raw decoder and unmodified production WGSL. A real
+BGRA8 plus depth framebuffer preserves all four output channels for numeric checks
+with `VerifyAlphaCaptures.py`. Cases cover factor precision around/equal to cutoff,
+image/factor multiplication, opaque alpha, straight source-over color and alpha,
+reversed overlapping submission, depth blocking/no transparent depth writes,
+double-sided/mirrored mapped surfaces, mixed phases and instances. Production
+shader strategy and the public ABI are unchanged.
+Parent acceptance independently repeated all 52 production GPU cases and 138
+numeric color/alpha checks, seven focused native/decoder regressions, the style
+gate and MASK/BLEND resource fault/update checks. Fresh visible URI and memory
+lists each completed 41 loads and nine expected retained-model errors, with
+zero tracked allocation bytes at teardown. This completes alpha modes, not the
+broader accessor/resource/deformation/extension compatibility goal.
 
 BoxTextured and BoxTexturedNonPowerOfTwo are Cesium's 2017 models, CC-BY-4.0;
 their Cesium logos have separate trademark restrictions. Keep their upstream

@@ -21,6 +21,12 @@ target_include_directories(LiteAssetTextureTests PRIVATE "${PROJECT_SOURCE_DIR}/
 target_link_libraries(LiteAssetTextureTests PRIVATE LiteLayer LiteAssetDecoder bgfx
     user32 windowscodecs ole32 d3d11)
 warnings_as_errors(LiteAssetTextureTests)
+add_executable(LiteAssetAlphaTests ../AssetTests/GpuAlpha.cpp AssetIO.cpp)
+target_compile_features(LiteAssetAlphaTests PRIVATE cxx_std_20)
+target_include_directories(LiteAssetAlphaTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+target_link_libraries(LiteAssetAlphaTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder bgfx
+    user32 windowscodecs ole32)
+warnings_as_errors(LiteAssetAlphaTests)
 add_executable(LiteAssetDecoder3Tests ../AssetTests/DecoderV3.cpp)
 target_link_libraries(LiteAssetDecoder3Tests PRIVATE LiteAssetDecoder)
 target_include_directories(LiteAssetDecoder3Tests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Include")

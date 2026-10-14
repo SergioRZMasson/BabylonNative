@@ -273,6 +273,8 @@ bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data,
         material->pbrInfo.hasBaseColorFactor = definition->hasBaseColorFactor;
         material->pbrInfo.baseColorFactor =
             definition->hasBaseColorFactor ? definition->baseColorFactor : bl_Color4{1, 1, 1, 1};
+        // Authored image alpha receives its factor in WGSL, exactly once.
+        material->pbrInfo.alpha = 1;
         const bl_Color4* factor = &material->pbrInfo.baseColorFactor;
         material->pbrInfo.hasBaseColorFactor =
             factor->r != 1 || factor->g != 1 || factor->b != 1 || factor->a != 1;
