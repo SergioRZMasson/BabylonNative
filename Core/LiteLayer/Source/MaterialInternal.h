@@ -87,6 +87,11 @@ struct L_Material
     bool pbrOcclusionUv1;
     bool pbrEmissiveUv1;
     bool pbrExtra;
+    bool pbrSpecularGlossiness;
+    bl_Vec3 pbrSpecularFactor;
+    double pbrGlossinessFactor;
+    bl_Texture2D pbrSpecularGlossinessTexture;
+    bool pbrSpecularGlossinessUv1;
 };
 
 struct L_Texture

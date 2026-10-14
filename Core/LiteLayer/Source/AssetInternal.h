@@ -19,14 +19,18 @@ struct L_Asset
 };
 
 bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDefinition* source,
-                                    bl_Material* material);
+                                    bl_Material* material,
+                                    const bl_AssetSpecularGlossinessInputs* inputs = NULL);
 bl_Status l_composeAssetMatrix(const bl_AssetNode* source, bl_TransformNodeOptions* options);
 bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason = NULL,
-                          const bl_ParsedGltf3* extended = NULL, const bl_ParsedGltf4* full = NULL);
+                          const bl_ParsedGltf3* extended = NULL, const bl_ParsedGltf4* full = NULL,
+                          const bl_ParsedGltf5* materials = NULL);
 bl_Status l_validateAssetHierarchy(bl_Runtime* runtime, const bl_ParsedGltf* data);
-bl_Status l_validateAssetTextures(const bl_ParsedGltf3* data, const char** reason);
+bl_Status l_validateAssetTextures(const bl_ParsedGltf3* data, const char** reason,
+                                  const bl_ParsedGltf5* materials = NULL);
 bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data, uint32_t index,
-                                     bl_Material material, const bl_ParsedGltf4* full = NULL);
+                                     bl_Material material, const bl_ParsedGltf4* full = NULL,
+                                     const bl_AssetSpecularGlossinessInputs* inputs = NULL);
 
 struct L_AssetAccessorReader
 {
@@ -55,6 +59,11 @@ bl_Status l_assetTriangleIndices(bl_Runtime* runtime, const bl_ParsedGltf* data,
                                  const bl_AssetPrimitive* primitive, size_t vertices,
                                  const bl_ParsedGltf4* full, bl_U32Span* indices);
 
+static_assert(__is_trivial(bl_ParsedGltf5) && __is_standard_layout(bl_ParsedGltf5) &&
+                  offsetof(bl_ParsedGltf5, document4) == 0 &&
+                  __is_trivial(bl_AssetSpecularGlossinessInputs) &&
+                  __is_standard_layout(bl_AssetSpecularGlossinessInputs),
+              "Raw v5 material inputs use full checked first-member POD storage");
 static_assert(__is_trivial(bl_ParsedGltf4) && __is_standard_layout(bl_ParsedGltf4) &&
                   offsetof(bl_ParsedGltf4, document3) == 0,
               "Raw v4 uses full checked nested first-member storage");

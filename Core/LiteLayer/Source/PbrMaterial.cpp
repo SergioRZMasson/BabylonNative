@@ -16,10 +16,11 @@ static uint8_t srgbByte(double value)
 static void pbrCleanup(bl_Runtime* runtime, L_Record* record)
 {
     L_Material* material = (L_Material*)record;
-    const bl_Texture2D textures[5] = {material->pbrInfo.baseColorTexture,
-                                      material->pbrInfo.ormTexture, material->pbrNormalTexture,
-                                      material->pbrOcclusionTexture, material->pbrEmissiveTexture};
-    for (unsigned i = 0; i < 5; ++i)
+    const bl_Texture2D textures[6] = {
+        material->pbrInfo.baseColorTexture, material->pbrInfo.ormTexture,
+        material->pbrNormalTexture,         material->pbrOcclusionTexture,
+        material->pbrEmissiveTexture,       material->pbrSpecularGlossinessTexture};
+    for (unsigned i = 0; i < 6; ++i)
     {
         L_Record* texture = l_peek(runtime, textures[i]._id);
         if (texture && ((L_Texture*)texture)->references)
@@ -28,7 +29,7 @@ static void pbrCleanup(bl_Runtime* runtime, L_Record* record)
         }
     }
     l_materialCleanup(runtime, record);
-    for (unsigned i = 0; i < 5; ++i)
+    for (unsigned i = 0; i < 6; ++i)
     {
         if (!L_NULL(textures[i]))
         {
@@ -39,23 +40,35 @@ static void pbrCleanup(bl_Runtime* runtime, L_Record* record)
 }
 
 bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDefinition* source,
-                                    bl_Material* out)
+                                    bl_Material* out,
+                                    const bl_AssetSpecularGlossinessInputs* inputs)
 {
     bl_Runtime* runtime = engine._runtime;
+    bool specGloss = inputs && inputs->present;
     bl_Color4 factor =
         source && source->hasBaseColorFactor ? source->baseColorFactor : bl_Color4{1, 1, 1, 1};
+    if (specGloss)
+    {
+        factor = inputs->hasDiffuseFactor ? inputs->diffuseFactor : bl_Color4{1, 1, 1, 1};
+    }
     double metallic = source && source->hasMetallicFactor ? source->metallicFactor : 1;
     double roughness = source && source->hasRoughnessFactor ? source->roughnessFactor : 1;
     uint8_t basePixels[4] = {srgbByte(factor.r), srgbByte(factor.g), srgbByte(factor.b),
                              unitByte(factor.a)};
     uint8_t ormPixels[4] = {255, unitByte(roughness), unitByte(metallic), 255};
+    if (specGloss)
+    {
+        memset(basePixels, 255, sizeof(basePixels));
+    }
     bl_PixelsTexture2DOptions options = {BL_ADDRESS_REPEAT, BL_ADDRESS_REPEAT, BL_FILTER_LINEAR,
                                          BL_FILTER_LINEAR, true};
     bl_Texture2D base = {};
     bl_Texture2D orm = {};
     L_TRY(bl_createTexture2DFromPixels(engine, {basePixels, 4}, 1, 1, &options, &base));
     options.srgb = false;
-    bl_Status status = bl_createTexture2DFromPixels(engine, {ormPixels, 4}, 1, 1, &options, &orm);
+    bl_Status status =
+        specGloss ? BL_OK
+                  : bl_createTexture2DFromPixels(engine, {ormPixels, 4}, 1, 1, &options, &orm);
     L_Record* record = NULL;
     if (status == BL_OK)
     {
@@ -83,14 +96,28 @@ bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDe
     material->pbrInfo.doubleSided = !material->culling;
     material->pbrInfo.alphaBlend = material->blending;
     material->pbrInfo.alpha = alphaMode == BL_ASSET_ALPHA_OPAQUE ? 1 : factor.a;
+    material->pbrSpecularGlossiness = specGloss;
+    if (specGloss)
+    {
+        material->pbrInfo.baseColorFactor = factor;
+        material->pbrInfo.hasBaseColorFactor =
+            factor.r != 1 || factor.g != 1 || factor.b != 1 || factor.a != 1;
+        material->pbrInfo.alpha = 1;
+        material->pbrSpecularFactor =
+            inputs->hasSpecularFactor ? inputs->specularFactor : bl_Vec3{1, 1, 1};
+        material->pbrGlossinessFactor = inputs->hasGlossinessFactor ? inputs->glossinessFactor : 1;
+    }
     material->pbrAlphaCutoff = source && source->hasAlphaCutoff ? source->alphaCutoff : 0.5;
     material->pbrNormalScale = 1;
     material->pbrEmissiveFactor =
         source && source->hasEmissiveFactor ? source->emissiveFactor : bl_Vec3{};
-    material->pbrExtra = material->pbrEmissiveFactor.x != 0 || material->pbrEmissiveFactor.y != 0 ||
-                         material->pbrEmissiveFactor.z != 0;
+    material->pbrExtra = specGloss || material->pbrEmissiveFactor.x != 0 ||
+                         material->pbrEmissiveFactor.y != 0 || material->pbrEmissiveFactor.z != 0;
     ++((L_Texture*)l_peek(runtime, base._id))->references;
-    ++((L_Texture*)l_peek(runtime, orm._id))->references;
+    if (!L_NULL(orm))
+    {
+        ++((L_Texture*)l_peek(runtime, orm._id))->references;
+    }
     if (source && source->hasName)
     {
         material->name = l_copyString(runtime, source->name);
@@ -132,6 +159,13 @@ bl_Status bl_getPbrMaterialInfo(bl_PbrMaterial handle, bl_PbrMaterialInfo* out)
     if (!out)
     {
         return BL_INVALID_ARGUMENT;
+    }
+    if (material->pbrSpecularGlossiness)
+    {
+        return l_error(handle._runtime, BL_UNSUPPORTED, __func__,
+                       "The frozen MR-oriented PBR info record cannot represent the "
+                       "specular/glossiness workflow",
+                       0);
     }
     *out = material->pbrInfo;
     return BL_OK;

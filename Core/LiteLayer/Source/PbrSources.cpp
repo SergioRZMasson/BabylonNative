@@ -223,7 +223,8 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
                        const L_Material* material, bool tangents, bool colors, bool flatNormal)
 {
     tangents = tangents && !flatNormal;
-    bool extra = material && material->pbrExtra;
+    bool specGloss = material && material->pbrSpecularGlossiness;
+    bool extra = material && (material->pbrExtra || specGloss);
     bool normal = material && !L_NULL(material->pbrNormalTexture);
     bool occlusion = material && !L_NULL(material->pbrOcclusionTexture);
     bool emissive = material && !L_NULL(material->pbrEmissiveTexture);
@@ -249,10 +250,11 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
             return BL_OUT_OF_MEMORY;
         }
     }
-    if (baseImage && !replacePbrText(runtime, fragment,
-                                     "textureSample(baseColorTexture,baseColorSampler,input.uv);",
-                                     "textureSample(baseColorTexture,baseColorSampler,input.uv)"
-                                     "*material.baseColorFactor;"))
+    if ((baseImage || specGloss) &&
+        !replacePbrText(runtime, fragment,
+                        "textureSample(baseColorTexture,baseColorSampler,input.uv);",
+                        "textureSample(baseColorTexture,baseColorSampler,input.uv)"
+                        "*material.baseColorFactor;"))
     {
         return BL_OUT_OF_MEMORY;
     }
@@ -264,6 +266,45 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
             !replacePbrText(runtime, fragment, field, fields) ||
             !replacePbrText(runtime, fragment, "var emissive:vec3f;",
                             "var emissive=material.surfaceFactors.xyz;"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (specGloss)
+    {
+        bool mapped = !L_NULL(material->pbrSpecularGlossinessTexture);
+        const char* bindings = mapped
+                                   ? "@group(1)@binding(4)var specGlossTexture:texture_2d<f32>;\n"
+                                     "@group(1)@binding(5)var specGlossSampler:sampler;"
+                                   : "";
+        const char* sample =
+            mapped ? "let specGloss=textureSample(specGlossTexture,specGlossSampler,input.uv);"
+                   : "let specGloss=vec4f(1.0);";
+        const char* factors = "surfaceFactors:vec4f,specularGlossinessFactors:vec4f";
+        const char* reflectance =
+            "var colorF0=specGloss.rgb*material.specularGlossinessFactors.xyz;\n"
+            "let colorF90=vec3f(1.0);\n"
+            "let maxSpecular=max(colorF0.r,max(colorF0.g,colorF0.b));\n"
+            "var surfaceAlbedo=baseColor*(1.0-maxSpecular);";
+        if (!replacePbrText(runtime, vertex, "surfaceFactors:vec4f", factors) ||
+            !replacePbrText(runtime, fragment, "surfaceFactors:vec4f", factors) ||
+            !replacePbrText(runtime, fragment,
+                            "@group(1)@binding(4)var ormTexture:texture_2d<f32>;\n"
+                            "@group(1)@binding(5)var ormSampler:sampler;",
+                            bindings) ||
+            !replacePbrText(runtime, fragment,
+                            "let orm=textureSample(ormTexture,ormSampler,input.uv).rgb;", sample) ||
+            !replacePbrText(runtime, fragment,
+                            "var roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);",
+                            "var roughness=1.0-clamp(specGloss.a*"
+                            "material.specularGlossinessFactors.w,0.0,1.0);") ||
+            !replacePbrText(runtime, fragment, "var metallic=orm.b*material.metallicFactor;", "") ||
+            !replacePbrText(runtime, fragment,
+                            "let dielectricF0=material.reflectance;\n"
+                            "var colorF0=mix(vec3f(dielectricF0),baseColor,metallic);\n"
+                            "let colorF90=vec3f(1.0);\n"
+                            "var surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);",
+                            reflectance))
         {
             return BL_OUT_OF_MEMORY;
         }
@@ -346,7 +387,7 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
             return BL_OUT_OF_MEMORY;
         }
     }
-    if (baseUv1 || ormUv1 ||
+    if (baseUv1 || ormUv1 || (specGloss && material->pbrSpecularGlossinessUv1) ||
         (extra &&
          (material->pbrNormalUv1 || material->pbrOcclusionUv1 || material->pbrEmissiveUv1)))
     {
@@ -375,6 +416,12 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
     {
         return BL_OUT_OF_MEMORY;
     }
+    if (specGloss && material->pbrSpecularGlossinessUv1 &&
+        !replacePbrText(runtime, fragment, "specGlossSampler,input.uv",
+                        "specGlossSampler,input.uv2"))
+    {
+        return BL_OUT_OF_MEMORY;
+    }
     if ((normal && material->pbrNormalUv1 &&
          !replacePbrText(runtime, fragment, "normalUv=input.uv;", "normalUv=input.uv2;")) ||
         (occlusion && material->pbrOcclusionUv1 &&
@@ -389,7 +436,7 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
     if (material)
     {
         // Factor textures retain source RGB bytes, but never quantize alpha classification.
-        if ((!baseImage || (!material->testing && !material->blending)) &&
+        if (((!baseImage && !specGloss) || (!material->testing && !material->blending)) &&
             !replacePbrText(runtime, fragment, "var alpha=baseColorSample.a;", "var alpha=1.0;"))
         {
             return BL_OUT_OF_MEMORY;

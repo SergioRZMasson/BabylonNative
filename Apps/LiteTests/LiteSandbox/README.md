@@ -52,7 +52,8 @@ are retained. RGB/RGBA FLOAT and normalized U8/U16 vertex colors become linear F
 RGB supplies alpha 1. Colors multiply base RGB and MASK/BLEND coverage once, never
 emissive or a second sRGB transfer. OPAQUE still outputs alpha 1.
 
-The sandbox explicitly requests the additive raw-service/document v4 protocol.
+The sandbox explicitly requests the additive raw-service/document v5 protocol,
+which retains the full nested v4 geometry/accessor storage.
 Sparse accessors retain their original raw descriptors and are resolved in Core:
 optional zero base, packed/interleaved base, checked U8/U16/U32 sparse indices and
 tightly packed value replacements, final typed bounds and normalization. Provider
@@ -118,6 +119,33 @@ non-mip LOD0 clamping are retained. Core uploads a complete native-generated mip
 the existing pixel-update API refreshes its levels. Exact per-sampler anisotropy remains
 deferred (source requests up to 4, effective native support is 1).
 
+Canonical `KHR_materials_pbrSpecularGlossiness` is supported as a distinct
+workflow, including factor-only materials and an empty extension object. Its
+diffuse RGBA, specular RGB and glossiness factors remain unquantized uniforms;
+both maps use sRGB RGB and linear alpha. Packed-map alpha controls glossiness,
+not coverage. Colored F0, diffuse energy attenuation and `1 - glossiness`
+roughness drive the real production BRDF/IBL path. Normal/occlusion/emissive,
+UV0/1, samplers, complete mip updates, vertex colors, flat normals and instances
+retain their existing behavior. SpecGloss takes precedence over an authored MR
+fallback, without decoding MR-only resources or requiring their UV channels.
+
+This intentionally corrects incomplete original Lite factor/workflow propagation.
+Existing MR rendering and getters remain unchanged. For SG the frozen
+`bl_getPbrMaterialInfo` returns `BL_UNSUPPORTED` with output unchanged and an
+explicit diagnostic because the record cannot represent this workflow. Material
+conversion, actual rendering and disposal remain valid. Imported PBR direct-light
+terms remain zero; this batch adds no direct-light support. Noncanonical extension
+capitalization and other unsupported extensions remain explicit failures; no
+optional LOD/layer fallback or filename/hash exceptions are implemented.
+
+`GenerateSpecularGlossinessFixtures.py`, `LiteAssetSpecularGlossinessTests`,
+`LiteAssetSpecularGlossinessGpuTests` and `VerifySpecularGlossinessCaptures.py`
+provide labeled synthetic raw/schema/ownership/fault, production reflection,
+colored BRDF/coverage and physical role/mip/update/sharing tests. They are separate
+from unchanged local-model viewer acceptance. New v5 PODs preserve all 151 prior
+record layouts, 37 enums and 199 Core signatures; old factories/callbacks and
+environment-v2 storage are frozen. Empty/no-BIN/zero-buffer behavior remains.
+
 Authored glTF camera definitions and attachments are ignored for rendering.
 Camera-bearing nodes retain their ordinary transforms, meshes, children and scene
 membership; no authored camera is instantiated or selected. The sandbox continues
@@ -134,7 +162,7 @@ current executable does not yet implement animations.
 
 Skins, animation playback, morph targets, compressed geometry/images, external/data
 buffer or image URIs, unsupported vertex semantics, point/line
-modes, quantization, unsupported material extensions, and mirrored instancing scales
+modes, quantization, other unsupported material extensions, and mirrored instancing scales
 produce explicit errors rather than dropping parts or substituting models.
 
 The existing runtime shader compiler and PBR/environment path are provisional.

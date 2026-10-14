@@ -16,7 +16,8 @@ bl_Status bl_createRuntime2(const bl_RuntimeOptions2* options, bl_Runtime** out)
     if (assets && (assets->structSize != sizeof(*assets) ||
                    (assets->version != BL_ASSET_SERVICE_VERSION &&
                     assets->version != BL_ASSET_SERVICE_VERSION_3 &&
-                    assets->version != BL_ASSET_SERVICE_VERSION_4) ||
+                    assets->version != BL_ASSET_SERVICE_VERSION_4 &&
+                    assets->version != BL_ASSET_SERVICE_VERSION_5) ||
                    !assets->parseGltf || !assets->releaseGltf || !assets->parseEnvironment ||
                    !assets->releaseEnvironment))
     {

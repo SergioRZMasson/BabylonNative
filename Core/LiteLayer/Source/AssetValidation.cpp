@@ -64,15 +64,27 @@ static bool assetSpan(const void* pointer, size_t count, size_t size, size_t ali
            l_typedSpan(pointer, count, alignment);
 }
 
-bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
-                          const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full)
+static bool unitFactor(double value)
 {
-    size_t expectedSize = full ? sizeof(*full) : extended ? sizeof(*extended) : sizeof(*data);
-    uint32_t expectedVersion = full       ? BL_ASSET_DOCUMENT_VERSION_4
+    return isfinite(value) && value >= 0 && value <= 1;
+}
+
+bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
+                          const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full,
+                          const bl_ParsedGltf5* materials)
+{
+    size_t expectedSize = materials  ? sizeof(*materials)
+                          : full     ? sizeof(*full)
+                          : extended ? sizeof(*extended)
+                                     : sizeof(*data);
+    uint32_t expectedVersion = materials  ? BL_ASSET_DOCUMENT_VERSION_5
+                               : full     ? BL_ASSET_DOCUMENT_VERSION_4
                                : extended ? BL_ASSET_DOCUMENT_VERSION_3
                                           : BL_ASSET_DOCUMENT_VERSION;
     if ((extended && &extended->document != data) || data->structSize != expectedSize ||
         (full && (extended != &full->document3 || (uintptr_t)full % alignof(bl_ParsedGltf4))) ||
+        (materials &&
+         (full != &materials->document4 || (uintptr_t)materials % alignof(bl_ParsedGltf5))) ||
         data->version != expectedVersion || data->gltfVersion != 2 ||
         !assetSpan(data->buffers, data->bufferCount, sizeof(bl_AssetBuffer),
                    alignof(bl_AssetBuffer)) ||
@@ -96,6 +108,12 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                             sizeof(bl_AssetAccessorInputs), alignof(bl_AssetAccessorInputs)) ||
                  !assetSpan(full->bufferViewInputs, data->bufferViewCount,
                             sizeof(bl_AssetBufferViewInputs), alignof(bl_AssetBufferViewInputs))))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    if (materials && !assetSpan(materials->specularGlossinessInputs, data->materialCount,
+                                sizeof(bl_AssetSpecularGlossinessInputs),
+                                alignof(bl_AssetSpecularGlossinessInputs)))
     {
         return BL_INVALID_ARGUMENT;
     }
@@ -124,18 +142,29 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         return BL_INVALID_ARGUMENT;
     }
     bool instancingUsed = false;
+    bool specGlossUsed = false;
     for (size_t i = 0; i < data->extensionsUsedCount; ++i)
     {
         if (!l_string(data->extensionsUsed[i]))
         {
             return BL_INVALID_ARGUMENT;
         }
-        if (!l_name(data->extensionsUsed[i], "EXT_mesh_gpu_instancing"))
+        if (l_name(data->extensionsUsed[i], "EXT_mesh_gpu_instancing"))
         {
-            return unsupported(reason, "Unsupported extensionsUsed entry; only "
-                                       "EXT_mesh_gpu_instancing is currently implemented");
+            instancingUsed = true;
         }
-        instancingUsed = true;
+        else if (materials &&
+                 l_name(data->extensionsUsed[i], "KHR_materials_pbrSpecularGlossiness"))
+        {
+            specGlossUsed = true;
+        }
+        else
+        {
+            return unsupported(reason, materials ? "Unsupported extensionsUsed entry"
+                                                 : "Unsupported extensionsUsed entry; only "
+                                                   "EXT_mesh_gpu_instancing is currently "
+                                                   "implemented");
+        }
     }
     for (size_t i = 0; i < data->extensionsRequiredCount; ++i)
     {
@@ -143,9 +172,17 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         {
             return BL_INVALID_ARGUMENT;
         }
-        if (!l_name(data->extensionsRequired[i], "EXT_mesh_gpu_instancing") || !instancingUsed)
+        bool instancing = l_name(data->extensionsRequired[i], "EXT_mesh_gpu_instancing");
+        bool specGloss =
+            materials && l_name(data->extensionsRequired[i], "KHR_materials_pbrSpecularGlossiness");
+        if (!instancing && !specGloss)
         {
             return unsupported(reason, "Unsupported extensionsRequired entry");
+        }
+        if ((instancing && !instancingUsed) || (specGloss && !specGlossUsed))
+        {
+            return materials ? BL_INVALID_ARGUMENT
+                             : unsupported(reason, "Unsupported extensionsRequired entry");
         }
     }
     for (size_t i = 0; i < data->bufferCount; ++i)
@@ -235,10 +272,25 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
             return unsupported(reason, "Material requires unsupported texture inputs "
                                        "or material extension");
         }
+        if (materials && materials->specularGlossinessInputs[i].present)
+        {
+            const bl_AssetSpecularGlossinessInputs* input = materials->specularGlossinessInputs + i;
+            if (!specGlossUsed ||
+                (input->hasDiffuseFactor &&
+                 (!unitFactor(input->diffuseFactor.r) || !unitFactor(input->diffuseFactor.g) ||
+                  !unitFactor(input->diffuseFactor.b) || !unitFactor(input->diffuseFactor.a))) ||
+                (input->hasSpecularFactor &&
+                 (!unitFactor(input->specularFactor.x) || !unitFactor(input->specularFactor.y) ||
+                  !unitFactor(input->specularFactor.z))) ||
+                (input->hasGlossinessFactor && !unitFactor(input->glossinessFactor)))
+            {
+                return BL_INVALID_ARGUMENT;
+            }
+        }
     }
     if (extended)
     {
-        L_TRY(l_validateAssetTextures(extended, reason));
+        L_TRY(l_validateAssetTextures(extended, reason, materials));
     }
     for (size_t i = 0; i < data->meshCount; ++i)
     {
@@ -398,6 +450,14 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                 const bl_AssetTextureInfo* textures[5] = {
                     &inputs->baseColor, &inputs->metallicRoughness, &inputs->normal,
                     &inputs->occlusion, &inputs->emissive};
+                if (materials &&
+                    materials->specularGlossinessInputs[primitive->material.value].present)
+                {
+                    const bl_AssetSpecularGlossinessInputs* workflow =
+                        materials->specularGlossinessInputs + primitive->material.value;
+                    textures[0] = &workflow->diffuse;
+                    textures[1] = &workflow->specularGlossiness;
+                }
                 for (unsigned k = 0; k < 5; ++k)
                 {
                     uint32_t channel =

@@ -70,6 +70,20 @@ factor-only alpha, default/equality cutoff handling and the existing ordered
 source-over transparent path. Deformation/animation, other resources and extensions remain
 pending, not silently ignored.
 
+Canonical `KHR_materials_pbrSpecularGlossiness` now has a genuine native workflow,
+selected by extension presence even without textures. Linear diffuse RGBA, colored
+specular RGB and glossiness factors multiply their respective inputs precisely;
+diffuse and packed specular/glossiness maps use sRGB RGB and linear alpha. Native
+PBR derives colored F0, `diffuse * (1 - max(F0))` and `roughness = 1 - glossiness`
+for the actual existing BRDF/IBL path. Common normal/occlusion/emissive, UV0/1,
+samplers, mip updates, vertex colors and precise OPAQUE/MASK/BLEND behavior remain.
+This explicitly corrects original Lite's incomplete factor-only/textured extension
+factor propagation, without changing the existing metallic/roughness path.
+Imported PBR direct-light terms remain zero; this is not new direct-light support.
+The frozen `bl_getPbrMaterialInfo` record cannot represent this workflow: SG calls
+return `BL_UNSUPPORTED`, preserve the output and provide an explicit diagnostic.
+Generic material conversion, rendering and disposal remain supported.
+
 The first isolated compiler-output cache and same-pin reduced-Tint measurements
 are recorded in [the runtime shader investigation](LiteRuntimeShaderInvestigation.md).
 They show less repeated compiler work and a smaller linked probe, not a new
@@ -107,8 +121,15 @@ The additive service/document **v4** keeps those layouts and all 199 Core functi
 frozen. Its four PODs describe sparse index/value locations, accessor/view field
 presence, view targets and original double min/max bounds through checked nested
 first-member full storage. The optional separate decoder's explicit
-`bl_assetDecoderService4` factory is used by the sandbox; v2/v3 factories stay
+`bl_assetDecoderService4` factory supplies this storage; v2/v3 factories stay
 unchanged and sparse remains unsupported on those older raw protocols.
+The sandbox now explicitly opts into service/document **v5** through the separate
+`bl_assetDecoderService5` factory. Its two additive PODs retain full nested v4 storage
+and dense source-presence/factor/texture supplements; all 151 prior records,
+37 enums, 199 Core signatures, old factories/callbacks and environment-v2 storage
+remain unchanged. Core owns workflow selection, validation, native material
+construction and the SG-only 80-byte material uniform layout. Valid empty/no-BIN,
+zero-buffer and selected-scene behavior remains unchanged.
 Core owns sparse/implicit-zero accessor resolution, typed matrix-column padding,
 normalization and final bounds validation. RGB/RGBA FLOAT and normalized U8/U16
 COLOR_0 becomes linear F32 RGBA and modulates base RGB/coverage once, preserving
@@ -128,7 +149,7 @@ Embedded PNG/JPEG base-color, metallic/roughness, normal,
 occlusion and emissive inputs use real sRGB/linear resources, UV0/1, native mip
 chains and writable pixel updates. Normal scale, authored tangents/cotangent
 fallback, occlusion strength and emissive factors retain their source semantics.
-Unsupported material/texture features, extensions, skinning, morphs, animation
+Other unsupported material/texture features, extensions, skinning, morphs, animation
 and backgrounds fail explicitly. Authored glTF cameras are ignored for rendering,
 not a loading blocker: camera counts/reference validation remain, camera-bearing
 node transforms/meshes/children/membership remain, and the sandbox uses native

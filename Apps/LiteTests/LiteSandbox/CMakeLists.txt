@@ -44,6 +44,32 @@ target_compile_features(LiteAssetEmptyTests PRIVATE cxx_std_20)
 target_include_directories(LiteAssetEmptyTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
 target_link_libraries(LiteAssetEmptyTests PRIVATE LiteLayer LiteAssetDecoder Babylon::LiteAssetJson bgfx)
 warnings_as_errors(LiteAssetEmptyTests)
+add_executable(LiteAssetSpecularGlossinessTests ../AssetTests/SpecularGlossiness.cpp)
+target_compile_features(LiteAssetSpecularGlossinessTests PRIVATE cxx_std_20)
+target_include_directories(LiteAssetSpecularGlossinessTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+target_link_libraries(LiteAssetSpecularGlossinessTests PRIVATE LiteLayer LiteAssetDecoder
+    Babylon::LiteAssetJson bgfx)
+warnings_as_errors(LiteAssetSpecularGlossinessTests)
+add_executable(LiteAssetSpecularGlossinessGpuTests ../AssetTests/GpuSpecularGlossiness.cpp AssetIO.cpp)
+target_compile_features(LiteAssetSpecularGlossinessGpuTests PRIVATE cxx_std_20)
+target_include_directories(LiteAssetSpecularGlossinessGpuTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+target_link_libraries(LiteAssetSpecularGlossinessGpuTests PRIVATE LiteLayer LiteShaderCompiler
+    LiteAssetDecoder Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+warnings_as_errors(LiteAssetSpecularGlossinessGpuTests)
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    set(LITE_SPECULAR_GLOSSINESS_FIXTURES "${CMAKE_CURRENT_BINARY_DIR}/SpecGlossFixtures")
+    add_custom_target(LiteAssetSpecularGlossinessFixtures
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_LIST_DIR}/../AssetTests/GenerateSpecularGlossinessFixtures.py"
+            "${LITE_SPECULAR_GLOSSINESS_FIXTURES}"
+        VERBATIM)
+    add_dependencies(LiteAssetSpecularGlossinessTests LiteAssetSpecularGlossinessFixtures)
+    add_dependencies(LiteAssetSpecularGlossinessGpuTests LiteAssetSpecularGlossinessFixtures)
+    add_test(NAME LiteAssetSpecularGlossinessTests COMMAND LiteAssetSpecularGlossinessTests
+        "${LITE_SPECULAR_GLOSSINESS_FIXTURES}"
+        "${CMAKE_CURRENT_BINARY_DIR}/specular-glossiness-cpu.json")
+endif()
 add_executable(LiteAssetEmptyGpuTests ../AssetTests/GpuEmpty.cpp AssetIO.cpp)
 target_compile_features(LiteAssetEmptyGpuTests PRIVATE cxx_std_20)
 target_include_directories(LiteAssetEmptyGpuTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")

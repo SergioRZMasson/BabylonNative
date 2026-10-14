@@ -207,7 +207,7 @@ static void numbers(const Json& value, double* out, size_t count)
     }
 }
 
-static uint64_t extensions(const Json& value, bool node = false)
+static uint64_t extensions(const Json& value, bool node = false, bool specGloss = false)
 {
     if (!value.contains("extensions"))
     {
@@ -218,7 +218,8 @@ static uint64_t extensions(const Json& value, bool node = false)
     uint64_t unsupported = 0;
     for (auto entry = list.begin(); entry != list.end(); ++entry)
     {
-        if (!node || entry.key() != "EXT_mesh_gpu_instancing")
+        if ((!node || entry.key() != "EXT_mesh_gpu_instancing") &&
+            (!specGloss || entry.key() != "KHR_materials_pbrSpecularGlossiness"))
         {
             unsupported |= BL_ASSET_UNSUPPORTED_EXTENSION;
         }
@@ -251,7 +252,7 @@ static bl_AssetAccessorShape shape(const Json& value)
 }
 
 static void descriptors(J_Result* storage, const Json& json, bl_Bytes binary,
-    bl_ParsedGltf* out)
+    bl_ParsedGltf* out, bool specGloss = false)
 {
     object(json);
     object(json.at("asset"));
@@ -569,7 +570,15 @@ static void descriptors(J_Result* storage, const Json& json, bl_Bytes binary,
         {
             target->textureInfoFields |= BL_ASSET_TEXTURE_EMISSIVE;
         }
-        target->unsupportedFeatures |= extensions(item);
+        target->unsupportedFeatures |= extensions(item, false, specGloss);
+        if (specGloss && item.contains("extensions") &&
+            item.at("extensions").contains("KHR_materials_pbrSpecularGlossiness"))
+        {
+            const Json& extension =
+                item.at("extensions").at("KHR_materials_pbrSpecularGlossiness");
+            object(extension);
+            target->unsupportedFeatures |= extensions(extension);
+        }
     }
     const Json& scenes = array(json, "scenes");
     bl_AssetScene* sceneData =
@@ -649,7 +658,7 @@ static void descriptors(J_Result* storage, const Json& json, bl_Bytes binary,
     }
 }
 
-static bl_AssetTextureInfo textureInfo(const Json& object, const char* key)
+static bl_AssetTextureInfo textureInfo(const Json& object, const char* key, bool modifiers = true)
 {
     bl_AssetTextureInfo result = {};
     if (!object.contains(key))
@@ -664,12 +673,12 @@ static bl_AssetTextureInfo textureInfo(const Json& object, const char* key)
     result.present = true;
     result.index = (uint32_t)integer(value.at("index"), UINT32_MAX);
     result.texCoord = optionalIndex(value, "texCoord");
-    result.hasScale = value.contains("scale");
+    result.hasScale = modifiers && value.contains("scale");
     if (result.hasScale)
     {
         result.scale = number(value.at("scale"));
     }
-    result.hasStrength = value.contains("strength");
+    result.hasStrength = modifiers && value.contains("strength");
     if (result.hasStrength)
     {
         result.strength = number(value.at("strength"));
@@ -741,6 +750,51 @@ static void textureDescriptors(J_Result* storage, const Json& json, bl_ParsedGlt
         inputs[i].normal = textureInfo(material, "normalTexture");
         inputs[i].occlusion = textureInfo(material, "occlusionTexture");
         inputs[i].emissive = textureInfo(material, "emissiveTexture");
+    }
+}
+
+static void specularGlossinessDescriptors(J_Result* storage, const Json& json,
+    bl_ParsedGltf5* out)
+{
+    const Json& materials = array(json, "materials");
+    bl_AssetSpecularGlossinessInputs* inputs = (bl_AssetSpecularGlossinessInputs*)allocate(
+        storage, materials.size(), sizeof(bl_AssetSpecularGlossinessInputs));
+    out->specularGlossinessInputs = inputs;
+    for (size_t i = 0; i < materials.size(); ++i)
+    {
+        const Json& material = materials[i];
+        if (!material.contains("extensions") ||
+            !material.at("extensions").contains("KHR_materials_pbrSpecularGlossiness"))
+        {
+            continue;
+        }
+        const Json& extension =
+            material.at("extensions").at("KHR_materials_pbrSpecularGlossiness");
+        object(extension);
+        bl_AssetSpecularGlossinessInputs* target = inputs + i;
+        target->present = true;
+        target->hasDiffuseFactor = extension.contains("diffuseFactor");
+        if (target->hasDiffuseFactor)
+        {
+            double tuple[4];
+            numbers(extension.at("diffuseFactor"), tuple, 4);
+            target->diffuseFactor = {tuple[0], tuple[1], tuple[2], tuple[3]};
+        }
+        target->hasSpecularFactor = extension.contains("specularFactor");
+        if (target->hasSpecularFactor)
+        {
+            double tuple[3];
+            numbers(extension.at("specularFactor"), tuple, 3);
+            target->specularFactor = {tuple[0], tuple[1], tuple[2]};
+        }
+        target->hasGlossinessFactor = extension.contains("glossinessFactor");
+        if (target->hasGlossinessFactor)
+        {
+            target->glossinessFactor = number(extension.at("glossinessFactor"));
+        }
+        target->diffuse = textureInfo(extension, "diffuseTexture", false);
+        target->specularGlossiness =
+            textureInfo(extension, "specularGlossinessTexture", false);
     }
 }
 
@@ -840,7 +894,7 @@ static bl_Status diagnostic(J_Result* storage, bl_AssetDiagnostic* target,
 }
 
 static bl_Status parseGltfCommon(void* user, bl_Bytes bytes, bl_String base, bl_ParsedGltf* out,
-    bl_ParsedGltf3* extended, bl_ParsedGltf4* full = NULL)
+    bl_ParsedGltf3* extended, bl_ParsedGltf4* full = NULL, bl_ParsedGltf5* materials = NULL)
 {
     (void)base;
     if (!user || !out || !bytes.data || !bytes.count)
@@ -893,7 +947,7 @@ static bl_Status parseGltfCommon(void* user, bl_Bytes bytes, bl_String base, bl_
         {
             fail("GLB BIN chunk missing", 165);
         }
-        descriptors(storage, json, binary, out);
+        descriptors(storage, json, binary, out, materials != NULL);
         if (extended)
         {
             textureDescriptors(storage, json, extended);
@@ -901,6 +955,10 @@ static bl_Status parseGltfCommon(void* user, bl_Bytes bytes, bl_String base, bl_
         if (full)
         {
             accessorDescriptors(storage, json, full);
+        }
+        if (materials)
+        {
+            specularGlossinessDescriptors(storage, json, materials);
         }
         return BL_OK;
     }
@@ -952,6 +1010,19 @@ static bl_Status parseGltf4(void* user, bl_Bytes bytes, bl_String base, bl_Parse
     }
     bl_ParsedGltf4* full = (bl_ParsedGltf4*)out;
     return parseGltfCommon(user, bytes, base, out, &full->document3, full);
+}
+
+static bl_Status parseGltf5(void* user, bl_Bytes bytes, bl_String base, bl_ParsedGltf* out)
+{
+    if (!out || out->structSize != sizeof(bl_ParsedGltf5) ||
+        out->version != BL_ASSET_DOCUMENT_VERSION_5 ||
+        (uintptr_t)out % alignof(bl_ParsedGltf5))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    bl_ParsedGltf5* full = (bl_ParsedGltf5*)out;
+    return parseGltfCommon(user, bytes, base, out, &full->document4.document3,
+        &full->document4, full);
 }
 
 static bl_Status parseEnvironment(void* user, bl_Bytes bytes, bl_ParsedEnvironment* out)
@@ -1121,6 +1192,17 @@ bl_Status bl_assetDecoderService4(bl_AssetDecoder* decoder, bl_AssetService* ser
         return BL_INVALID_ARGUMENT;
     }
     *service = {sizeof(bl_AssetService), BL_ASSET_SERVICE_VERSION_4, decoder, parseGltf4,
+        releaseGltf, parseEnvironment, releaseEnvironment};
+    return BL_OK;
+}
+
+bl_Status bl_assetDecoderService5(bl_AssetDecoder* decoder, bl_AssetService* service)
+{
+    if (!decoder || !service)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    *service = {sizeof(bl_AssetService), BL_ASSET_SERVICE_VERSION_5, decoder, parseGltf5,
         releaseGltf, parseEnvironment, releaseEnvironment};
     return BL_OK;
 }

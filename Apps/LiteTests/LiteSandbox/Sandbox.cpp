@@ -195,7 +195,9 @@ struct Model
     size_t sourcePrimitives = 0;
     size_t sourceVertices = 0;
     size_t sourceMaterials = 0;
+    size_t sourceSpecularGlossinessMaterials = 0;
     size_t selectedPrimitives = 0;
+    size_t selectedSpecularGlossinessPrimitives = 0;
     size_t selectedNodes = 0;
     uint32_t selectedScene = 0;
     bool emptyCamera = false;
@@ -237,9 +239,21 @@ static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_Par
         host->parsedCounts.sourceMaterials = out->materialCount;
         host->parsedCounts.sourcePrimitives = 0;
         host->parsedCounts.sourceVertices = 0;
+        host->parsedCounts.sourceSpecularGlossinessMaterials = 0;
         host->parsedCounts.selectedScene = out->defaultScene.present ? out->defaultScene.value : 0;
         host->parsedCounts.selectedPrimitives = 0;
+        host->parsedCounts.selectedSpecularGlossinessPrimitives = 0;
         host->parsedCounts.selectedNodes = 0;
+        const bl_AssetSpecularGlossinessInputs* materialInputs = nullptr;
+        if (out->version == BL_ASSET_DOCUMENT_VERSION_5 &&
+            out->structSize == sizeof(bl_ParsedGltf5))
+        {
+            materialInputs = reinterpret_cast<const bl_ParsedGltf5*>(out)->specularGlossinessInputs;
+            for (size_t i = 0; i < out->materialCount; ++i)
+            {
+                host->parsedCounts.sourceSpecularGlossinessMaterials += materialInputs[i].present;
+            }
+        }
         for (size_t i = 0; i < out->meshCount; ++i)
         {
             const auto& mesh = out->meshes[i];
@@ -283,7 +297,17 @@ static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_Par
             const auto& node = out->nodes[index];
             if (node.mesh.present && node.mesh.value < out->meshCount)
             {
-                host->parsedCounts.selectedPrimitives += out->meshes[node.mesh.value].primitiveCount;
+                const auto& mesh = out->meshes[node.mesh.value];
+                host->parsedCounts.selectedPrimitives += mesh.primitiveCount;
+                for (size_t i = 0; materialInputs && i < mesh.primitiveCount; ++i)
+                {
+                    const auto& primitive = mesh.primitives[i];
+                    if (primitive.material.present && primitive.material.value < out->materialCount)
+                    {
+                        host->parsedCounts.selectedSpecularGlossinessPrimitives +=
+                            materialInputs[primitive.material.value].present;
+                    }
+                }
             }
             for (size_t i = 0; i < node.childCount; ++i)
             {
@@ -475,7 +499,11 @@ static void loadModel(Host& host, const std::wstring& path)
     candidate.sourcePrimitives = host.parsedCounts.sourcePrimitives;
     candidate.sourceVertices = host.parsedCounts.sourceVertices;
     candidate.sourceMaterials = host.parsedCounts.sourceMaterials;
+    candidate.sourceSpecularGlossinessMaterials =
+        host.parsedCounts.sourceSpecularGlossinessMaterials;
     candidate.selectedPrimitives = host.parsedCounts.selectedPrimitives;
+    candidate.selectedSpecularGlossinessPrimitives =
+        host.parsedCounts.selectedSpecularGlossinessPrimitives;
     candidate.selectedNodes = host.parsedCounts.selectedNodes;
     candidate.selectedScene = host.parsedCounts.selectedScene;
     host.model = std::move(candidate);
@@ -703,7 +731,7 @@ int wmain(int argc, wchar_t** argv)
         bl_Allocator allocator = {&host.memory, allocate, release};
         bl_AssetService assets = {};
         checked(bl_createAssetDecoder(&allocator, &host.decoder, &assets), "Create raw GLB decoder");
-        checked(bl_assetDecoderService4(host.decoder, &assets), "Advertise raw GLB geometry inputs");
+        checked(bl_assetDecoderService5(host.decoder, &assets), "Advertise raw GLB material inputs");
         host.decoderService = assets;
         assets.userData = &host;
         assets.parseGltf = parseForHost;
@@ -821,9 +849,13 @@ int wmain(int argc, wchar_t** argv)
                        << ",\"sourcePrimitives\":" << host.model.sourcePrimitives
                        << ",\"sourceVertices\":" << host.model.sourceVertices
                        << ",\"sourceMaterials\":" << host.model.sourceMaterials
+                       << ",\"sourceSpecularGlossinessMaterials\":"
+                       << host.model.sourceSpecularGlossinessMaterials
                        << ",\"selectedScene\":" << host.model.selectedScene
                        << ",\"selectedNodes\":" << host.model.selectedNodes
                        << ",\"selectedPrimitives\":" << host.model.selectedPrimitives
+                       << ",\"selectedSpecularGlossinessPrimitives\":"
+                       << host.model.selectedSpecularGlossinessPrimitives
                        << ",\"emptySceneCamera\":" << (host.model.emptyCamera ? "true" : "false")
                        << ",\"visible\":" << (IsWindowVisible(host.window) ? "true" : "false")
                        << ",\"allocatorLiveBytes\":" << host.memory.bytes << "}\n";

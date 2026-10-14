@@ -237,7 +237,7 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     {
         meshData[i] = (float)mesh->node.world.values[i];
     }
-    float materialData[16] = {1, 1, 0.04f, 1, 1, 1, 1, 1};
+    float materialData[20] = {1, 1, 0.04f, 1, 1, 1, 1, 1};
     const bl_PbrMaterialInfo* info = &material->pbrInfo;
     materialData[0] = (float)info->environmentIntensity;
     materialData[1] = (float)info->directIntensity;
@@ -255,6 +255,10 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     materialData[13] = (float)material->pbrEmissiveFactor.y;
     materialData[14] = (float)material->pbrEmissiveFactor.z;
     materialData[15] = (float)info->occlusionStrength;
+    materialData[16] = (float)material->pbrSpecularFactor.x;
+    materialData[17] = (float)material->pbrSpecularFactor.y;
+    materialData[18] = (float)material->pbrSpecularFactor.z;
+    materialData[19] = (float)material->pbrGlossinessFactor;
     bl_Bytes blocks[3] = {};
     if (packet->pipeline.blockCount != 3)
     {
@@ -273,7 +277,10 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
         }
         else if (l_name(block->name, "material"))
         {
-            size_t floats = material->pbrExtra ? 16 : material->pbrBaseImage ? 12 : 8;
+            size_t floats = material->pbrSpecularGlossiness ? 20
+                            : material->pbrExtra            ? 16
+                            : material->pbrBaseImage        ? 12
+                                                            : 8;
             blocks[i] = {(const uint8_t*)materialData, sizeof(float) * floats};
         }
         else
@@ -302,6 +309,7 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
             bl_Texture2D handle =
                 l_name(binding->name, "baseColorTexture")   ? info->baseColorTexture
                 : l_name(binding->name, "ormTexture")       ? info->ormTexture
+                : l_name(binding->name, "specGlossTexture") ? material->pbrSpecularGlossinessTexture
                 : l_name(binding->name, "normalTexture")    ? material->pbrNormalTexture
                 : l_name(binding->name, "occlusionTexture") ? material->pbrOcclusionTexture
                 : l_name(binding->name, "emissiveTexture")  ? material->pbrEmissiveTexture

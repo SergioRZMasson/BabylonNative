@@ -353,7 +353,8 @@ static bl_Status generateAssetNormals(bl_Runtime* runtime, bl_MeshGeometry* geom
 
 static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t nodeIndex,
                            const bl_AssetPrimitive* primitive, bl_TransformNode parent,
-                           const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full)
+                           const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full,
+                           const bl_ParsedGltf5* materials)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     bl_MeshGeometry geometry = {};
@@ -426,16 +427,20 @@ static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t n
     if (L_NULL(asset->materials[materialIndex]))
     {
         bl_Material material = {};
+        const bl_AssetSpecularGlossinessInputs* inputs =
+            materials && primitive->material.present
+                ? materials->specularGlossinessInputs + primitive->material.value
+                : NULL;
         L_TRY(l_createPbrFactorMaterial(
             {runtime, asset->engine->record.id},
             primitive->material.present ? data->materials + primitive->material.value : NULL,
-            &material));
+            &material, inputs));
         asset->materials[materialIndex] = material;
         l_pin(l_peek(runtime, material._id));
         if (extended && primitive->material.present)
         {
             L_TRY(l_applyAssetMaterialInputs(asset, extended, primitive->material.value, material,
-                                             full));
+                                             full, inputs));
         }
     }
     bl_MeshProperties2 properties = {asset->materials[materialIndex], {}, false};
@@ -479,7 +484,7 @@ struct L_AssetBuildFrame
 
 static bl_Status buildNode(L_Asset* asset, const bl_ParsedGltf* data, uint32_t index,
                            bl_TransformNode parent, const bl_ParsedGltf3* extended,
-                           const bl_ParsedGltf4* full)
+                           const bl_ParsedGltf4* full, const bl_ParsedGltf5* materials)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     size_t bytes;
@@ -514,7 +519,7 @@ static bl_Status buildNode(L_Asset* asset, const bl_ParsedGltf* data, uint32_t i
             for (size_t i = 0; i < mesh->primitiveCount && status == BL_OK; ++i)
             {
                 status = buildMesh(asset, data, frame->index, mesh->primitives + i, frame->node,
-                                   extended, full);
+                                   extended, full, materials);
             }
         }
         --depth;
@@ -558,12 +563,19 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
     bl_ParsedGltf legacy = {};
     bl_ParsedGltf3 extended = {};
     bl_ParsedGltf4 full = {};
+    bl_ParsedGltf5 materialData = {};
     bool version3 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_3;
     bool version4 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_4;
-    bl_ParsedGltf3* textures = version4 ? &full.document3 : version3 ? &extended : NULL;
+    bool version5 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_5;
+    bl_ParsedGltf4* accessors = version5 ? &materialData.document4 : version4 ? &full : NULL;
+    bl_ParsedGltf3* textures = accessors ? &accessors->document3 : version3 ? &extended : NULL;
     bl_ParsedGltf& parsed = textures ? textures->document : legacy;
-    parsed.structSize = version4 ? sizeof(full) : version3 ? sizeof(extended) : sizeof(legacy);
-    parsed.version = version4   ? BL_ASSET_DOCUMENT_VERSION_4
+    parsed.structSize = version5   ? sizeof(materialData)
+                        : version4 ? sizeof(full)
+                        : version3 ? sizeof(extended)
+                                   : sizeof(legacy);
+    parsed.version = version5   ? BL_ASSET_DOCUMENT_VERSION_5
+                     : version4 ? BL_ASSET_DOCUMENT_VERSION_4
                      : version3 ? BL_ASSET_DOCUMENT_VERSION_3
                                 : BL_ASSET_DOCUMENT_VERSION;
     bool invoked = false;
@@ -580,7 +592,8 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
     }
     if (status == BL_OK)
     {
-        status = l_validateAsset(&parsed, &validationReason, textures, version4 ? &full : NULL);
+        status = l_validateAsset(&parsed, &validationReason, textures, accessors,
+                                 version5 ? &materialData : NULL);
     }
     if (status == BL_OK)
     {
@@ -664,7 +677,7 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
             for (size_t i = 0; i < parsed.scenes[scene].rootCount && status == BL_OK; ++i)
             {
                 status = buildNode(asset, &parsed, parsed.scenes[scene].roots[i], asset->root,
-                                   textures, version4 ? &full : NULL);
+                                   textures, accessors, version5 ? &materialData : NULL);
             }
         }
     }

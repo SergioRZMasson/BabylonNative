@@ -21,7 +21,28 @@ static bool wrapValid(bl_AssetOptionalIndex wrap)
     return !wrap.present || wrap.value == 10497 || wrap.value == 33071 || wrap.value == 33648;
 }
 
-bl_Status l_validateAssetTextures(const bl_ParsedGltf3* extended, const char** reason)
+static bl_Status validateSpecGlossTexture(const bl_AssetTextureInfo* input, size_t textureCount,
+                                          const char** reason)
+{
+    if (!input->present)
+    {
+        return BL_OK;
+    }
+    if ((input->unsupportedFeatures & ~UINT64_C(15)) || input->index >= textureCount ||
+        input->hasScale || input->hasStrength)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    if (input->unsupportedFeatures || (input->texCoord.present && input->texCoord.value > 1))
+    {
+        return unsupportedTexture(reason, "Specular/glossiness texture extensions and UV "
+                                          "channels beyond TEXCOORD_0/1 are unsupported");
+    }
+    return BL_OK;
+}
+
+bl_Status l_validateAssetTextures(const bl_ParsedGltf3* extended, const char** reason,
+                                  const bl_ParsedGltf5* materials)
 {
     const bl_ParsedGltf* data = &extended->document;
     if (!descriptorSpan(extended->images, data->imageCount, sizeof(bl_AssetImage),
@@ -145,6 +166,14 @@ bl_Status l_validateAssetTextures(const bl_ParsedGltf3* extended, const char** r
         {
             return BL_INVALID_ARGUMENT;
         }
+        if (materials && materials->specularGlossinessInputs[i].present)
+        {
+            const bl_AssetSpecularGlossinessInputs* workflow =
+                materials->specularGlossinessInputs + i;
+            L_TRY(validateSpecGlossTexture(&workflow->diffuse, data->textureCount, reason));
+            L_TRY(validateSpecGlossTexture(&workflow->specularGlossiness, data->textureCount,
+                                           reason));
+        }
     }
     return BL_OK;
 }
@@ -258,13 +287,32 @@ static void replaceMaterialTexture(bl_Runtime* runtime, bl_Texture2D* slot, bl_T
 }
 
 bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data, uint32_t index,
-                                     bl_Material handle, const bl_ParsedGltf4* full)
+                                     bl_Material handle, const bl_ParsedGltf4* full,
+                                     const bl_AssetSpecularGlossinessInputs* workflow)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     L_Material* material = (L_Material*)l_peek(runtime, handle._id);
     const bl_AssetMaterialInputs* inputs = data->materialInputs + index;
     const bl_AssetPbrDefinition* definition = data->document.materials + index;
-    if (inputs->baseColor.present)
+    if (material->pbrSpecularGlossiness)
+    {
+        const bl_AssetTextureInfo* roles[2] = {&workflow->diffuse, &workflow->specularGlossiness};
+        bl_Texture2D* slots[2] = {&material->pbrInfo.baseColorTexture,
+                                  &material->pbrSpecularGlossinessTexture};
+        bool* uv1[2] = {&material->pbrBaseUv1, &material->pbrSpecularGlossinessUv1};
+        for (unsigned i = 0; i < 2; ++i)
+        {
+            if (roles[i]->present)
+            {
+                bl_Texture2D texture = {};
+                L_TRY(imageTexture(asset, data, roles[i], true, &texture, full));
+                replaceMaterialTexture(runtime, slots[i], texture);
+                *uv1[i] = roles[i]->texCoord.present && roles[i]->texCoord.value == 1;
+            }
+        }
+        material->pbrBaseImage = workflow->diffuse.present;
+    }
+    else if (inputs->baseColor.present)
     {
         bl_Texture2D texture = {};
         L_TRY(imageTexture(asset, data, &inputs->baseColor, true, &texture, full));
@@ -281,7 +329,7 @@ bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data,
         material->pbrInfo.hasBaseColorFactor =
             factor->r != 1 || factor->g != 1 || factor->b != 1 || factor->a != 1;
     }
-    if (inputs->metallicRoughness.present)
+    if (!material->pbrSpecularGlossiness && inputs->metallicRoughness.present)
     {
         bl_Texture2D texture = {};
         L_TRY(imageTexture(asset, data, &inputs->metallicRoughness, false, &texture, full));

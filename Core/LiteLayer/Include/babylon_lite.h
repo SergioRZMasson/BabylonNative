@@ -2452,6 +2452,45 @@ typedef struct bl_ParsedGltf4
     const bl_AssetBufferViewInputs* bufferViewInputs;
 } bl_ParsedGltf4;
 
+#define BL_ASSET_SERVICE_VERSION_5 UINT32_C(5)
+#define BL_ASSET_DOCUMENT_VERSION_5 UINT32_C(5)
+
+typedef struct bl_AssetSpecularGlossinessInputs
+{
+    bool present;
+    bool hasDiffuseFactor;
+    bl_Color4 diffuseFactor;
+    bool hasSpecularFactor;
+    bl_Vec3 specularFactor;
+    bool hasGlossinessFactor;
+    double glossinessFactor;
+    bl_AssetTextureInfo diffuse;
+    bl_AssetTextureInfo specularGlossiness;
+} bl_AssetSpecularGlossinessInputs;
+
+/*
+ * Explicit service5 receives &result.document4.document3.document in FULL
+ * caller-owned bl_ParsedGltf5 storage, initialized with sizeof(bl_ParsedGltf5)
+ * and version5 in that prefix. All v2/v3/v4 records and callbacks stay frozen.
+ * specularGlossinessInputs has document.materialCount elements in source order.
+ * present records canonical material extension presence, independently of maps.
+ * Absent factors and absent texture-info values are ignored, not defaulted here.
+ * The ordinary v3 materialInputs still describe MR and common material inputs.
+ * Existing unsupportedFeatures bits retain unsupported nested extensions.
+ *
+ * All spans are provider-owned through exactly one releaseGltf on the SAME
+ * prefix, including partial/error/cancelled/malformed results. Input is call-only.
+ * Release uses the prefix allocation token, not mutable size/version, to free
+ * every allocation. It clears only the old prefix; tails are invalid afterwards.
+ * Reject short/mismatched/misaligned storage before reading or writing any tail.
+ * Environment callbacks remain unchanged version2.
+ */
+typedef struct bl_ParsedGltf5
+{
+    bl_ParsedGltf4 document4;
+    const bl_AssetSpecularGlossinessInputs* specularGlossinessInputs;
+} bl_ParsedGltf5;
+
 typedef enum bl_EnvironmentFace
 {
     BL_ENVIRONMENT_POSITIVE_X = 0,
@@ -2746,7 +2785,15 @@ bl_Status bl_getTextureCubeInfo(bl_TextureCube texture, bl_TextureCubeInfo* info
  * culling deferred. Source get/set vector identity is preserved by user bindings;
  * PBR base colors transport source array[0..3] via Color4, not vector aliases.
  *
- * PBR info is effective props, not raw factors: base/ORM source-created1x1
+ * Service5 implements canonical KHR_materials_pbrSpecularGlossiness, selected
+ * by extension presence, with exact diffuse/specular/glossiness factors,
+ * sRGB RGB/linear alpha maps and roughness=1-glossiness. Common material inputs
+ * and coverage remain active; other material extensions remain unsupported.
+ * bl_getPbrMaterialInfo returns UNSUPPORTED with output unchanged for this
+ * workflow: the frozen MR-oriented info record cannot represent it. Generic
+ * material conversion, rendering and disposal remain supported.
+ *
+ * For MR, PBR info is effective props, not raw factors: base/ORM source-created1x1
  * defaults are white for missing material; missing assets are NEVER white
  * fallbacks. Original IEC sRGB factor bytes/ORM rounding/specularAA/IBL retained.
  * Environment options required, brdfUrl nonempty, default skip flags FALSE;
