@@ -55,6 +55,12 @@ production compiler or full model-load/first-frame performance result. A
 diagnostic-context cache-key gap is explicitly tracked; direct Tint HLSL remains
 a separate compatibility experiment.
 
+The [subsequent uncached direct Tint HLSL comparison](LiteDirectTintHlslInvestigation.md)
+shows 7.69-15.59% lower compiler-service lifecycle times across eleven captured
+profiles and a 693,760-byte smaller matched linked probe. This is still an
+isolated supported-subset prototype, not production compiler adoption,
+source-perfect shader equivalence or a full GLB/first-frame/GPU benchmark.
+
 ### Scene35 asset slice (qualification in progress)
 
 The single C99 header now contains **199 functions**: the frozen 181-function

@@ -1,5 +1,10 @@
 # Native runtime shader strategy investigation
 
+The subsequent [direct Tint HLSL comparison](LiteDirectTintHlslInvestigation.md)
+measures uncached compilation and linked footprint improvements. The results
+below remain the separate, frozen cache/reduced-SPIR-V-closure batch; do not
+combine their percentages with the direct-route experiment.
+
 **Reusing successful compiler results reduces repeated shader work in the
 captured model-loading and Minecraft/UI request chains. A smaller same-pin Tint
 configuration reduces the linked probe by about 297 KiB, but does not establish
@@ -181,10 +186,15 @@ Its explicit request/options fingerprint does not automatically capture the
 host's working directory. Before adoption, include the effective diagnostic
 and system-compiler context in invalidation, or separately review consistent
 diagnostic naming. Do not strip warnings or paths to hide the mismatch.
-Fixing this gap is follow-up work in a separate, unmeasured cache revision;
-its timings must not be substituted for these frozen measurements.
+A separate unmeasured revision now captures the absolute working-directory
+context per request and retains full warnings. It passes actual warning-bearing
+and warning-free A/B/A context changes, labels, held-result and OOM checks.
+Its creating-thread use and host serialization of all process-wide cwd changes
+are required; it does not promise safety against concurrent external A/B/A
+mutation or compiler/DLL hot-swaps. Its timings must not be substituted for
+these frozen fixed-context measurements.
 
-The next candidate is **direct Tint WGSL -> HLSL -> FXC**. Source review found
+The follow-up candidate is **direct Tint WGSL -> HLSL -> FXC**. Source review found
 that it is not a writer substitution: it needs genuine IR consolidation of
 multiple logical UBOs into `b0`, preserved logical metadata and correct access
 lowering, plus a compiler-local semantic hook for bgfx geometry and reserved
@@ -192,7 +202,9 @@ instance TEXCOORD31..28 inputs. Texture/sampler reflection, active native
 layouts, stage linking and compatible containers remain required. Direct
 output need not be byte-identical, but must establish interface/resource
 correctness and relevant native rendering before timing. This route was
-**not executed in the measured batch**.
+**not executed in this cache/reduced-closure batch**. It was subsequently
+implemented and measured separately in
+[the direct Tint HLSL report](LiteDirectTintHlslInvestigation.md).
 
 The reviewed Naga HLSL path is also not a drop-in replacement: IO semantics,
 separate cbuffers and sampler/resource conventions differ. No Rust toolchain,
