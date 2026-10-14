@@ -25,7 +25,11 @@ enum L_Kind
     L_LIGHT,
     L_CONTROL,
     L_LIMIT,
-    L_STANDARD
+    L_STANDARD,
+    L_PBR,
+    L_ASSET,
+    L_ENVIRONMENT,
+    L_CUBE
 };
 
 struct L_Record
@@ -56,9 +60,13 @@ struct bl_Runtime
     bl_ShaderCompilerService compiler;
     bl_AudioService audio;
     bl_IOService io;
+    bl_AssetService assets;
+    bl_ShaderCompilerService2 compiler2;
     bool hasCompiler;
     bool hasAudio;
     bool hasIO;
+    bool hasAssets;
+    bool hasCompiler2;
     bool destroying;
     uint32_t thread;
     unsigned hostDepth;
@@ -66,7 +74,7 @@ struct bl_Runtime
     unsigned dispatchDepth;
     L_Record** records;
     L_Slot* slots;
-    size_t freeHeads[L_STANDARD + 1];
+    size_t freeHeads[L_CUBE + 1];
     size_t count;
     size_t capacity;
     uint64_t matrixVersion;

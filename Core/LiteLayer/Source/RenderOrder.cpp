@@ -1,4 +1,5 @@
 #include "LiteInternal.h"
+#include "PbrInternal.h"
 
 static bl_Status reserveDraws(bl_Runtime* r, L_Scene* s)
 {
@@ -58,6 +59,7 @@ static L_DrawGroup* drawGroup(L_Scene* s, uint64_t materialId)
 bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t* out)
 {
     L_TRY(l_prepareStandardPackets(r, s, false, 0));
+    L_TRY(l_preparePbrScene(r, s));
     L_TRY(reserveDraws(r, s));
     if (s->groupCapacity)
     {
@@ -78,7 +80,7 @@ bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t*
         }
         L_Record* record = l_peek(r, identity._id);
         if (!record || record->disposed ||
-            (record->kind != L_MATERIAL && record->kind != L_STANDARD))
+            (record->kind != L_MATERIAL && record->kind != L_STANDARD && record->kind != L_PBR))
         {
             return L_FAIL(r, BL_INVALID_HANDLE, "Scene material identity is not live");
         }
@@ -111,7 +113,8 @@ bl_Status l_collectDraws(bl_Runtime* r, L_Scene* s, const bl_Mat4* view, size_t*
         }
         L_Mesh* mesh = (L_Mesh*)n;
         bl_Material identity = l_meshMaterial(mesh);
-        if (L_NULL(identity) || !mesh->geometry.vertices || !mesh->geometry.indexCount)
+        if (L_NULL(identity) || !mesh->geometry.vertices || !mesh->geometry.indexCount ||
+            (mesh->hasInstances && !mesh->instanceCount))
         {
             continue;
         }

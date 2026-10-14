@@ -225,6 +225,10 @@ export function createSceneContext(engine) {
 export const createFreeCamera = (position, target) => camera(native.createFreeCamera(position, target));
 export function createArcRotateCamera(alpha, beta, radius, target) {
     const handle = native.createArcRotateCamera(alpha, beta, radius, target);
+    return arcRotateCamera(handle);
+}
+
+function arcRotateCamera(handle) {
     const object = node(handle);
     cameraHandles.add(handle);
     const targetView = vector(() => native.getArcRotateCameraProperties(handle).target,
@@ -245,6 +249,61 @@ export function createArcRotateCamera(alpha, beta, radius, target) {
     }
     return object;
 }
+
+// Loads complete synchronously in Core; the fulfilled Promise is a blocking embedding adaptation.
+export async function loadGltf(engine, source) {
+    return identity(native.loadGltf(token(engine), source), (object, handle) => {
+        const entities = native.getAssetContainerEntities(handle).map(node);
+        field(object, "entities", () => entities);
+    });
+}
+
+export async function loadEnvironment(scene, url, options) {
+    const result = identity(native.loadEnvironment(token(scene), url, options));
+    const retained = sceneEntities.get(scene);
+    if (retained) retained.push(result);
+    return result;
+}
+
+export const createDefaultCamera = scene => arcRotateCamera(native.createDefaultCamera(token(scene)));
+export const disposeAssetContainer = object => native.disposeAssetContainer(token(object));
+export const disposePbrMaterial = object => native.disposePbrMaterial(token(object));
+export function getPbrMaterialInfo(object) {
+    const info = native.getPbrMaterialInfo(token(object));
+    info.baseColorTexture = identity(info.baseColorTexture);
+    info.ormTexture = identity(info.ormTexture);
+    return info;
+}
+export function getEnvironmentInfo(object) {
+    const info = native.getEnvironmentInfo(token(object));
+    info.specularCube = identity(info.specularCube);
+    info.brdfLut = identity(info.brdfLut);
+    return info;
+}
+export const disposeEnvironmentTextures = object => native.disposeEnvironmentTextures(token(object));
+export const getTextureCubeInfo = object => native.getTextureCubeInfo(token(object));
+
+const thinReferences = new WeakMap();
+export function setThinInstances(object, matrices, count) {
+    native.setThinInstances(token(object), matrices, count);
+    const existing = thinReferences.get(object);
+    if (existing) {
+        existing.matrices = matrices;
+        existing.count = count;
+        existing._capacity = count;
+        existing._version++;
+    } else {
+        thinReferences.set(object, { matrices, count, _capacity: count, _version: 1 });
+    }
+}
+export function getThinInstances(object) {
+    const existing = thinReferences.get(object);
+    if (existing) return existing;
+    const result = native.getThinInstances(token(object));
+    thinReferences.set(object, result);
+    return result;
+}
+export const enableThinInstanceWorldBounds = object => native.enableThinInstanceWorldBounds(token(object));
 
 export function setCameraLimits(object, limits, _unusedScene) {
     const disposer = native.setCameraLimits(token(object), limits);

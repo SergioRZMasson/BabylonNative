@@ -5,7 +5,7 @@ bl_Status l_materialFamily(bl_Material h, L_Material** out)
 {
     L_Record* record;
     L_TRY(l_get(h._runtime, h._id, 0, &record));
-    if (record->kind != L_MATERIAL && record->kind != L_STANDARD)
+    if (record->kind != L_MATERIAL && record->kind != L_STANDARD && record->kind != L_PBR)
     {
         return BL_INVALID_HANDLE;
     }

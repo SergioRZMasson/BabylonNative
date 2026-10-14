@@ -283,7 +283,7 @@ bl_Status bl_setNodePosition(bl_SceneNode h, bl_Vec3 value)
     if (memcmp(&value, &n->position, sizeof(value)))
     {
         n->position = value;
-        n->dirty = true;
+        n->dirty |= !n->localMatrixLocked;
     }
     return BL_OK;
 }
@@ -313,7 +313,7 @@ bl_Status bl_setNodeScaling(bl_SceneNode h, bl_Vec3 value)
     if (memcmp(&value, &n->scale, sizeof(value)))
     {
         n->scale = value;
-        n->dirty = true;
+        n->dirty |= !n->localMatrixLocked;
     }
     return BL_OK;
 }
@@ -367,7 +367,7 @@ bl_Status bl_setNodeRotation(bl_SceneNode h, bl_Vec3 value)
     double sz = sin(value.z * .5);
     bl_Quat q = {sx * cy * cz + cx * sy * sz, cx * sy * cz - sx * cy * sz,
                  cx * cy * sz + sx * sy * cz, cx * cy * cz - sx * sy * sz};
-    n->dirty = true;
+    n->dirty |= !n->localMatrixLocked;
     n->quaternion = q;
     n->euler = value;
     n->eulerValid = true;
@@ -397,7 +397,7 @@ bl_Status bl_setNodeRotationQuaternion(bl_SceneNode h, bl_Quat q)
         return BL_INVALID_ARGUMENT;
     }
     n->quaternion = q;
-    n->dirty = true;
+    n->dirty |= !n->localMatrixLocked;
     n->eulerValid = false;
     return BL_OK;
 }
@@ -564,17 +564,8 @@ bl_Status bl_setSubtreeVisible(bl_SceneNode h, bool value)
     return BL_OK;
 }
 
-bl_Status l_world(bl_Runtime* r, L_Node* n)
+static bl_Status evaluateWorld(bl_Runtime* r, L_Node* n)
 {
-    if (n->parent)
-    {
-        if (n->highPrecision && !n->parent->highPrecision)
-        {
-            n->parent->highPrecision = true;
-            n->parent->dirty = true;
-        }
-        L_TRY(l_world(r, n->parent));
-    }
     uint64_t pv = n->parent ? n->parent->version : 0;
     if (!n->dirty && pv == n->parentVersion)
     {
@@ -582,6 +573,21 @@ bl_Status l_world(bl_Runtime* r, L_Node* n)
     }
     bl_Mat4 m;
     l_identity(&m);
+    if (n->localMatrixLocked)
+    {
+        if (n->parent)
+        {
+            l_multiply(&n->parent->world, &n->lockedLocalMatrix, &n->world, n->highPrecision);
+        }
+        else
+        {
+            n->world = n->lockedLocalMatrix;
+        }
+        n->parentVersion = pv;
+        n->dirty = false;
+        n->version = ++r->matrixVersion;
+        return BL_OK;
+    }
     double* v = m.values;
     bl_Vec3 position = n->position;
     bl_Vec3 target = n->target;
@@ -669,6 +675,47 @@ bl_Status l_world(bl_Runtime* r, L_Node* n)
     n->dirty = false;
     n->version = ++r->matrixVersion;
     return BL_OK;
+}
+
+bl_Status l_world(bl_Runtime* r, L_Node* n)
+{
+    L_Node* first = NULL;
+    size_t depth = 0;
+    for (L_Node* node = n; node; node = node->parent)
+    {
+        if (++depth > r->count)
+        {
+            return BL_INVALID_ARGUMENT;
+        }
+        if (node->highPrecision && node->parent && !node->parent->highPrecision)
+        {
+            node->parent->highPrecision = true;
+            node->parent->dirty = true;
+        }
+        if (node->dirty || (node->parent && node->parentVersion != node->parent->version))
+        {
+            first = node;
+        }
+    }
+    if (!first)
+    {
+        return BL_OK;
+    }
+    // Walk only the invalidated suffix, without recursion or hot-frame scratch allocation.
+    for (L_Node* node = first;;)
+    {
+        L_TRY(evaluateWorld(r, node));
+        if (node == n)
+        {
+            return BL_OK;
+        }
+        L_Node* child = n;
+        while (child->parent != node)
+        {
+            child = child->parent;
+        }
+        node = child;
+    }
 }
 
 bl_Status bl_getNodeWorldMatrix(bl_SceneNode h, bl_Mat4* out, uint64_t* version)

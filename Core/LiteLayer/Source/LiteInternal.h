@@ -58,6 +58,15 @@ struct L_Mesh
     L_Geometry geometry;
     bl_MeshProperties properties;
     bl_Material material;
+    float* instanceMatrices;
+    size_t instanceFloatCount;
+    size_t instanceCount;
+    size_t instanceCapacity;
+    uint64_t instanceVersion;
+    uint64_t instanceGpuVersion;
+    bool hasInstances;
+    bool instanceWorldBounds;
+    uint16_t instanceBufferIndex;
 };
 
 struct L_Draw
@@ -97,6 +106,8 @@ static_assert(offsetof(L_Mesh, node) == 0 && offsetof(L_Node, record) == 0,
               "Checked records must be convertible through their first member");
 
 void l_meshCleanup(bl_Runtime* r, L_Record* record);
+bl_Status l_meshWorldBounds(bl_Runtime* runtime, L_Mesh* mesh, bl_Vec3* minimum, bl_Vec3* maximum,
+                            bool* hasBounds);
 void l_geometryCleanup(bl_Runtime* r, L_Geometry* g);
 bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* engine, L_Material* m);
 bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material* m, L_Mesh* mesh,

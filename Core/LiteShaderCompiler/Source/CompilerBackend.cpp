@@ -17,6 +17,7 @@
 #include <spirv_hlsl.hpp>
 #include <bgfx/bgfx.h>
 #include <d3dcompiler.h>
+#include <d3d11shader.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -482,10 +483,13 @@ namespace Babylon::LiteShaderCompiler
             const auto* data = static_cast<const uint8_t*>(bytecode.GetBufferPointer());
             bytes.insert(bytes.end(), data, data + bytecode.GetBufferSize());
             Append(bytes, uint8_t{0});
-            Append(bytes, static_cast<uint8_t>(stage.attributes.size()));
+            const auto geometryCount = std::count_if(stage.attributes.begin(), stage.attributes.end(),
+                [](const Attribute& item) { return item.semantic < bgfx::Attrib::Count; });
+            Append(bytes, static_cast<uint8_t>(geometryCount));
             for (const auto& attribute : stage.attributes)
             {
-                Append(bytes, bgfx::attribToId(static_cast<bgfx::Attrib::Enum>(attribute.semantic)));
+                if (attribute.semantic < bgfx::Attrib::Count)
+                    Append(bytes, bgfx::attribToId(static_cast<bgfx::Attrib::Enum>(attribute.semantic)));
             }
             Append(bytes, static_cast<uint16_t>(uniformSize));
         }
@@ -511,10 +515,79 @@ namespace Babylon::LiteShaderCompiler
             }
         }
 
+        std::map<Binding, uint32_t> TextureOperations(const std::vector<uint32_t>& words)
+            {
+                std::map<uint32_t, Binding> bindings;
+                std::map<uint32_t, uint32_t> groups;
+                std::map<uint32_t, uint32_t> slots;
+                std::map<uint32_t, uint32_t> origins;
+                for (size_t offset = 5; offset < words.size();)
+                {
+                    const uint32_t count = words[offset] >> 16;
+                    const auto operation = static_cast<spv::Op>(words[offset] & 65535);
+                    if (!count || count > words.size() - offset)
+                    {
+                        throw std::runtime_error("Malformed compiler SPIR-V instruction.");
+                    }
+                    const uint32_t* instruction = words.data() + offset;
+                    if (operation == spv::OpDecorate && count >= 4)
+                    {
+                        if (instruction[2] == spv::DecorationDescriptorSet)
+                            groups[instruction[1]] = instruction[3];
+                        if (instruction[2] == spv::DecorationBinding)
+                            slots[instruction[1]] = instruction[3];
+                    }
+                    offset += count;
+                }
+                for (const auto& item : slots)
+                {
+                    if (groups.contains(item.first))
+                        bindings[item.first] = {groups.at(item.first), item.second};
+                }
+                std::map<Binding, uint32_t> result;
+                for (size_t offset = 5; offset < words.size();)
+                {
+                    const uint32_t* instruction = words.data() + offset;
+                    const uint32_t count = instruction[0] >> 16;
+                    const auto operation = static_cast<spv::Op>(instruction[0] & 65535);
+                    if ((operation == spv::OpLoad || operation == spv::OpCopyObject ||
+                            operation == spv::OpAccessChain || operation == spv::OpImage ||
+                            operation == spv::OpSampledImage) && count >= 4)
+                    {
+                        const uint32_t from = instruction[3];
+                        origins[instruction[2]] = origins.contains(from) ? origins.at(from) : from;
+                    }
+                    uint32_t uses = 0;
+                    if (operation == spv::OpImageFetch)
+                        uses = 1;
+                    if (operation == spv::OpImageSampleImplicitLod)
+                        uses = count > 5 && (instruction[5] & spv::ImageOperandsBiasMask) ? 8 : 2;
+                    if (operation == spv::OpImageSampleExplicitLod)
+                        uses = count > 5 && (instruction[5] & spv::ImageOperandsGradMask) ? 16 : 4;
+                    if (operation == spv::OpImageSampleDrefImplicitLod ||
+                        operation == spv::OpImageSampleDrefExplicitLod)
+                        uses = 32;
+                    if (operation == spv::OpImageQuerySize || operation == spv::OpImageQuerySizeLod ||
+                        operation == spv::OpImageQueryLevels)
+                        uses = 64;
+                    if (uses && count >= 4)
+                    {
+                        const uint32_t image = instruction[3];
+                        const uint32_t original = origins.contains(image) ? origins.at(image) : image;
+                        if (!bindings.contains(original))
+                            throw std::runtime_error("Active texture operation lost its IR binding origin.");
+                        result[bindings.at(original)] |= uses;
+                    }
+                    offset += count;
+                }
+                return result;
+            }
+
         Stage CompileStage(std::string_view source, std::string_view entryName, bool vertex,
             std::vector<tint::inspector::StageVariable>& inputs,
             std::vector<tint::inspector::StageVariable>& outputs,
-            std::map<Binding, uint32_t>& textureStages)
+            std::map<Binding, uint32_t>& textureStages,
+            const std::vector<InstanceAttribute>& instances)
         {
             const char* phase = "WGSL parsing";
             try
@@ -571,6 +644,7 @@ namespace Babylon::LiteShaderCompiler
                 phase = "SPIR-V uniform consolidation and reflection";
                 Stage result;
                 auto words = MergeUniformBlocks(std::move(generated.Get().spirv), sourceResources, result.blocks);
+                const auto textureOperations = TextureOperations(words);
                 for (auto& block : result.blocks)
                 {
                     block.members = ReflectMembers(program, {block.group, block.binding});
@@ -589,7 +663,26 @@ namespace Babylon::LiteShaderCompiler
                         {
                             continue;
                         }
-                        const uint32_t semantic = AttributeSemantic(input.name, used);
+                        const auto instance = std::find_if(instances.begin(), instances.end(),
+                            [&](const InstanceAttribute& item) {
+                                return item.location == *input.attributes.location;
+                            });
+                        const uint32_t semantic = instance == instances.end()
+                            ? AttributeSemantic(input.name, used)
+                            : static_cast<uint32_t>(bgfx::Attrib::Count) + instance->column;
+                        if (instance != instances.end())
+                        {
+                            const auto field = input.name.substr(
+                                input.name.find_last_of('.') == std::string::npos
+                                    ? 0 : input.name.find_last_of('.') + 1);
+                            if (field != instance->name ||
+                                input.composition_type != tint::inspector::CompositionType::kVec4 ||
+                                input.component_type != tint::inspector::ComponentType::kF32 ||
+                                used.contains(semantic))
+                            {
+                                throw std::runtime_error("Active instance IR input does not match its declaration.");
+                            }
+                        }
                         used.insert(semantic);
                         const uint8_t components = input.composition_type == tint::inspector::CompositionType::kVec2 ? 2 : input.composition_type == tint::inspector::CompositionType::kVec3 ? 3
                                                                                                                        : input.composition_type == tint::inspector::CompositionType::kVec4   ? 4
@@ -604,9 +697,11 @@ namespace Babylon::LiteShaderCompiler
                             {bgfx::Attrib::Weight, "BLENDWEIGHT"},
                         };
                         const auto known = semantics.find(semantic);
-                        const std::string hlslSemantic = known == semantics.end()
-                                                             ? "TEXCOORD" + std::to_string(semantic - bgfx::Attrib::TexCoord0)
-                                                             : known->second;
+                        const std::string hlslSemantic = instance != instances.end()
+                            ? "TEXCOORD" + std::to_string(31 - instance->column)
+                            : known == semantics.end()
+                                ? "TEXCOORD" + std::to_string(semantic - bgfx::Attrib::TexCoord0)
+                                : known->second;
                         compiler.add_vertex_attribute_remap({*input.attributes.location, hlslSemantic});
                     }
                 }
@@ -647,8 +742,20 @@ namespace Babylon::LiteShaderCompiler
                             samplerStages[samplerBinding] = stage;
                         }
                     }
+                    const uint32_t sampleType =
+                        sourceResource.resource_type == Resource::ResourceType::kDepthTexture ? 3
+                        : sourceResource.sampled_kind == Resource::SampledKind::kSInt ? 1
+                        : sourceResource.sampled_kind == Resource::SampledKind::kUInt ? 2 : 0;
+                    uint32_t samplerKind = 0;
+                    if (pair != samplerUses.end())
+                    {
+                        const auto& samplerResource = FindResource(sourceResources, samplerBinding);
+                        samplerKind = samplerResource.sampler_type == Resource::SamplerType::kComparison
+                            ? 2 : 1;
+                    }
                     result.textures.push_back({sourceResource.variable_name, samplerName, UniformName(sourceResource), binding.first, binding.second,
-                        samplerBinding.first, samplerBinding.second, stage, TextureDimension(sourceResource.dim)});
+                        samplerBinding.first, samplerBinding.second, stage, TextureDimension(sourceResource.dim),
+                        sampleType, samplerKind, textureOperations.contains(binding) ? textureOperations.at(binding) : 0});
                     compiler.set_decoration(image.id, spv::DecorationDescriptorSet, 0);
                     compiler.set_decoration(image.id, spv::DecorationBinding, stage);
                 }
@@ -678,6 +785,51 @@ namespace Babylon::LiteShaderCompiler
                                                  ? std::string(static_cast<const char*>(diagnostics->GetBufferPointer()), diagnostics->GetBufferSize())
                                                  : "D3DCompile failed without a diagnostic.");
                 }
+                if (vertex)
+                {
+                    Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+                    if (FAILED(D3DReflect(bytecode->GetBufferPointer(), bytecode->GetBufferSize(),
+                        IID_PPV_ARGS(&reflection))))
+                    {
+                        throw std::runtime_error("Native vertex input reflection failed.");
+                    }
+                    D3D11_SHADER_DESC description{};
+                    if (FAILED(reflection->GetDesc(&description)))
+                    {
+                        throw std::runtime_error("Native vertex signature is unavailable.");
+                    }
+                    const auto active = [&](const Attribute& attribute)
+                    {
+                        const bool instance = attribute.semantic >= bgfx::Attrib::Count;
+                        const bool texcoord = instance || attribute.semantic >= bgfx::Attrib::TexCoord0;
+                        const char* name = texcoord ? "TEXCOORD" :
+                            attribute.semantic == bgfx::Attrib::Position ? "POSITION" :
+                            attribute.semantic == bgfx::Attrib::Normal ? "NORMAL" :
+                            attribute.semantic == bgfx::Attrib::Tangent ? "TANGENT" :
+                            attribute.semantic == bgfx::Attrib::Color0 ? "COLOR" :
+                            attribute.semantic == bgfx::Attrib::Indices ? "BLENDINDICES" : "BLENDWEIGHT";
+                        const uint32_t index = instance ? 31 - (attribute.semantic - bgfx::Attrib::Count) :
+                            texcoord ? attribute.semantic - bgfx::Attrib::TexCoord0 : 0;
+                        for (uint32_t i = 0; i < description.InputParameters; ++i)
+                        {
+                            D3D11_SIGNATURE_PARAMETER_DESC parameter{};
+                            if (FAILED(reflection->GetInputParameterDesc(i, &parameter)))
+                            {
+                                throw std::runtime_error("Native vertex input descriptor failed.");
+                            }
+                            if (parameter.SemanticIndex == index &&
+                                !strcmp(parameter.SemanticName, name))
+                            {
+                                return parameter.ReadWriteMask != 0;
+                            }
+                        }
+                        return false;
+                    };
+                    result.attributes.erase(std::remove_if(result.attributes.begin(),
+                        result.attributes.end(), [&](const Attribute& attribute) {
+                            return !active(attribute);
+                        }), result.attributes.end());
+                }
                 result.diagnostics = program.Diagnostics().Str();
                 if (diagnostics)
                 {
@@ -693,16 +845,17 @@ namespace Babylon::LiteShaderCompiler
         }
     }
 
-    Program CompileD3D11(std::string_view vertexSource, std::string_view vertexEntry,
-        std::string_view fragmentSource, std::string_view fragmentEntry)
+    Program CompileD3D11WithInstances(std::string_view vertexSource, std::string_view vertexEntry,
+        std::string_view fragmentSource, std::string_view fragmentEntry,
+        const std::vector<InstanceAttribute>& instances)
     {
         static std::once_flag initialized;
         std::call_once(initialized, [] { tint::Initialize(); });
         std::vector<tint::inspector::StageVariable> vertexInputs, vertexOutputs, fragmentInputs, fragmentOutputs;
         std::map<Binding, uint32_t> textureStages;
         Program result;
-        result.vertex = CompileStage(vertexSource, vertexEntry, true, vertexInputs, vertexOutputs, textureStages);
-        result.fragment = CompileStage(fragmentSource, fragmentEntry, false, fragmentInputs, fragmentOutputs, textureStages);
+        result.vertex = CompileStage(vertexSource, vertexEntry, true, vertexInputs, vertexOutputs, textureStages, instances);
+        result.fragment = CompileStage(fragmentSource, fragmentEntry, false, fragmentInputs, fragmentOutputs, textureStages, {});
         for (const auto& input : fragmentInputs)
         {
             if (!input.attributes.location)
@@ -749,5 +902,11 @@ namespace Babylon::LiteShaderCompiler
             result.fragment.bytes[4 + byte] = static_cast<uint8_t>(interfaceHash >> (byte * 8));
         }
         return result;
+    }
+
+    Program CompileD3D11(std::string_view vertexSource, std::string_view vertexEntry,
+        std::string_view fragmentSource, std::string_view fragmentEntry)
+    {
+        return CompileD3D11WithInstances(vertexSource, vertexEntry, fragmentSource, fragmentEntry, {});
     }
 }

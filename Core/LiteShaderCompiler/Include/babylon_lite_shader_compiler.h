@@ -15,6 +15,7 @@ extern "C"
  * The returned table is stateless and may outlive any individual runtime.
  */
     bl_ShaderCompilerService bl_shaderCompilerService(void);
+    bl_ShaderCompilerService2 bl_shaderCompilerService2(void);
 
 #ifdef __cplusplus
 }

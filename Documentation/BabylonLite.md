@@ -20,9 +20,98 @@ are carried by the static target.
 
 ## Components
 
+### Current priority: runtime GLB loading and manual sandbox
+
+The immediate deliverable is the minimum reusable native GLB loading API and
+a visible, interactive native sandbox that accepts arbitrary `.glb` file paths
+by drag and drop (user decision, 2026-10-13). It must load raw model data at
+runtime, frame the model automatically, permit repeated model replacement and
+report malformed/unsupported inputs without crashing or silently dropping
+features. Demonstrate multiple different models through the same executable;
+there must be no per-model regeneration or scene35-specific dispatch.
+
+Common static-model support is the first scope; supported attributes, materials
+and extensions must be listed explicitly. This is not a claim of every glTF
+extension, animation or compressed format. Pixel-perfect scene35 rendering,
+full camera controls and comparative benchmarks are deferred, not blockers.
+Native memory/resource safety remains required. The existing shader compiler is
+an interim implementation; shader-translation options will be evaluated after
+the native loader and manual testing application are working.
+
+The first common-static-model loader/sandbox milestone is now implemented:
+[`Apps/LiteTests/LiteSandbox/README.md`](../Apps/LiteTests/LiteSandbox/README.md)
+documents launch/build options, actual drag/drop behavior and supported input
+features. Parent checks exercised both disk and in-memory loads of multiple
+textured/untextured GLBs, repeated replacements and retained errors. This is
+arbitrary runtime file selection within the documented subset, **not every GLB
+or glTF rendering feature**. For example, Avocado currently reports unsupported
+normal/occlusion material inputs instead of silently displaying an incomplete
+material.
+
+### Scene35 asset slice (qualification in progress)
+
+The single C99 header now contains **199 functions**: the frozen 181-function
+baseline plus 18 reviewed asset/runtime-v2, PBR, instancing, environment and
+default-camera functions. The additions use 35 POD records and 10 enums.
+Older signatures, layouts and enum meanings remain frozen.
+
+`BABYLON_NATIVE_BUILD_LITE_ASSET_DECODER=ON` builds the optional, separate
+`Babylon::LiteAssetDecoder` provider. Its private `Babylon::LiteAssetJson`
+dependency consumes the unchanged vendored nlohmann_json header; Core never
+links or includes JSON, a codec, a VM or the shader compiler. The provider returns
+raw schema and field presence. Core validates it and owns accessor conversion,
+hierarchy/root reflection, copied instance slabs, factors, PBR shaders, HDR
+resources and camera bounds.
+
+The legacy raw-service v2 domain retains self-contained GLB, ordinary transforms,
+EXT instancing and opaque factor-only PBR. The additive service/document v3
+protocol keeps all 199 function signatures and prior record layouts unchanged,
+and exposes encoded images, textures, samplers and material inputs as raw POD.
+The current native loader supports multiple meshes/primitives/materials,
+packed/interleaved FLOAT attributes, normalized U8/U16 UVs, U8/U16/U32 or generated
+indices, native-generated missing normals, mirrored ordinary nodes and opaque
+double-sided PBR. Embedded PNG/JPEG base-color and metallic/roughness inputs use
+real sRGB/linear resources, UV0/1, native mip chains and writable pixel updates.
+Unsupported material/texture features, extensions, skinning, morphs, animation
+and backgrounds fail explicitly. Complete authored RGBD environments still
+require an explicit BRDF resource.
+Environment skip flags default to false; the source scene explicitly skips both
+background features. Native loading is synchronous; the JS Promise projection is
+an explicit blocking adaptation, not network concurrency or a job framework.
+
+Container adds preserve earlier recursive additions when a later entity fails,
+while the legacy node-add contract is unchanged. Last-scene removal retires mesh
+identities despite surviving container trees. Successful environment loads retain
+scene-owned history, and cached PBR packets bind the latest environment.
+Compiler-v2 instance names remain result-owned until the paired release.
+
+`Apps/LiteTests/NativeScene35` compiles the byte-identical STANDARD user main using
+external transport headers, or bundles unchanged original `scene35.ts` with only
+the thin NAPI shim. Its offline IO aliases resolve licensed raw assets, not
+compiler-specialized mesh plans. WIC/native platform handling lives outside Core.
+The root integration is opt-in through the `LITE_SCENE35_*_DIR` cache paths and
+requires the separate decoder and compiler.
+
+Recovery evidence is retained under `build\lite-c99\demo-scene35\recovery`.
+Exact authored HDR/data and constant-factor sampling proofs do not qualify
+framebuffer numerical differences or performance. The source requests factor
+anisotropy 4; the observed native value is 1, as scoped below. Scene35 remains
+unqualified for source-perfect framebuffer comparison. That comparison and
+its benchmark are deferred by the user's loader/sandbox priority, not prerequisites
+for the accepted common-model loading milestone. No fresh performance result
+is claimed here.
+Both original application projections and their controls now execute. The nine
+original-engine hardware replay images match the frozen SDL images exactly.
+Native moving poses expose sparse interior RGB errors up to 28 levels, beyond
+the earlier static two-level difference. Exact submitted camera matrices and
+eye values, byte-identical source WGSL, and isolated depth32/position-invariance
+experiments do not remove that discrepancy. It is a genuine framebuffer
+qualification failure, not the deferred anisotropy gate; no tolerance change,
+renderer workaround, or quality-equivalent benchmark is approved by this evidence.
+
 ### Original scene38 procedural slice
 
-The current single C99 header has **181 functions**. Fourteen reviewed additions
+The scene38 milestone brought the single C99 header to **181 functions**. Fourteen reviewed additions
 provide data and mesh factories for Cylinder, Plane, Disc, Polyhedron, Ribbon,
 Tube and ExtrudeShape. All previous 167 signatures, 97 records and 515 layout
 witnesses remain unchanged, as do the older 122/160/162 ABI subsets.

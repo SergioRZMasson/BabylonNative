@@ -2,6 +2,12 @@ if(NOT WIN32 OR NOT GRAPHICS_API STREQUAL "D3D11")
     message(FATAL_ERROR "LiteShaderCompiler currently implements the D3D11 runtime backend only.")
 endif()
 
+file(STRINGS "${BGFX_DIR}/src/config.h" LITE_BGFX_INSTANCE_SEMANTIC_LINE
+    REGEX "^#[ \t]*define BGFX_CONFIG_INSTANCE_DATA_FIRST_TEXCOORD ")
+if(NOT LITE_BGFX_INSTANCE_SEMANTIC_LINE MATCHES "FIRST_TEXCOORD 31$")
+    message(FATAL_ERROR "LiteShaderCompiler instance semantics require the pinned bgfx TEXCOORD31 layout.")
+endif()
+
 file(STRINGS "${BGFX_DIR}/tools/shaderc/shaderc.cpp" LITE_BGFX_SHADER_VERSION_LINE
     REGEX "^#define BGFX_SHADER_BIN_VERSION ")
 if(NOT LITE_BGFX_SHADER_VERSION_LINE MATCHES "BGFX_SHADER_BIN_VERSION 12$")

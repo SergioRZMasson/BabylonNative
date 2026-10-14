@@ -16,6 +16,8 @@ struct L_Node
     bool visible;
     bool dirty;
     bool highPrecision;
+    bool localMatrixLocked;
+    bl_Mat4 lockedLocalMatrix;
     L_Node* parent;
     bl_SceneNode* children;
     size_t childCount;
@@ -66,6 +68,13 @@ struct L_Scene
     bool lightsReady;
     size_t standardMemberCount;
     bool disposing;
+    struct L_Environment* environment;
+    struct L_Environment* environmentHistory;
+    double exposure;
+    double contrast;
+    bool toneMappingEnabled;
+    struct L_PbrPacket* pbrPackets;
+    size_t pbrCapacity;
 };
 
 struct L_Engine
@@ -85,6 +94,7 @@ struct L_Engine
     void* completionUser;
     bl_EngineStats stats;
     struct L_ViewReservation* reservedViews;
+    uint16_t assetViewCount;
 };
 
 struct L_ViewReservation
@@ -112,6 +122,8 @@ void l_inverse(const bl_Mat4* m, bl_Mat4* out, bool precise);
 void l_unregisterScene(L_Scene* s);
 void l_sceneCleanup(bl_Runtime* r, L_Record* record);
 bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n);
+bl_Status l_addAssetHierarchy(bl_Runtime* runtime, L_Scene* scene, L_Node* root);
+void l_removePbrPacket(bl_Runtime* runtime, L_Scene* scene, size_t index);
 bl_Status l_retire(L_Engine* e);
 bl_Status l_reserveViews(L_Engine* engine, L_ViewReservation* reservation);
 void l_releaseViews(L_Engine* engine, L_ViewReservation* reservation);

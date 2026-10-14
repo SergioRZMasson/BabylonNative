@@ -15,6 +15,15 @@ namespace Babylon::LiteShaderCompiler
         uint8_t components{};
     };
 
+    struct InstanceAttribute
+    {
+        std::string name;
+        uint32_t location{};
+        uint32_t column{};
+        uint32_t offset{};
+        uint32_t stride{};
+    };
+
     struct UniformMember
     {
         std::string name;
@@ -46,6 +55,9 @@ namespace Babylon::LiteShaderCompiler
         uint32_t samplerBinding{};
         uint32_t stage{};
         uint32_t dimension{};
+        uint32_t sampleType{};
+        uint32_t samplerKind{};
+        uint32_t operations{};
     };
 
     struct Stage
@@ -65,4 +77,8 @@ namespace Babylon::LiteShaderCompiler
 
     Program CompileD3D11(std::string_view vertexSource, std::string_view vertexEntry,
         std::string_view fragmentSource, std::string_view fragmentEntry);
+
+    Program CompileD3D11WithInstances(std::string_view vertexSource, std::string_view vertexEntry,
+        std::string_view fragmentSource, std::string_view fragmentEntry,
+        const std::vector<InstanceAttribute>& instances);
 }

@@ -37,7 +37,11 @@ namespace Babylon::Plugins::LiteJSBinding
             Light,
             DirectionalLight,
             Control,
-            Limits
+            Limits,
+            AssetContainer,
+            PbrMaterial,
+            Environment,
+            TextureCube
         };
 
         struct Token
@@ -168,6 +172,18 @@ namespace Babylon::Plugins::LiteJSBinding
                     else if (token.kind == Kind::Texture)
                     {
                         status = bl_disposeTexture2D({token.identity._runtime, token.identity._id});
+                    }
+                    else if (token.kind == Kind::AssetContainer)
+                    {
+                        status = bl_disposeAssetContainer({token.identity._runtime, token.identity._id});
+                    }
+                    else if (token.kind == Kind::PbrMaterial)
+                    {
+                        status = bl_disposePbrMaterial({token.identity._runtime, token.identity._id});
+                    }
+                    else if (token.kind == Kind::Environment)
+                    {
+                        status = bl_disposeEnvironmentTextures({token.identity._runtime, token.identity._id});
                     }
                     else if (token.kind == Kind::Scene)
                     {
@@ -351,7 +367,7 @@ namespace Babylon::Plugins::LiteJSBinding
                 const auto key = std::pair{kind, handle._id};
                 if (kind == Kind::Camera || kind == Kind::ArcCamera || kind == Kind::Material ||
                     kind == Kind::StandardMaterial || kind == Kind::Light ||
-                    kind == Kind::DirectionalLight)
+                    kind == Kind::DirectionalLight || kind == Kind::PbrMaterial)
                 {
                     familyKinds.insert_or_assign(handle._id, kind);
                 }
@@ -447,6 +463,8 @@ namespace Babylon::Plugins::LiteJSBinding
                     Check(value.Env(), bl_shaderMaterialAsMaterial({token.identity._runtime, token.identity._id}, &result));
                 else if (token.kind == Kind::StandardMaterial)
                     Check(value.Env(), bl_standardMaterialAsMaterial({token.identity._runtime, token.identity._id}, &result));
+                else if (token.kind == Kind::PbrMaterial)
+                    Check(value.Env(), bl_pbrMaterialAsMaterial({token.identity._runtime, token.identity._id}, &result));
                 else
                     throw Napi::TypeError::New(value.Env(), "Expected a material family identity.");
                 return result;
@@ -458,7 +476,11 @@ namespace Babylon::Plugins::LiteJSBinding
                 if (!handle._id) return env.Null();
                 const auto kind = familyKinds.find(handle._id);
                 if (kind == familyKinds.end())
-                    throw Napi::TypeError::New(env, "Unissued binding family identity.");
+                {
+                    bl_PbrMaterial material{};
+                    Check(env, bl_materialAsPbrMaterial({handle._runtime, handle._id}, &material));
+                    return Wrap(env, material, Kind::PbrMaterial);
+                }
                 return Wrap(env, handle, kind->second);
             }
         };
@@ -2182,6 +2204,172 @@ namespace Babylon::Plugins::LiteJSBinding
             });
         }
 
+        void BindAssets(Napi::Object api, const std::shared_ptr<State>& state)
+        {
+            Bind(api, state, "loadGltf", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                std::string uri;
+                bl_AssetSource source{};
+                if (i[1].IsString())
+                {
+                    uri = i[1].As<Napi::String>().Utf8Value();
+                    source.kind = BL_ASSET_SOURCE_URI;
+                    source.uri = {uri.data(), uri.size()};
+                }
+                else
+                {
+                    source.kind = BL_ASSET_SOURCE_BYTES;
+                    source.bytes = Bytes(i[1]);
+                }
+                bl_AssetContainer container{};
+                s.Check(i.Env(), bl_loadGltf(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), &source, &container));
+                return s.Wrap(i.Env(), container, Kind::AssetContainer);
+            });
+            Bind(api, state, "getAssetContainerEntities", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_AssetEntities entities{};
+                s.Check(i.Env(), bl_getAssetContainerEntities(s.HandleOf<bl_AssetContainer>(i[0], Kind::AssetContainer), &entities));
+                auto result = Napi::Array::New(i.Env(), entities.count);
+                for (uint32_t n = 0; n < entities.count; ++n)
+                    result.Set(n, s.WrapNode(i.Env(), entities.data[n]));
+                return result;
+            });
+            Bind(api, state, "disposeAssetContainer", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_disposeAssetContainer(s.HandleOf<bl_AssetContainer>(i[0], Kind::AssetContainer)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "createDefaultCamera", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ArcRotateCamera camera{};
+                s.Check(i.Env(), bl_createDefaultCamera(s.HandleOf<bl_SceneContext>(i[0], Kind::Scene), &camera));
+                return s.Wrap(i.Env(), camera, Kind::ArcCamera);
+            });
+            Bind(api, state, "loadEnvironment", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto uri = i[1].As<Napi::String>().Utf8Value();
+                std::string brdf, ground, skybox;
+                bl_EnvironmentOptions options{};
+                if (!i[2].IsUndefined())
+                {
+                    const auto input = i[2].As<Napi::Object>();
+                    if (input.Has("brdfUrl")) brdf = input.Get("brdfUrl").As<Napi::String>().Utf8Value();
+                    if (input.Has("groundTextureUrl")) ground = input.Get("groundTextureUrl").As<Napi::String>().Utf8Value();
+                    if (input.Has("skyboxUrl")) skybox = input.Get("skyboxUrl").As<Napi::String>().Utf8Value();
+                    if (input.Has("skyboxSize")) options.skyboxSize = {true, input.Get("skyboxSize").As<Napi::Number>().DoubleValue()};
+                    if (input.Has("skipSkybox")) options.skipSkybox = input.Get("skipSkybox").As<Napi::Boolean>().Value() ? BL_BOOL_TRUE : BL_BOOL_FALSE;
+                    if (input.Has("skipGround")) options.skipGround = input.Get("skipGround").As<Napi::Boolean>().Value() ? BL_BOOL_TRUE : BL_BOOL_FALSE;
+                }
+                options.brdfUrl = {brdf.data(), brdf.size()};
+                options.groundTextureUrl = {ground.data(), ground.size()};
+                options.skyboxUrl = {skybox.data(), skybox.size()};
+                bl_EnvironmentTextures environment{};
+                s.Check(i.Env(), bl_loadEnvironment(s.HandleOf<bl_SceneContext>(i[0], Kind::Scene),
+                    {uri.data(), uri.size()}, &options, &environment));
+                return s.Wrap(i.Env(), environment, Kind::Environment);
+            });
+            const auto mesh = [](State& s, Napi::Value value) {
+                const auto node = s.NodeOf(value);
+                bl_SceneNode checked{};
+                const bl_Mesh handle{node._runtime, node._id};
+                s.Check(value.Env(), bl_meshNode(handle, &checked));
+                return handle;
+            };
+            Bind(api, state, "setThinInstances", [mesh](State& s, const Napi::CallbackInfo& i) {
+                const auto matrices = i[1].As<Napi::Float32Array>();
+                const double count = i[2].As<Napi::Number>().DoubleValue();
+                if (!std::isfinite(count) || std::trunc(count) != count || count < 0 || count > UINT32_MAX)
+                    throw Napi::TypeError::New(i.Env(), "Invalid thin-instance count.");
+                s.Check(i.Env(), bl_setThinInstances(mesh(s, i[0]), {matrices.Data(), matrices.ElementLength()}, static_cast<size_t>(count)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getThinInstances", [mesh](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_ThinInstanceView view{};
+                s.Check(i.Env(), bl_getThinInstances(mesh(s, i[0]), &view));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("matrices", CopyArray<Napi::Float32Array>(i.Env(), view.matrices.data, view.matrices.count));
+                result.Set("count", static_cast<double>(view.count));
+                result.Set("capacity", static_cast<double>(view.capacity));
+                result.Set("version", Napi::String::New(i.Env(), std::to_string(view.version)));
+                result.Set("worldBoundsEnabled", view.worldBoundsEnabled);
+                return result;
+            });
+            Bind(api, state, "enableThinInstanceWorldBounds", [mesh](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_enableThinInstanceWorldBounds(mesh(s, i[0])));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getPbrMaterialInfo", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_PbrMaterial material{};
+                s.Check(i.Env(), bl_materialAsPbrMaterial(s.MaterialFamily(i[0]), &material));
+                bl_PbrMaterialInfo info{};
+                s.Check(i.Env(), bl_getPbrMaterialInfo(material, &info));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("baseColorTexture", s.Wrap(i.Env(), info.baseColorTexture, Kind::Texture));
+                result.Set("ormTexture", s.Wrap(i.Env(), info.ormTexture, Kind::Texture));
+                result.Set("metallicFactor", info.metallicFactor);
+                result.Set("roughnessFactor", info.roughnessFactor);
+                result.Set("reflectance", info.reflectance);
+                result.Set("environmentIntensity", info.environmentIntensity);
+                result.Set("directIntensity", info.directIntensity);
+                result.Set("alpha", info.alpha);
+                result.Set("occlusionStrength", info.occlusionStrength);
+                result.Set("hasBaseColorFactor", info.hasBaseColorFactor);
+                auto color = Napi::Array::New(i.Env(), 4);
+                color.Set(uint32_t(0), info.baseColorFactor.r);
+                color.Set(uint32_t(1), info.baseColorFactor.g);
+                color.Set(uint32_t(2), info.baseColorFactor.b);
+                color.Set(uint32_t(3), info.baseColorFactor.a);
+                result.Set("baseColorFactor", color);
+                result.Set("doubleSided", info.doubleSided);
+                result.Set("alphaBlend", info.alphaBlend);
+                result.Set("enableSpecularAA", info.enableSpecularAA);
+                return result;
+            });
+            Bind(api, state, "disposePbrMaterial", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_disposePbrMaterial(s.HandleOf<bl_PbrMaterial>(i[0], Kind::PbrMaterial)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getEnvironmentInfo", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_EnvironmentInfo info{};
+                s.Check(i.Env(), bl_getEnvironmentInfo(s.HandleOf<bl_EnvironmentTextures>(i[0], Kind::Environment), &info));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("specularCube", s.Wrap(i.Env(), info.specularCube, Kind::TextureCube));
+                result.Set("brdfLut", s.Wrap(i.Env(), info.brdfLut, Kind::Texture));
+                result.Set("irradianceSH", CopyArray<Napi::Float32Array>(i.Env(), info.irradianceSH.data, info.irradianceSH.count));
+                result.Set("sphericalHarmonics", CopyArray<Napi::Float32Array>(i.Env(), info.sphericalHarmonics.data, info.sphericalHarmonics.count));
+                result.Set("lodGenerationScale", info.lodGenerationScale);
+                result.Set("lodGenerationOffset", info.lodGenerationOffset);
+                result.Set("brdfWidth", info.brdfWidth);
+                result.Set("brdfHeight", info.brdfHeight);
+                result.Set("brdfFormat", static_cast<int>(info.brdfFormat));
+                const auto sampler = [&](const bl_SamplerInfo2& value) {
+                    auto object = Napi::Object::New(i.Env());
+                    object.Set("addressModeU", static_cast<int>(value.addressModeU));
+                    object.Set("addressModeV", static_cast<int>(value.addressModeV));
+                    object.Set("addressModeW", static_cast<int>(value.addressModeW));
+                    object.Set("minFilter", static_cast<int>(value.minFilter));
+                    object.Set("magFilter", static_cast<int>(value.magFilter));
+                    object.Set("mipFilter", static_cast<int>(value.mipFilter));
+                    object.Set("lodMinClamp", value.lodMinClamp);
+                    object.Set("lodMaxClamp", value.lodMaxClamp);
+                    object.Set("maxAnisotropy", value.maxAnisotropy);
+                    return object;
+                };
+                result.Set("cubeSampler", sampler(info.cubeSampler));
+                result.Set("brdfSampler", sampler(info.brdfSampler));
+                return result;
+            });
+            Bind(api, state, "disposeEnvironmentTextures", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_disposeEnvironmentTextures(s.HandleOf<bl_EnvironmentTextures>(i[0], Kind::Environment)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "getTextureCubeInfo", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_TextureCubeInfo info{};
+                s.Check(i.Env(), bl_getTextureCubeInfo(s.HandleOf<bl_TextureCube>(i[0], Kind::TextureCube), &info));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("width", info.width);
+                result.Set("mipCount", info.mipCount);
+                result.Set("srgb", info.srgb);
+                result.Set("format", static_cast<int>(info.format));
+                return result;
+            });
+        }
+
         void BindExtras(Napi::Object api, const std::shared_ptr<State>& state)
         {
             Bind(api, state, "createSphere", [](State& s, const Napi::CallbackInfo& i) {
@@ -2482,6 +2670,7 @@ namespace Babylon::Plugins::LiteJSBinding
         BindUi(api, state);
         BindExtras(api, state);
         BindFamilies(api, state);
+        BindAssets(api, state);
         Bind(api, state, "disposeEngine", [](State& s, const Napi::CallbackInfo& i) {
             const auto engine = s.HandleOf<bl_EngineContext>(i[0], Kind::Engine);
             s.Check(i.Env(), bl_disposeEngine(engine));
@@ -2652,7 +2841,13 @@ namespace Babylon::Plugins::LiteJSBinding
         {
             Bind(api, state, add ? "addToScene" : "removeFromScene", [add](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
                 const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
-                s.Check(i.Env(), add ? bl_addToScene(scene, s.NodeOf(i[1])) : bl_removeFromScene(scene, s.NodeOf(i[1])));
+                if (s.Get(i[1]).kind == Kind::AssetContainer)
+                {
+                    const auto asset = s.HandleOf<bl_AssetContainer>(i[1], Kind::AssetContainer);
+                    s.Check(i.Env(), add ? bl_addAssetContainerToScene(scene, asset) : bl_removeAssetContainerFromScene(scene, asset));
+                }
+                else
+                    s.Check(i.Env(), add ? bl_addToScene(scene, s.NodeOf(i[1])) : bl_removeFromScene(scene, s.NodeOf(i[1])));
                 return i.Env().Undefined();
             });
         }

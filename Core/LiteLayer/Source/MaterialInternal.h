@@ -72,6 +72,11 @@ struct L_Material
     L_MaterialBlock blocks[4];
     size_t blockCount;
     L_Material* standardVariants[2];
+    bl_PbrMaterialInfo pbrInfo;
+    bool pbrBaseUv1;
+    bool pbrOrmUv1;
+    bool pbrBaseImage;
+    bool pbrOrmImage;
 };
 
 struct L_Texture
@@ -82,6 +87,10 @@ struct L_Texture
     uint64_t flags;
     uint16_t handleIndex;
     size_t references;
+    bl_TextureDataFormat2 format;
+    uint8_t mipCount;
+    uint8_t* mipPixels;
+    uint8_t samplerMaxLod;
 };
 
 struct L_Text
@@ -106,6 +115,9 @@ size_t l_uniformSlot(L_Material* m, bl_String name);
 size_t l_samplerSlot(L_Material* m, bl_String name);
 bool l_samplerSuffix(bl_String a, bl_String b);
 bool l_appendText(bl_Runtime* r, L_Text* t, bl_String s);
+bl_Status l_createAssetPixelTexture(bl_EngineContext engine, bl_Bytes pixels, uint32_t width,
+                                    uint32_t height, const bl_PixelsTexture2DOptions* options,
+                                    bool mips, bl_Texture2D* texture);
 void l_materialCleanup(bl_Runtime* r, L_Record* record);
 bl_Status l_materialFamily(bl_Material handle, L_Material** material);
 bl_Status l_standardSources(bl_Runtime* runtime, L_Material* pipeline, bool disableLighting);

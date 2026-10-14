@@ -295,6 +295,10 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
 
 bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
 {
+    if (m->record.kind == L_PBR)
+    {
+        return m->record.disposed ? BL_DISPOSED : BL_OK;
+    }
     if (m->record.kind == L_STANDARD && !m->blockCount)
     {
         L_Material* pipeline;

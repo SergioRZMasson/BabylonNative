@@ -1,4 +1,4 @@
-set(SOURCES "Source/Tests.ShaderCompiler.cpp")
+set(SOURCES "Source/Tests.ShaderCompiler.cpp" "Source/Tests.V2.cpp")
 add_executable(LiteShaderCompilerTests ${SOURCES})
 warnings_as_errors(LiteShaderCompilerTests)
 target_link_libraries(LiteShaderCompilerTests PRIVATE LiteShaderCompiler gtest_main d3dcompiler dxguid)

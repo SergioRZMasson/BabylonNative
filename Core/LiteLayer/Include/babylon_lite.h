@@ -2086,6 +2086,639 @@ bl_Status bl_disposeStandardMaterial(bl_StandardMaterial material);
  * atlas image composition remain ORIGINAL DEMO USER CODE, not hidden core APIs.
  */
 
+/* ---------------- Runtime assets / native HDR / shader-service revision2 --- */
+
+#define BL_RUNTIME_OPTIONS_VERSION_2 UINT32_C(2)
+#define BL_ASSET_SERVICE_VERSION UINT32_C(2)
+#define BL_ASSET_DOCUMENT_VERSION UINT32_C(2)
+#define BL_ASSET_SERVICE_VERSION_3 UINT32_C(3)
+#define BL_ASSET_DOCUMENT_VERSION_3 UINT32_C(3)
+#define BL_SHADER_COMPILER_SERVICE_VERSION_2 UINT32_C(2)
+#define BL_SHADER_COMPILE_VERSION_2 UINT32_C(2)
+
+typedef struct bl_AssetContainer
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_AssetContainer;
+
+typedef struct bl_PbrMaterial
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_PbrMaterial;
+
+typedef struct bl_EnvironmentTextures
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_EnvironmentTextures;
+
+typedef struct bl_TextureCube
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_TextureCube;
+
+typedef enum bl_AssetSourceKind
+{
+    BL_ASSET_SOURCE_URI = 0,
+    BL_ASSET_SOURCE_BYTES = 1
+} bl_AssetSourceKind;
+
+typedef struct bl_AssetSource
+{
+    bl_AssetSourceKind kind;
+    bl_String uri;
+    bl_Bytes bytes;
+} bl_AssetSource;
+
+typedef struct bl_AssetOptionalIndex
+{
+    bool present;
+    uint32_t value;
+} bl_AssetOptionalIndex;
+
+typedef struct bl_AssetOptionalSize
+{
+    bool present;
+    size_t value;
+} bl_AssetOptionalSize;
+
+typedef enum bl_AssetComponentType
+{
+    BL_ASSET_COMPONENT_I8 = 5120,
+    BL_ASSET_COMPONENT_U8 = 5121,
+    BL_ASSET_COMPONENT_I16 = 5122,
+    BL_ASSET_COMPONENT_U16 = 5123,
+    BL_ASSET_COMPONENT_U32 = 5125,
+    BL_ASSET_COMPONENT_F32 = 5126
+} bl_AssetComponentType;
+
+typedef enum bl_AssetAccessorShape
+{
+    BL_ASSET_SCALAR = 0,
+    BL_ASSET_VEC2 = 1,
+    BL_ASSET_VEC3 = 2,
+    BL_ASSET_VEC4 = 3,
+    BL_ASSET_MAT2 = 4,
+    BL_ASSET_MAT3 = 5,
+    BL_ASSET_MAT4 = 6
+} bl_AssetAccessorShape;
+
+typedef enum bl_AssetAlphaMode
+{
+    BL_ASSET_ALPHA_OPAQUE = 0,
+    BL_ASSET_ALPHA_MASK = 1,
+    BL_ASSET_ALPHA_BLEND = 2
+} bl_AssetAlphaMode;
+
+typedef enum bl_AssetPrimitiveMode
+{
+    BL_ASSET_MODE_POINTS = 0,
+    BL_ASSET_MODE_LINES = 1,
+    BL_ASSET_MODE_LINE_LOOP = 2,
+    BL_ASSET_MODE_LINE_STRIP = 3,
+    BL_ASSET_MODE_TRIANGLES = 4,
+    BL_ASSET_MODE_TRIANGLE_STRIP = 5,
+    BL_ASSET_MODE_TRIANGLE_FAN = 6
+} bl_AssetPrimitiveMode;
+
+#define BL_ASSET_TEXTURE_BASE_COLOR UINT32_C(1)
+#define BL_ASSET_TEXTURE_METALLIC_ROUGHNESS UINT32_C(2)
+#define BL_ASSET_TEXTURE_NORMAL UINT32_C(4)
+#define BL_ASSET_TEXTURE_OCCLUSION UINT32_C(8)
+#define BL_ASSET_TEXTURE_EMISSIVE UINT32_C(16)
+#define BL_ASSET_UNSUPPORTED_EXTENSION UINT64_C(1)
+#define BL_ASSET_UNSUPPORTED_BUFFER_URI UINT64_C(2)
+#define BL_ASSET_UNSUPPORTED_TEXTURE_INFO UINT64_C(4)
+#define BL_ASSET_UNSUPPORTED_EXTRA_RENDER_FEATURE UINT64_C(8)
+
+typedef struct bl_AssetBuffer
+{
+    bl_Bytes bytes;
+    size_t declaredByteLength;
+    bl_String uri;
+} bl_AssetBuffer;
+
+typedef struct bl_AssetBufferView
+{
+    uint32_t buffer;
+    size_t byteOffset;
+    size_t byteLength;
+    bl_AssetOptionalSize byteStride;
+} bl_AssetBufferView;
+
+typedef struct bl_AssetAccessor
+{
+    bl_AssetOptionalIndex bufferView;
+    size_t byteOffset;
+    size_t count;
+    bl_AssetComponentType componentType;
+    bl_AssetAccessorShape shape;
+    bool normalized;
+    bool sparsePresent;
+} bl_AssetAccessor;
+
+typedef struct bl_AssetAttribute
+{
+    bl_String semantic;
+    uint32_t accessor;
+} bl_AssetAttribute;
+
+typedef struct bl_AssetPrimitive
+{
+    const bl_AssetAttribute* attributes;
+    size_t attributeCount;
+    bl_AssetOptionalIndex indices;
+    bl_AssetOptionalIndex material;
+    bool hasMode;
+    bl_AssetPrimitiveMode mode;
+    size_t morphTargetCount;
+    uint64_t unsupportedFeatures;
+} bl_AssetPrimitive;
+
+typedef struct bl_AssetMesh
+{
+    bool hasName;
+    bl_String name;
+    const bl_AssetPrimitive* primitives;
+    size_t primitiveCount;
+} bl_AssetMesh;
+
+typedef struct bl_AssetNode
+{
+    bool hasName;
+    bl_String name;
+    bl_AssetOptionalIndex mesh;
+    const uint32_t* children;
+    size_t childCount;
+    bool hasMatrix;
+    bl_Mat4 matrix;
+    bool hasTranslation;
+    bl_Vec3 translation;
+    bool hasRotation;
+    bl_Quat rotation;
+    bool hasScale;
+    bl_Vec3 scale;
+    bool hasInstancing;
+    bl_AssetOptionalIndex instanceTranslation;
+    bl_AssetOptionalIndex instanceRotation;
+    bl_AssetOptionalIndex instanceScale;
+    bl_AssetOptionalIndex camera;
+    bl_AssetOptionalIndex skin;
+    uint64_t unsupportedFeatures;
+} bl_AssetNode;
+
+typedef struct bl_AssetPbrDefinition
+{
+    bool hasName;
+    bl_String name;
+    bool hasBaseColorFactor;
+    bl_Color4 baseColorFactor;
+    bool hasMetallicFactor;
+    double metallicFactor;
+    bool hasRoughnessFactor;
+    double roughnessFactor;
+    bool hasEmissiveFactor;
+    bl_Vec3 emissiveFactor;
+    bool hasAlphaMode;
+    bl_AssetAlphaMode alphaMode;
+    bool hasAlphaCutoff;
+    double alphaCutoff;
+    bool hasDoubleSided;
+    bool doubleSided;
+    uint32_t textureInfoFields;
+    uint64_t unsupportedFeatures;
+} bl_AssetPbrDefinition;
+
+typedef struct bl_AssetScene
+{
+    const uint32_t* roots;
+    size_t rootCount;
+} bl_AssetScene;
+
+typedef struct bl_AssetDiagnostic
+{
+    uint32_t sourceErrorCode;
+    bl_String message;
+} bl_AssetDiagnostic;
+
+typedef struct bl_ParsedGltf
+{
+    uint32_t structSize;
+    uint32_t version;
+    uint32_t gltfVersion;
+    const bl_AssetBuffer* buffers;
+    size_t bufferCount;
+    const bl_AssetBufferView* bufferViews;
+    size_t bufferViewCount;
+    const bl_AssetAccessor* accessors;
+    size_t accessorCount;
+    const bl_AssetMesh* meshes;
+    size_t meshCount;
+    const bl_AssetNode* nodes;
+    size_t nodeCount;
+    const bl_AssetPbrDefinition* materials;
+    size_t materialCount;
+    const bl_AssetScene* scenes;
+    size_t sceneCount;
+    bl_AssetOptionalIndex defaultScene;
+    const bl_String* extensionsUsed;
+    size_t extensionsUsedCount;
+    const bl_String* extensionsRequired;
+    size_t extensionsRequiredCount;
+    size_t animationCount;
+    size_t skinCount;
+    size_t imageCount;
+    size_t textureCount;
+    size_t samplerCount;
+    size_t cameraCount;
+    uint64_t unsupportedFeatures;
+    bl_AssetDiagnostic diagnostic;
+    void* allocation;
+} bl_ParsedGltf;
+
+typedef struct bl_AssetImage
+{
+    bl_AssetOptionalIndex bufferView;
+    bool hasMimeType;
+    bl_String mimeType;
+    bool hasUri;
+    bl_String uri;
+    uint64_t unsupportedFeatures;
+} bl_AssetImage;
+
+typedef struct bl_AssetTexture
+{
+    bl_AssetOptionalIndex source;
+    bl_AssetOptionalIndex sampler;
+    uint64_t unsupportedFeatures;
+} bl_AssetTexture;
+
+typedef struct bl_AssetSampler
+{
+    bl_AssetOptionalIndex magFilter;
+    bl_AssetOptionalIndex minFilter;
+    bl_AssetOptionalIndex wrapS;
+    bl_AssetOptionalIndex wrapT;
+} bl_AssetSampler;
+
+typedef struct bl_AssetTextureInfo
+{
+    bool present;
+    uint32_t index;
+    bl_AssetOptionalIndex texCoord;
+    bool hasScale;
+    double scale;
+    bool hasStrength;
+    double strength;
+    uint64_t unsupportedFeatures;
+} bl_AssetTextureInfo;
+
+typedef struct bl_AssetMaterialInputs
+{
+    bl_AssetTextureInfo baseColor;
+    bl_AssetTextureInfo metallicRoughness;
+    bl_AssetTextureInfo normal;
+    bl_AssetTextureInfo occlusion;
+    bl_AssetTextureInfo emissive;
+} bl_AssetMaterialInputs;
+
+/*
+ * Service3 parseGltf receives the document prefix of caller-owned FULL
+ * bl_ParsedGltf3 storage: document.structSize=sizeof(bl_ParsedGltf3), version3.
+ * Counts in document index the corresponding trailing descriptor arrays.
+ * Every returned span is valid until the exactly-once releaseGltf call on the
+ * SAME prefix pointer, including partial/error/cancelled results.
+ * Service2 receives only the unchanged version2 document. Service3's
+ * parseEnvironment/releaseEnvironment still use the unchanged version2 record.
+ */
+typedef struct bl_ParsedGltf3
+{
+    bl_ParsedGltf document;
+    const bl_AssetImage* images;
+    const bl_AssetTexture* textures;
+    const bl_AssetSampler* samplers;
+    const bl_AssetMaterialInputs* materialInputs;
+} bl_ParsedGltf3;
+
+typedef enum bl_EnvironmentFace
+{
+    BL_ENVIRONMENT_POSITIVE_X = 0,
+    BL_ENVIRONMENT_NEGATIVE_X = 1,
+    BL_ENVIRONMENT_POSITIVE_Y = 2,
+    BL_ENVIRONMENT_NEGATIVE_Y = 3,
+    BL_ENVIRONMENT_POSITIVE_Z = 4,
+    BL_ENVIRONMENT_NEGATIVE_Z = 5
+} bl_EnvironmentFace;
+
+typedef struct bl_EncodedEnvironmentFace
+{
+    uint32_t mip;
+    bl_EnvironmentFace face;
+    bl_String mimeType;
+    bl_Bytes encoded;
+} bl_EncodedEnvironmentFace;
+
+typedef struct bl_ParsedEnvironment
+{
+    uint32_t structSize;
+    uint32_t version;
+    bool hasFileVersion;
+    uint32_t fileVersion;
+    uint32_t width;
+    const bl_EncodedEnvironmentFace* faces;
+    size_t faceCount;
+    double irradiancePolynomial[27];
+    bl_AssetDiagnostic diagnostic;
+    void* allocation;
+} bl_ParsedEnvironment;
+
+typedef struct bl_AssetService
+{
+    uint32_t structSize;
+    uint32_t version;
+    void* userData;
+    bl_Status (*parseGltf)(void* userData, bl_Bytes source, bl_String baseUri,
+                           bl_ParsedGltf* result);
+    void (*releaseGltf)(void* userData, bl_ParsedGltf* result);
+    bl_Status (*parseEnvironment)(void* userData, bl_Bytes source, bl_ParsedEnvironment* result);
+    void (*releaseEnvironment)(void* userData, bl_ParsedEnvironment* result);
+} bl_AssetService;
+
+typedef enum bl_ShaderTextureDimension2
+{
+    BL_SHADER_TEXTURE_2D = 0,
+    BL_SHADER_TEXTURE_CUBE = 1
+} bl_ShaderTextureDimension2;
+
+typedef enum bl_ShaderTextureSampleType2
+{
+    BL_SHADER_TEXTURE_FLOAT = 0,
+    BL_SHADER_TEXTURE_SINT = 1,
+    BL_SHADER_TEXTURE_UINT = 2,
+    BL_SHADER_TEXTURE_DEPTH = 3
+} bl_ShaderTextureSampleType2;
+
+typedef enum bl_ShaderSamplerKind2
+{
+    BL_SHADER_SAMPLER_NONE = 0,
+    BL_SHADER_SAMPLER_REGULAR = 1,
+    BL_SHADER_SAMPLER_COMPARISON = 2
+} bl_ShaderSamplerKind2;
+
+#define BL_SHADER_TEXTURE_USE_LOAD UINT32_C(1)
+#define BL_SHADER_TEXTURE_USE_SAMPLE UINT32_C(2)
+#define BL_SHADER_TEXTURE_USE_SAMPLE_LEVEL UINT32_C(4)
+#define BL_SHADER_TEXTURE_USE_SAMPLE_BIAS UINT32_C(8)
+#define BL_SHADER_TEXTURE_USE_SAMPLE_GRAD UINT32_C(16)
+#define BL_SHADER_TEXTURE_USE_SAMPLE_COMPARE UINT32_C(32)
+#define BL_SHADER_TEXTURE_USE_DIMENSIONS UINT32_C(64)
+
+typedef struct bl_InstanceAttributeDeclaration
+{
+    bl_String name;
+    uint32_t location;
+    uint32_t matrixColumn;
+    uint32_t byteOffset;
+    uint32_t byteStride;
+} bl_InstanceAttributeDeclaration;
+
+typedef struct bl_ShaderCompileRequest2
+{
+    uint32_t structSize;
+    uint32_t version;
+    bl_ShaderCompileRequest base;
+    const bl_InstanceAttributeDeclaration* instanceAttributes;
+    size_t instanceAttributeCount;
+} bl_ShaderCompileRequest2;
+
+typedef struct bl_ReflectedInstanceAttribute
+{
+    bl_String name;
+    uint32_t location;
+    uint32_t matrixColumn;
+    uint32_t byteOffset;
+    uint32_t byteStride;
+    uint8_t components;
+} bl_ReflectedInstanceAttribute;
+
+typedef struct bl_ReflectedTexture2
+{
+    bl_ReflectedTexture binding;
+    bl_ShaderTextureDimension2 dimension;
+    bl_ShaderTextureSampleType2 sampleType;
+    bl_ShaderSamplerKind2 samplerKind;
+    uint32_t samplingOperations;
+} bl_ReflectedTexture2;
+
+typedef struct bl_ShaderCompileResult2
+{
+    uint32_t structSize;
+    uint32_t version;
+    bl_ShaderCompileResult base;
+    const bl_ReflectedInstanceAttribute* instanceAttributes;
+    size_t instanceAttributeCount;
+    const bl_ReflectedTexture2* textureInfo;
+    size_t textureInfoCount;
+} bl_ShaderCompileResult2;
+
+typedef struct bl_ShaderCompilerService2
+{
+    uint32_t structSize;
+    uint32_t version;
+    void* userData;
+    bl_Status (*compile)(void* userData, const bl_ShaderCompileRequest2* request,
+                         bl_ShaderCompileResult2* result);
+    void (*release)(void* userData, bl_ShaderCompileResult2* result);
+} bl_ShaderCompilerService2;
+
+typedef struct bl_RuntimeOptions2
+{
+    uint32_t structSize;
+    uint32_t version;
+    bl_RuntimeOptions base;
+    const bl_AssetService* assets;
+    const bl_ShaderCompilerService2* shaderCompiler2;
+} bl_RuntimeOptions2;
+
+typedef struct bl_EnvironmentOptions
+{
+    bl_String brdfUrl;
+    bl_String groundTextureUrl;
+    bl_String skyboxUrl;
+    bl_OptionalNumber skyboxSize;
+    bl_OptionalBool skipSkybox;
+    bl_OptionalBool skipGround;
+} bl_EnvironmentOptions;
+
+typedef struct bl_AssetEntities
+{
+    const bl_SceneNode* data;
+    size_t count;
+} bl_AssetEntities;
+
+typedef struct bl_ThinInstanceView
+{
+    bl_F32Span matrices;
+    size_t count;
+    size_t capacity;
+    uint64_t version;
+    bool worldBoundsEnabled;
+} bl_ThinInstanceView;
+
+typedef struct bl_PbrMaterialInfo
+{
+    bl_Texture2D baseColorTexture;
+    bl_Texture2D ormTexture;
+    bool hasBaseColorFactor;
+    bl_Color4 baseColorFactor;
+    double metallicFactor;
+    double roughnessFactor;
+    double reflectance;
+    double environmentIntensity;
+    double directIntensity;
+    double alpha;
+    double occlusionStrength;
+    bool doubleSided;
+    bool alphaBlend;
+    bool enableSpecularAA;
+} bl_PbrMaterialInfo;
+
+typedef enum bl_TextureDataFormat2
+{
+    BL_TEXTURE_DATA_RGBA8 = 0,
+    BL_TEXTURE_DATA_RGBA16F = 1
+} bl_TextureDataFormat2;
+
+typedef struct bl_SamplerInfo2
+{
+    bl_AddressMode addressModeU;
+    bl_AddressMode addressModeV;
+    bl_AddressMode addressModeW;
+    bl_FilterMode minFilter;
+    bl_FilterMode magFilter;
+    bl_FilterMode mipFilter;
+    double lodMinClamp;
+    double lodMaxClamp;
+    uint32_t maxAnisotropy;
+} bl_SamplerInfo2;
+
+typedef struct bl_TextureCubeInfo
+{
+    uint32_t width;
+    uint32_t mipCount;
+    bl_TextureDataFormat2 format;
+    bool srgb;
+} bl_TextureCubeInfo;
+
+typedef struct bl_EnvironmentInfo
+{
+    bl_TextureCube specularCube;
+    bl_Texture2D brdfLut;
+    bl_F32Span irradianceSH;
+    bl_F32Span sphericalHarmonics;
+    double lodGenerationScale;
+    double lodGenerationOffset;
+    uint32_t brdfWidth;
+    uint32_t brdfHeight;
+    bl_TextureDataFormat2 brdfFormat;
+    bl_SamplerInfo2 cubeSampler;
+    bl_SamplerInfo2 brdfSampler;
+} bl_EnvironmentInfo;
+
+bl_Status bl_createRuntime2(const bl_RuntimeOptions2* options, bl_Runtime** runtime);
+bl_Status bl_loadGltf(bl_EngineContext engine, const bl_AssetSource* source,
+                      bl_AssetContainer* container);
+bl_Status bl_loadEnvironment(bl_SceneContext scene, bl_String url,
+                             const bl_EnvironmentOptions* options,
+                             bl_EnvironmentTextures* environment);
+bl_Status bl_createDefaultCamera(bl_SceneContext scene, bl_ArcRotateCamera* camera);
+bl_Status bl_addAssetContainerToScene(bl_SceneContext scene, bl_AssetContainer container);
+bl_Status bl_removeAssetContainerFromScene(bl_SceneContext scene, bl_AssetContainer container);
+bl_Status bl_getAssetContainerEntities(bl_AssetContainer container, bl_AssetEntities* entities);
+bl_Status bl_disposeAssetContainer(bl_AssetContainer container);
+bl_Status bl_setThinInstances(bl_Mesh mesh, bl_F32Span matrices, size_t count);
+bl_Status bl_getThinInstances(bl_Mesh mesh, bl_ThinInstanceView* instances);
+bl_Status bl_enableThinInstanceWorldBounds(bl_Mesh mesh);
+bl_Status bl_pbrMaterialAsMaterial(bl_PbrMaterial source, bl_Material* material);
+bl_Status bl_materialAsPbrMaterial(bl_Material source, bl_PbrMaterial* material);
+bl_Status bl_getPbrMaterialInfo(bl_PbrMaterial material, bl_PbrMaterialInfo* info);
+bl_Status bl_disposePbrMaterial(bl_PbrMaterial material);
+bl_Status bl_getEnvironmentInfo(bl_EnvironmentTextures environment, bl_EnvironmentInfo* info);
+bl_Status bl_disposeEnvironmentTextures(bl_EnvironmentTextures environment);
+bl_Status bl_getTextureCubeInfo(bl_TextureCube texture, bl_TextureCubeInfo* info);
+
+/*
+ * Version2 exact sizeof/version prefixes; base shader contract remains1.
+ * Tables are copied, userdata/allocator lives through runtime destruction.
+ * Results start zero with initialized prefix. EVERY callback invocation, even
+ * failed/partial/cancelled/malformed, has exactly one paired release. All retained
+ * data is copied before release; no exceptions or host/service reentry.
+ *
+ * Asset provider owns raw GLB/UTF8/JSON/.env schema only. Input is call-only;
+ * result strings, binary slices and arrays are provider-owned until release.
+ * Core validates counts/ranges/alignment/UTF8/overflow/features and constructs
+ * all native engine objects/accessor conversions/hierarchy/instances/materials.
+ * Presence is retained; unused optional values are ignored, not fake defaults.
+ * No JSON/vendor/platform/GPU/VM type or dependency enters this boundary.
+ *
+ * Completed synchronous loads are a blocking JS Promise embedding adaptation,
+ * not browser network concurrency. Run between host frames; active-frame/input/
+ * UI/service callback loads return BUSY before IO. No pending job/cancel token
+ * framework. Actual CANCELLED propagates after cleanup; NOT_READY retains no job.
+ * Failure publishes no identities/scene mutations, outputs unchanged; submitted
+ * setup retires safely but cannot be unsubmitted. Success does not imply GPU idle.
+ *
+ * Raw self-contained magic-selected GLB only: indexed triangles/F32 normals,
+ * ordinary supported node transforms and EXT_mesh_gpu_instancing. Missing UV0
+ * ->zeros, missing tangents/UV2 absent; unsupported textures/normal generation/
+ * colors/sparse/overstride/skins/morph/animation/other extensions error, no proxy.
+ * Core source root reflection(-1,1,1), local instance TRS and visible world bounds
+ * frame default camera. No asset-name/hash/count specialization.
+ *
+ * entities is the TOP-LEVEL source list, not flattened meshes, borrowed until
+ * container disposal. Recursive adds preserve source order/duplicate ownership
+ * and source partial-add behavior; remove preserves child arrays. Last owning
+ * scene retires meshes despite container references; no resurrection. Disposal
+ * helpers are idempotent native GC adaptations, BUSY while live owners remain.
+ *
+ * Thin data: aligned finite F32 whole slab copied, multiple16 floats, count within
+ * slab/UINT32_MAX and checked byte sizes. Capacity=count, every set bumps version,
+ * dirties source range and reuses adequate GPU storage. Count0 draws0. View expires
+ * on set/disposal; missing data NOT_READY. Bounds require instances/source453,
+ * use world*instance*local bounds and source zero-linear1e-9 skip. F64/colors/
+ * culling deferred. Source get/set vector identity is preserved by user bindings;
+ * PBR base colors transport source array[0..3] via Color4, not vector aliases.
+ *
+ * PBR info is effective props, not raw factors: base/ORM source-created1x1
+ * defaults are white for missing material; missing assets are NEVER white
+ * fallbacks. Original IEC sRGB factor bytes/ORM rounding/specularAA/IBL retained.
+ * Environment options required, brdfUrl nonempty, default skip flags FALSE;
+ * supported first slice explicitly sets both TRUE. Any background URL or present
+ * skyboxSize is UNSUPPORTED, never ignored. Exposure.8/contrast1.2/standard tone
+ * mapping belong to SCENE, not EnvironmentInfo. Every successful load retains
+ * source scene-owned releases, including replaced environment history, until
+ * scene disposal. Other material/scene owners and actual GPU retirement protected.
+ *
+ * RGBD GPU raster uses original textureLoad integer pixels:
+ * pow(rgb,2.2)/max(alpha,1/255),alpha1 ->actual RGBA16F; cube Y flip, BRDF no flip.
+ * Complete faces/mips and actual format/filter/RT/view capabilities validated.
+ * Source GPU/F16 bit readbacks are required; CPU query structs are NOT proof.
+ * RGBA8-only legacy updates reject F16 before mutation. SH27/36 F32 spans borrowed
+ * until dispose; LOD.8/0, source trilinear cube/bilinear BRDF sampler semantics.
+ *
+ * Compiler2 has geometry's six original semantics plus separate4 matrix columns,
+ * per-instance64-byte stride/offset16*column, actual active/dead IR/link metadata.
+ * textureInfo is one-to-one with base bindings. Dimension/sample type/sampler
+ * kind/operation bits are shader semantics, NOT format/filter capability.
+ * LOAD-only may use NONE/empty samplerName/UINT32_MAX sampler bindings; still a
+ * real active texture binding. V2 arrays share base.allocation, release2 only.
+ * No v1 guessed fallback or payload reinterpretation, no compute-stage API.
+ * Old v1 Shader/Standard services/signatures/layouts are unchanged.
+ */
+
 #ifdef __cplusplus
 }
 #endif

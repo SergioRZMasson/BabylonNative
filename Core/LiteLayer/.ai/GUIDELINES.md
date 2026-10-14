@@ -281,6 +281,19 @@ For measurements and interaction with host agents:
 
 ## 8. Test-driven implementation and rewrite workflow
 
+Current milestone priority (user decision, 2026-10-13): finish the minimum
+reusable **native runtime GLB loader**, then a visible native application for
+drag-and-drop testing of different GLBs. Pixel-perfect scene35 images and full
+camera-control implementation are not acceptance prerequisites for this milestone.
+Preserve their existing results; stop expanding those diagnostics. Keep parsing,
+typed-handle, allocation, failure, ownership and GPU-retirement safety checks.
+Load raw files/bytes at runtime without asset-name/hash/count specialization or
+regeneration. Exercise varied models and record the exact supported features;
+unsupported data must produce actionable errors, not silent substitutions.
+The sandbox is an outside-Core host, not a browser or new engine framework.
+Use the current working shader service provisionally; evaluating a replacement
+shader-translation strategy comes after the loader is usable for manual testing.
+
 1. Read this policy, the entire relevant public contract, original TS bodies,
    existing native tests and the performance report before designing changes.
    Keep implementation exploration isolated from NativeEngine/generated engine

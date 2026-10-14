@@ -2,6 +2,7 @@
 #include "CompilerBackend.h"
 
 #include <bgfx/bgfx.h>
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <new>
@@ -37,6 +38,9 @@ namespace
         std::vector<bl_ReflectedUniformBlock> blocks;
         std::vector<bl_ReflectedUniform> uniforms;
         std::vector<bl_ReflectedTexture> textures;
+        std::vector<InstanceAttribute> instanceDeclarations;
+        std::vector<bl_ReflectedInstanceAttribute> instanceAttributes;
+        std::vector<bl_ReflectedTexture2> textureInfo;
         std::string diagnostics;
     };
 
@@ -61,7 +65,7 @@ namespace
         }
     }
 
-    void Reflect(Storage& storage)
+    void Reflect(Storage& storage, const std::vector<InstanceAttribute>& instances = {})
     {
         using Binding = std::pair<uint32_t, uint32_t>;
         std::map<Binding, uint32_t> blockIndices;
@@ -72,8 +76,18 @@ namespace
             {
                 throw std::runtime_error("Vertex attribute must be a canonical vec2/vec3/vec4 stream.");
             }
-            storage.attributes.push_back({String(attribute.name), attribute.location,
-                Semantic(attribute.semantic), attribute.components});
+            const auto instance = std::find_if(instances.begin(), instances.end(),
+                [&](const InstanceAttribute& item) { return item.location == attribute.location; });
+            if (instance != instances.end())
+            {
+                storage.instanceAttributes.push_back({String(instance->name), attribute.location,
+                    instance->column, instance->offset, instance->stride, attribute.components});
+            }
+            else
+            {
+                storage.attributes.push_back({String(attribute.name), attribute.location,
+                    Semantic(attribute.semantic), attribute.components});
+            }
         }
         const auto reflectStage = [&](const Stage& stage, uint32_t stages) {
             for (const auto& block : stage.blocks)
@@ -139,12 +153,29 @@ namespace
                         throw std::runtime_error("WGSL stages disagree about a shared texture/sampler pairing.");
                     }
                     previous.stages |= stages;
+                    auto& extended = storage.textureInfo[textureIndices.at(binding)];
+                    if (static_cast<uint32_t>(extended.sampleType) != texture.sampleType ||
+                        extended.dimension != (texture.dimension == 4 ? BL_SHADER_TEXTURE_CUBE : BL_SHADER_TEXTURE_2D) ||
+                        static_cast<uint32_t>(extended.samplerKind) != texture.samplerKind)
+                    {
+                        throw std::runtime_error("Stages disagree about texture semantics.");
+                    }
+                    extended.binding.stages |= stages;
+                    extended.samplingOperations |= texture.operations;
                     continue;
                 }
                 textureIndices[binding] = static_cast<uint32_t>(storage.textures.size());
                 storage.textures.push_back({String(texture.name), String(texture.samplerName), texture.group, texture.binding,
                     texture.samplerGroup, texture.samplerBinding, stages, String(texture.uniformName),
                     static_cast<uint8_t>(texture.stage)});
+                if (texture.dimension != 2 && texture.dimension != 4)
+                {
+                    throw std::runtime_error("Texture dimension is outside the v2 2D/cube contract.");
+                }
+                storage.textureInfo.push_back({storage.textures.back(),
+                    texture.dimension == 4 ? BL_SHADER_TEXTURE_CUBE : BL_SHADER_TEXTURE_2D,
+                    static_cast<bl_ShaderTextureSampleType2>(texture.sampleType),
+                    static_cast<bl_ShaderSamplerKind2>(texture.samplerKind), texture.operations});
             }
         };
         reflectStage(storage.program.vertex, BL_STAGE_VERTEX);
@@ -236,9 +267,108 @@ namespace
             *result = {};
         }
     }
+
+    bl_Status Compile2(void*, const bl_ShaderCompileRequest2* request,
+            bl_ShaderCompileResult2* result)
+        {
+            if (!result)
+                return BL_INVALID_ARGUMENT;
+            *result = {};
+            result->structSize = sizeof(*result);
+            result->version = BL_SHADER_COMPILE_VERSION_2;
+            if (!request || request->structSize != sizeof(*request) ||
+                request->version != BL_SHADER_COMPILE_VERSION_2 ||
+                request->base.contractVersion != BL_CONTRACT_VERSION ||
+                request->base.vertex.stage != BL_STAGE_VERTEX ||
+                request->base.fragment.stage != BL_STAGE_FRAGMENT ||
+                (request->instanceAttributeCount != 0 && request->instanceAttributeCount != 4) ||
+                (request->instanceAttributeCount && !request->instanceAttributes))
+                return Diagnostic(result->base, BL_INVALID_ARGUMENT, "Invalid v2 shader request.");
+            if (request->base.backend != BL_RENDERER_D3D11 ||
+                request->base.bgfxShaderBinaryVersion != 12)
+                return Diagnostic(result->base, BL_UNSUPPORTED, "D3D11 container v12 required.");
+            if (request->base.homogeneousDepth || request->base.originBottomLeft)
+                return Diagnostic(result->base, BL_INVALID_ARGUMENT, "Wrong D3D11 clip/origin.");
+            try
+            {
+                std::vector<InstanceAttribute> instances;
+                uint32_t columns = 0;
+                for (size_t i = 0; i < request->instanceAttributeCount; ++i)
+                {
+                    const auto& input = request->instanceAttributes[i];
+                    const std::string name(View(input.name));
+                    if (input.matrixColumn > 3 || input.byteStride != 64 ||
+                        input.byteOffset != input.matrixColumn * 16 ||
+                        (columns & (1u << input.matrixColumn)))
+                        throw std::invalid_argument("Invalid instance declaration layout.");
+                    for (const auto& previous : instances)
+                        if (previous.name == name || previous.location == input.location)
+                            throw std::invalid_argument("Duplicate instance declaration.");
+                    columns |= 1u << input.matrixColumn;
+                    instances.push_back({name, input.location, input.matrixColumn,
+                        input.byteOffset, input.byteStride});
+                }
+                auto storage = std::make_unique<Storage>();
+                storage->instanceDeclarations = std::move(instances);
+                storage->program = CompileD3D11WithInstances(
+                    View(request->base.vertex.wgsl), View(request->base.vertex.entryPoint),
+                    View(request->base.fragment.wgsl), View(request->base.fragment.entryPoint),
+                    storage->instanceDeclarations);
+                Reflect(*storage, storage->instanceDeclarations);
+                auto& base = result->base;
+                base.vertexContainer = {storage->program.vertex.bytes.data(), storage->program.vertex.bytes.size()};
+                base.fragmentContainer = {storage->program.fragment.bytes.data(), storage->program.fragment.bytes.size()};
+                base.attributes = storage->attributes.data();
+                base.attributeCount = storage->attributes.size();
+                base.uniformBlocks = storage->blocks.data();
+                base.uniformBlockCount = storage->blocks.size();
+                base.uniforms = storage->uniforms.data();
+                base.uniformCount = storage->uniforms.size();
+                base.textures = storage->textures.data();
+                base.textureCount = storage->textures.size();
+                base.diagnostics = String(storage->diagnostics);
+                result->instanceAttributes = storage->instanceAttributes.data();
+                result->instanceAttributeCount = storage->instanceAttributes.size();
+                result->textureInfo = storage->textureInfo.data();
+                result->textureInfoCount = storage->textureInfo.size();
+                base.allocation = storage.release();
+                return BL_OK;
+            }
+            catch (const std::invalid_argument& error)
+            {
+                return Diagnostic(result->base, BL_INVALID_ARGUMENT, error.what());
+            }
+            catch (const std::bad_alloc&)
+            {
+                return Diagnostic(result->base, BL_OUT_OF_MEMORY, "V2 shader allocation failed.");
+            }
+            catch (const std::exception& error)
+            {
+                return Diagnostic(result->base, BL_SHADER_ERROR, error.what());
+            }
+            catch (...)
+            {
+                return Diagnostic(result->base, BL_SHADER_ERROR, "Unexpected v2 compiler failure.");
+            }
+        }
+
+        void Release2(void*, bl_ShaderCompileResult2* result)
+        {
+            if (result)
+            {
+                delete static_cast<Storage*>(result->base.allocation);
+                *result = {};
+            }
+    }
 }
 
 extern "C" bl_ShaderCompilerService bl_shaderCompilerService(void)
 {
     return {nullptr, Compile, Release};
+}
+
+extern "C" bl_ShaderCompilerService2 bl_shaderCompilerService2(void)
+{
+    return {sizeof(bl_ShaderCompilerService2), BL_SHADER_COMPILER_SERVICE_VERSION_2,
+        nullptr, Compile2, Release2};
 }

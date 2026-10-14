@@ -1,5 +1,7 @@
 #include "LiteInternal.h"
 #include "ArcRotateInternal.h"
+#include "EnvironmentInternal.h"
+#include "PbrInternal.h"
 #include <bx/cpu.h>
 #include <bx/os.h>
 
@@ -286,6 +288,8 @@ void l_unregisterScene(L_Scene* s)
 void l_sceneCleanup(bl_Runtime* r, L_Record* record)
 {
     L_Scene* s = (L_Scene*)record;
+    l_cleanupPbrScene(r, s);
+    l_environmentCleanupScene(r, s);
     l_unregisterScene(s);
     s->disposing = true;
     l_enterDispatch(r);
@@ -760,17 +764,12 @@ bl_Status bl_setSceneProperties2(bl_SceneContext h, const bl_SceneProperties2* p
     return BL_OK;
 }
 
-static bl_Status inspectHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n, size_t* count, size_t depth)
+static bl_Status inspectSceneEntity(bl_Runtime* r, L_Scene* s, L_Node* n)
 {
-    if (depth > r->count || n->record.disposed)
+    if (n->record.disposed)
     {
-        return n->record.disposed ? BL_DISPOSED : BL_INVALID_ARGUMENT;
+        return BL_DISPOSED;
     }
-    if (*count == SIZE_MAX)
-    {
-        return BL_OUT_OF_MEMORY;
-    }
-    ++*count;
     if (n->record.kind == L_MESH)
     {
         L_Mesh* m = (L_Mesh*)n;
@@ -790,6 +789,21 @@ static bl_Status inspectHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n, size_t* 
             }
         }
     }
+    return BL_OK;
+}
+
+static bl_Status inspectHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n, size_t* count, size_t depth)
+{
+    if (depth > r->count)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    L_TRY(inspectSceneEntity(r, s, n));
+    if (*count == SIZE_MAX)
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    ++*count;
     for (size_t i = 0; i < n->childCount; ++i)
     {
         L_Node* c;
@@ -806,7 +820,7 @@ static bl_Status inspectHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n, size_t* 
     return BL_OK;
 }
 
-static void addHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n)
+static void appendSceneMember(bl_Runtime* r, L_Scene* s, L_Node* n)
 {
     bool owner = true;
     for (size_t i = 0; i < s->memberCount; ++i)
@@ -839,6 +853,11 @@ static void addHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n)
     l_pin(&n->record);
     n->highPrecision = s->engine->highPrecision;
     n->dirty = true;
+}
+
+static void addHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n)
+{
+    appendSceneMember(r, s, n);
     for (size_t i = 0; i < n->childCount; ++i)
     {
         L_Node* c = (L_Node*)l_peek(r, n->children[i]._id);
@@ -847,17 +866,8 @@ static void addHierarchy(bl_Runtime* r, L_Scene* s, L_Node* n)
     }
 }
 
-bl_Status bl_addToScene(bl_SceneContext h, bl_SceneNode entity)
+static bl_Status reserveSceneMembers(bl_Runtime* r, L_Scene* s, size_t count)
 {
-    L_GET(h, L_SCENE, L_Scene, s);
-    bl_Runtime* r = h._runtime;
-    if (entity._runtime != r)
-    {
-        return BL_WRONG_RUNTIME;
-    }
-    L_NODE_GET(entity, n);
-    size_t count = 0;
-    L_TRY(inspectHierarchy(r, s, n, &count, 0));
     if (count > SIZE_MAX - s->memberCount)
     {
         return BL_OUT_OF_MEMORY;
@@ -912,8 +922,94 @@ bl_Status bl_addToScene(bl_SceneContext h, bl_SceneNode entity)
         s->memberOwners = owners;
         s->memberCapacity = cap;
     }
+    return BL_OK;
+}
+
+bl_Status bl_addToScene(bl_SceneContext h, bl_SceneNode entity)
+{
+    L_GET(h, L_SCENE, L_Scene, s);
+    bl_Runtime* r = h._runtime;
+    if (entity._runtime != r)
+    {
+        return BL_WRONG_RUNTIME;
+    }
+    L_NODE_GET(entity, n);
+    size_t count = 0;
+    L_TRY(inspectHierarchy(r, s, n, &count, 0));
+    L_TRY(reserveSceneMembers(r, s, count));
     addHierarchy(r, s, n);
     return BL_OK;
+}
+
+struct L_AssetAddFrame
+{
+    L_Node* node;
+    size_t nextChild;
+};
+
+bl_Status l_addAssetHierarchy(bl_Runtime* r, L_Scene* s, L_Node* root)
+{
+    size_t bytes;
+    if (!l_size(r->count, sizeof(L_AssetAddFrame), &bytes))
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    L_AssetAddFrame* stack = (L_AssetAddFrame*)l_alloc(r, bytes);
+    if (!stack)
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    size_t depth = 0;
+    L_Node* node = root;
+    bl_Status status = BL_OK;
+    for (;;)
+    {
+        if (node)
+        {
+            // Inspect this entity only: the source commits earlier siblings on a later error.
+            status = inspectSceneEntity(r, s, node);
+            if (status == BL_OK)
+            {
+                status = reserveSceneMembers(r, s, 1);
+            }
+            if (status != BL_OK)
+            {
+                break;
+            }
+            appendSceneMember(r, s, node);
+            stack[depth++] = {node, 0};
+        }
+        while (depth && stack[depth - 1].nextChild == stack[depth - 1].node->childCount)
+        {
+            --depth;
+        }
+        if (!depth)
+        {
+            break;
+        }
+        L_AssetAddFrame* frame = stack + depth - 1;
+        status = l_node(frame->node->children[frame->nextChild++], &node);
+        if (status != BL_OK)
+        {
+            break;
+        }
+        for (size_t i = 0; i < depth; ++i)
+        {
+            if (stack[i].node == node)
+            {
+                status = BL_INVALID_ARGUMENT;
+                break;
+            }
+        }
+        if (status != BL_OK || depth == r->count)
+        {
+            status = BL_INVALID_ARGUMENT;
+            break;
+        }
+        l_parent(node, frame->node);
+    }
+    l_free(r, stack);
+    return status;
 }
 
 bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n)
@@ -965,6 +1061,7 @@ bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n)
                     (s->memberCount - i - 1) * sizeof(*s->standardPackets));
             s->standardPackets[s->memberCount - 1] = {};
         }
+        l_removePbrPacket(r, s, i);
         --s->memberCount;
     }
     if (removedOwner && n->sceneCount)
@@ -1010,7 +1107,7 @@ bl_Status bl_registerScene(bl_SceneContext h)
     {
         ++count;
     }
-    if (count >= s->engine->native.target.viewCount)
+    if (count + s->engine->assetViewCount >= s->engine->native.target.viewCount)
     {
         return BL_INVALID_ARGUMENT;
     }
@@ -1036,6 +1133,7 @@ bl_Status bl_registerScene(bl_SceneContext h)
         }
     }
     L_TRY(l_prepareStandardPackets(h._runtime, s, false, 0));
+    L_TRY(l_preparePbrScene(h._runtime, s));
     if (s->engine->lastScene)
     {
         s->engine->lastScene->next = s;
@@ -1244,8 +1342,16 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
                             camera->world.values[14]};
         for (size_t i = 0; i < count; ++i)
         {
-            status = l_drawMaterial(r, e, s, draws[i].material, draws[i].mesh, &view, &projection,
-                                    position, viewId, draws[i].standard);
+            if (draws[i].material->record.kind == L_PBR)
+            {
+                status = l_drawPbr(r, s, draws[i].mesh, draws[i].material, &view, &projection,
+                                   position, viewId);
+            }
+            else
+            {
+                status = l_drawMaterial(r, e, s, draws[i].material, draws[i].mesh, &view,
+                                        &projection, position, viewId, draws[i].standard);
+            }
             if (status != BL_OK)
             {
                 break;
@@ -1282,8 +1388,9 @@ static bl_Status render(L_Engine* e, double delta, bool driven)
     unsigned view = 0;
     for (L_Scene* s = e->scenes; s; s = s->next, ++view)
     {
-        status =
-            renderScene(r, e, s, delta, (uint16_t)(e->native.target.firstViewId + view), view == 0);
+        uint16_t offset = e->assetViewCount;
+        status = renderScene(r, e, s, delta,
+                             (uint16_t)(e->native.target.firstViewId + offset + view), view == 0);
         if (status != BL_OK)
         {
             break;

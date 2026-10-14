@@ -254,6 +254,12 @@ void l_meshCleanup(bl_Runtime* r, L_Record* record)
         }
     }
     l_geometryCleanup(r, &m->geometry);
+    if (m->hasInstances && m->instanceBufferIndex != BL_INVALID_BGFX_HANDLE)
+    {
+        bgfx::destroy(bgfx::DynamicVertexBufferHandle{m->instanceBufferIndex});
+    }
+    l_free(r, m->instanceMatrices);
+    m->instanceMatrices = NULL;
     l_cleanNode(r, &m->node);
     l_unpin(&m->engine->record);
     record->disposed = true;
@@ -378,7 +384,7 @@ bl_Status bl_getMeshProperties(bl_Mesh h, bl_MeshProperties* out)
     {
         return BL_INVALID_ARGUMENT;
     }
-    if (!L_NULL(m->material) && h._runtime->slots[(uint32_t)m->material._id - 1].kind == L_STANDARD)
+    if (!L_NULL(m->material) && h._runtime->slots[(uint32_t)m->material._id - 1].kind != L_MATERIAL)
     {
         return BL_UNSUPPORTED;
     }
