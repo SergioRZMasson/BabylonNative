@@ -16,21 +16,25 @@ static uint8_t srgbByte(double value)
 static void pbrCleanup(bl_Runtime* runtime, L_Record* record)
 {
     L_Material* material = (L_Material*)record;
-    bl_Texture2D base = material->pbrInfo.baseColorTexture;
-    bl_Texture2D orm = material->pbrInfo.ormTexture;
-    L_Record* baseRecord = l_peek(runtime, base._id);
-    L_Record* ormRecord = l_peek(runtime, orm._id);
-    if (baseRecord && ((L_Texture*)baseRecord)->references)
+    const bl_Texture2D textures[5] = {material->pbrInfo.baseColorTexture,
+                                      material->pbrInfo.ormTexture, material->pbrNormalTexture,
+                                      material->pbrOcclusionTexture, material->pbrEmissiveTexture};
+    for (unsigned i = 0; i < 5; ++i)
     {
-        --((L_Texture*)baseRecord)->references;
-    }
-    if (ormRecord && ((L_Texture*)ormRecord)->references)
-    {
-        --((L_Texture*)ormRecord)->references;
+        L_Record* texture = l_peek(runtime, textures[i]._id);
+        if (texture && ((L_Texture*)texture)->references)
+        {
+            --((L_Texture*)texture)->references;
+        }
     }
     l_materialCleanup(runtime, record);
-    bl_disposeTexture2D(base);
-    bl_disposeTexture2D(orm);
+    for (unsigned i = 0; i < 5; ++i)
+    {
+        if (!L_NULL(textures[i]))
+        {
+            bl_disposeTexture2D(textures[i]);
+        }
+    }
     record->disposed = true;
 }
 
@@ -73,6 +77,11 @@ bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDe
     material->pbrInfo = {base, orm, false, {1, 1, 1, 1}, 1,     1,   0.04, 1,
                          1,    1,   0,     false,        false, true};
     material->pbrInfo.doubleSided = !material->culling;
+    material->pbrNormalScale = 1;
+    material->pbrEmissiveFactor =
+        source && source->hasEmissiveFactor ? source->emissiveFactor : bl_Vec3{};
+    material->pbrExtra = material->pbrEmissiveFactor.x != 0 || material->pbrEmissiveFactor.y != 0 ||
+                         material->pbrEmissiveFactor.z != 0;
     ++((L_Texture*)l_peek(runtime, base._id))->references;
     ++((L_Texture*)l_peek(runtime, orm._id))->references;
     if (source && source->hasName)

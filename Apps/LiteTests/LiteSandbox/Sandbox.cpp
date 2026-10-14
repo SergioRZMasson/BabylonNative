@@ -551,9 +551,16 @@ static std::string jsonString(const std::string& text)
     return stream.str();
 }
 
+#if defined(LITE_ASSET_MATERIAL_ORACLE_TEST)
+#include "../AssetTests/MaterialOracle.h"
+#endif
+
 int wmain(int argc, wchar_t** argv)
 {
     Host host;
+#if defined(LITE_ASSET_MATERIAL_ORACLE_TEST)
+    MaterialOracle oracle;
+#endif
     std::filesystem::path smoke;
     std::filesystem::path output;
     wchar_t executable[32768] = {};
@@ -642,6 +649,9 @@ int wmain(int argc, wchar_t** argv)
         assets.releaseEnvironment = releaseEnvironmentForHost;
         auto compiler = bl_shaderCompilerService();
         auto compiler2 = bl_shaderCompilerService2();
+#if defined(LITE_ASSET_MATERIAL_ORACLE_TEST)
+        compiler2 = materialOracleService(oracle);
+#endif
         auto io = SandboxAssetIO();
         bl_RuntimeOptions2 options = {sizeof(options), 2,
                                      {allocator, nullptr, nullptr, &compiler, nullptr, &io},
@@ -770,6 +780,12 @@ int wmain(int argc, wchar_t** argv)
                      frames, host.successfulDrops, host.failedDrops);
         disposeModel(host, host.model);
         checked(bl_disposeRuntime(host.runtime), "Runtime teardown");
+#if defined(LITE_ASSET_MATERIAL_ORACLE_TEST)
+        if (oracle.calls != oracle.releases)
+        {
+            throw std::runtime_error("Every observed shader callback must release exactly once");
+        }
+#endif
         host.runtime = nullptr;
         bl_destroyAssetDecoder(host.decoder);
         host.decoder = nullptr;

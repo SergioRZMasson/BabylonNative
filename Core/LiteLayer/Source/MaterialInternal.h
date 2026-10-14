@@ -77,6 +77,15 @@ struct L_Material
     bool pbrOrmUv1;
     bool pbrBaseImage;
     bool pbrOrmImage;
+    bl_Texture2D pbrNormalTexture;
+    bl_Texture2D pbrOcclusionTexture;
+    bl_Texture2D pbrEmissiveTexture;
+    bl_Vec3 pbrEmissiveFactor;
+    double pbrNormalScale;
+    bool pbrNormalUv1;
+    bool pbrOcclusionUv1;
+    bool pbrEmissiveUv1;
+    bool pbrExtra;
 };
 
 struct L_Texture

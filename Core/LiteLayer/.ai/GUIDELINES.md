@@ -289,6 +289,15 @@ animation, compression and extension coverage in separately reviewed feature
 batches. Preserve native allocation, identity, failure, ownership and actual
 GPU-retirement safety throughout.
 
+The clarified completion target is core glTF 2.0 plus the extension set supported
+by Babylon.js. Pin the comparison to Babylon.js 9.30.0, release source
+`b248b370267f13bfaf5b2a0f8fd525bad7c99b52`, rather than a moving branch.
+This compatibility target does not replace the Lite 1.32.0 API/source authority
+or authorize copying NativeEngine bodies. Preserve original Lite semantics and
+review additions/adaptations explicitly. The sandbox must load every animation
+clip, automatically play the first clip and provide clip selection; these are
+requirements to implement, not already-completed capabilities.
+
 All shader-compilation strategy investigation is paused: no compiler comparison,
 cache/direct-Tint adoption, compiler-closure optimization or shader benchmarking.
 Use the current working production shader service provisionally. Material WGSL

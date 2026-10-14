@@ -223,13 +223,10 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
             return BL_INVALID_ARGUMENT;
         }
         if (material->unsupportedFeatures || (!extended && material->textureInfoFields) ||
-            (material->hasAlphaMode && material->alphaMode != BL_ASSET_ALPHA_OPAQUE) ||
-            (material->hasEmissiveFactor &&
-             (material->emissiveFactor.x || material->emissiveFactor.y ||
-              material->emissiveFactor.z)))
+            (material->hasAlphaMode && material->alphaMode != BL_ASSET_ALPHA_OPAQUE))
         {
             return unsupported(reason, "Material requires unsupported texture inputs, alpha mode, "
-                                       "emissive lighting or material extension");
+                                       "or material extension");
         }
     }
     if (extended)
@@ -334,9 +331,10 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
             {
                 const bl_AssetMaterialInputs* inputs =
                     extended->materialInputs + primitive->material.value;
-                const bl_AssetTextureInfo* textures[2] = {&inputs->baseColor,
-                                                          &inputs->metallicRoughness};
-                for (unsigned k = 0; k < 2; ++k)
+                const bl_AssetTextureInfo* textures[5] = {
+                    &inputs->baseColor, &inputs->metallicRoughness, &inputs->normal,
+                    &inputs->occlusion, &inputs->emissive};
+                for (unsigned k = 0; k < 5; ++k)
                 {
                     uint32_t channel =
                         textures[k]->texCoord.present ? textures[k]->texCoord.value : 0;

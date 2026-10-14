@@ -31,6 +31,11 @@ individually reviewed batches, retaining explicit failure/lifetime behavior.
 Existing compiler/cache/direct-Tint experiment artifacts are preserved and
 paused; the current production shader service remains in use. Material WGSL
 needed for a loading feature is in scope, compiler-strategy research is not.
+The user clarified the completion target as core glTF 2.0 plus Babylon.js loader
+extension coverage. The fixed comparison reference is Babylon.js 9.30.0 at
+`b248b370267f13bfaf5b2a0f8fd525bad7c99b52`; Lite's 1.32.0 source/API authority
+remains unchanged. Animation work must load all clips, autoplay the first and
+allow clip selection. Animation support and that UI are still pending.
 
 ### Implemented baseline: runtime GLB loading and manual sandbox
 
@@ -56,9 +61,12 @@ documents launch/build options, actual drag/drop behavior and supported input
 features. Parent checks exercised both disk and in-memory loads of multiple
 textured/untextured GLBs, repeated replacements and retained errors. This is
 arbitrary runtime file selection within the documented subset, **not every GLB
-or glTF rendering feature**. For example, Avocado currently reports unsupported
-normal/occlusion material inputs instead of silently displaying an incomplete
-material.
+or glTF rendering feature**. The next material batch now supports native normal,
+occlusion and emissive textures/factors: Avocado's authored tangent normal map
+and BoomBox's five roles render through the same API. The pinned Avocado has no
+occlusion texture; BoomBox supplies the real shared metallic/roughness/occlusion
+case. Alpha modes, deformation/animation, other resources and extensions remain
+pending, not silently ignored.
 
 The first isolated compiler-output cache and same-pin reduced-Tint measurements
 are recorded in [the runtime shader investigation](LiteRuntimeShaderInvestigation.md).
@@ -95,8 +103,10 @@ and exposes encoded images, textures, samplers and material inputs as raw POD.
 The current native loader supports multiple meshes/primitives/materials,
 packed/interleaved FLOAT attributes, normalized U8/U16 UVs, U8/U16/U32 or generated
 indices, native-generated missing normals, mirrored ordinary nodes and opaque
-double-sided PBR. Embedded PNG/JPEG base-color and metallic/roughness inputs use
-real sRGB/linear resources, UV0/1, native mip chains and writable pixel updates.
+double-sided PBR. Embedded PNG/JPEG base-color, metallic/roughness, normal,
+occlusion and emissive inputs use real sRGB/linear resources, UV0/1, native mip
+chains and writable pixel updates. Normal scale, authored tangents/cotangent
+fallback, occlusion strength and emissive factors retain their source semantics.
 Unsupported material/texture features, extensions, skinning, morphs, animation
 and backgrounds fail explicitly. Complete authored RGBD environments still
 require an explicit BRDF resource.

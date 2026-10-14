@@ -9,6 +9,7 @@ struct L_PbrPacket
     L_Environment* environment;
     L_Material* material;
     bool instances;
+    bool tangents;
 };
 
 bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene);
@@ -17,6 +18,7 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
 void l_cleanupPbrScene(bl_Runtime* runtime, L_Scene* scene);
 bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
                        bool doubleSided = false, bool baseImage = false, bool baseUv1 = false,
-                       bool ormUv1 = false);
+                       bool ormUv1 = false, const L_Material* material = NULL,
+                       bool tangents = false);
 
 #endif

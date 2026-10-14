@@ -42,17 +42,28 @@ double-sided surfaces; tightly packed/interleaved FLOAT attributes; normalized
 U8/U16 UVs; U8/U16/U32 indices and nonindexed triangles. Missing normals are generated
 in native Core. Source POSITION, NORMAL, TEXCOORD_0/1 and TANGENT streams are retained.
 
-Embedded bufferView PNG/JPEG base-color and metallic/roughness textures are supported
+Embedded bufferView PNG/JPEG base-color, metallic/roughness, normal, occlusion and
+emissive textures are supported
 through the explicitly advertised raw-service v3 protocol. Base color uses sRGB,
-metallic/roughness uses linear data, and source factors are applied in native Core.
+metallic/roughness, normals and occlusion use linear data. Emissive RGB uses sRGB
+with linear alpha. Source factors are applied in native Core, including normal
+scale, occlusion strength and emissive factor (default zero, with or without an
+image). Normal mapping preserves authored tangent handedness; absent tangents use
+the original source cotangent-derivative frame. Geometric/shading normals both
+follow double-sided face correction, and mapped normals enable source IBL horizon
+occlusion.
 UV0/UV1 selection, nearest/linear/mipmap filtering, repeat/clamp/mirror addressing and
 non-mip LOD0 clamping are retained. Core uploads a complete native-generated mip chain;
 the existing pixel-update API refreshes its levels. Exact per-sampler anisotropy remains
 deferred (source requests up to 4, effective native support is 1).
 
-This is a common-static-model subset, **not full glTF support**. Normal, occlusion and
-emissive texture bindings are preserved by the raw parser but explicitly rejected by
-the initial native material slice; they are not silently ignored.
+This is an expanding common-static-model subset, **not full glTF support**.
+Broader valid-GLB compatibility remains the current priority; unsupported domains
+below are pending feature batches, not silently ignored or considered complete.
+The completion target is core glTF 2.0 plus Babylon.js 9.30.0 loader extension
+coverage, pinned at `b248b370267f13bfaf5b2a0f8fd525bad7c99b52`. Future animation
+support must retain all clips, autoplay the first and allow selection; the
+current executable does not yet implement animations.
 
 Skins, animation playback, morph targets, compressed geometry/images, external/data
 buffer or image URIs, unsupported vertex semantics, imported cameras, non-triangle
@@ -70,16 +81,26 @@ BoxTexturedNonPowerOfTwo GLBs (embedded PNG, including non-power-of-two dimensio
 the original bowling-ball GLB (embedded JPEG base color and PNG metallic/roughness),
 Babylon Burster (JPEG), the original instanced model, and the eight-mesh/seven-material
 Cornell model. Disk and byte-source checks include Unicode/spaces filenames, repeated
-replacement, malformed JSON, a missing file, and Avocado's explicitly unsupported
-normal/occlusion texture inputs. Failed replacements preserve the previous asset
+replacement, malformed JSON and a missing file. The material compatibility batch
+adds unchanged Avocado (base/MR/authored tangent normal; its pinned file declares
+no occlusion binding) and BoomBox (all five texture roles, shared MR/occlusion and
+emissive factor). Failed replacements preserve the previous asset
 identity and continue drawing it; exact retained-frame byte equality is not claimed.
 Runtime/decoder tracked allocation bytes return to zero at teardown.
 
-Parent acceptance independently repeated disk and byte-source visible smoke
+Earlier parent acceptance independently repeated disk and byte-source visible smoke
 loads: each had seven successes and three expected failures with the previous
 model retained. Native contract/legacy CPU/data-only checks, the version3 decoder,
 texture upload/update/ownership fault tests and the strict Core style gate pass.
-This does not establish full glTF or source-perfect image qualification.
+Those earlier results predate the three-role material batch and are preserved.
+They do not establish full glTF or source-perfect image qualification.
+
+Parent acceptance of the material batch independently reran the seven focused
+native/decoder/data-only suites, numeric asymmetric map/basis/UV/color-space
+capture checks, distinct/shared-role GPU resources and update/fault/churn checks.
+Fresh visible disk and memory lists each produced seventeen successful loads
+and five expected retained-model errors, with zero tracked bytes at teardown.
+The public 199-function header is byte-identical to the accepted baseline.
 
 BoxTextured and BoxTexturedNonPowerOfTwo are Cesium's 2017 models, CC-BY-4.0;
 their Cesium logos have separate trademark restrictions. Keep their upstream
@@ -94,6 +115,13 @@ Build `LiteAssetDecoder3Tests` for the registered raw-provider CTest. Build
 and a new result-file path for GPU upload/mip/update, shared-owner, fault,
 allocation-failure and retirement checks. Its actual GPU staging checks do not
 establish original-source framebuffer or mip-generation equivalence.
+
+`GenerateMaterialFixtures.py` creates labeled synthetic asymmetric material inputs,
+not regenerated real models. The separate `LiteAssetMaterialOracleTests` executable
+compiles the production WGSL with only its final output encoded for numeric GPU
+checks; this hook is excluded from `LiteSandbox`. `VerifyMaterialCaptures.py` checks
+normal/UV/scale/basis, occlusion/strength, emissive/defaults/sRGB and linear alpha
+against independent arithmetic. Shader compilation strategy remains paused.
 
 ## Automated smoke mode
 

@@ -1,4 +1,5 @@
 #include "AssetInternal.h"
+#include "PbrInternal.h"
 #include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -228,7 +229,7 @@ static void hierarchy()
     data.materialCount = 1;
     require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "nonfinite raw factor before feature dispatch");
     factor.emissiveFactor.x = 1;
-    require(l_validateAsset(&data) == BL_UNSUPPORTED, "finite unsupported emissive factor");
+    require(l_validateAsset(&data) == BL_OK, "finite emissive factor in legacy raw document");
     data.materials = NULL;
     data.materialCount = 0;
     nodes[0].hasMatrix = true;
@@ -538,8 +539,42 @@ static void textureProtocol3()
     require(l_validateAsset(&data.document, &reason, &data) == BL_OK, "UV1 declaration retained");
     inputs.normal.present = true;
     material.textureInfoFields |= BL_ASSET_TEXTURE_NORMAL;
-    require(l_validateAsset(&data.document, &reason, &data) == BL_UNSUPPORTED && reason,
-            "normal texture explicitly unsupported, not ignored");
+    inputs.normal.hasScale = true;
+    inputs.normal.scale = 0.375;
+    inputs.normal.texCoord = {true, 1};
+    inputs.occlusion.present = true;
+    inputs.occlusion.hasStrength = true;
+    inputs.occlusion.strength = 0.625;
+    inputs.emissive.present = true;
+    material.hasEmissiveFactor = true;
+    material.emissiveFactor = {0.125, 0.25, 0.5};
+    material.textureInfoFields |= BL_ASSET_TEXTURE_OCCLUSION | BL_ASSET_TEXTURE_EMISSIVE;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_OK,
+            "normal occlusion emissive roles and independent factors accepted");
+    inputs.normal.index = 1;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_INVALID_ARGUMENT,
+            "invalid normal texture reference before decode");
+    inputs.normal.index = 0;
+    inputs.normal.scale = NAN;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_INVALID_ARGUMENT,
+            "nonfinite normal scale before decode");
+    inputs.normal.scale = 0;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_OK,
+            "zero normal scale is not a missing default");
+    inputs.occlusion.strength = 1.01;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_INVALID_ARGUMENT,
+            "occlusion strength range before decode");
+    inputs.occlusion.strength = 0;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_OK,
+            "zero occlusion strength is not a missing default");
+    inputs.emissive.texCoord = {true, 2};
+    require(l_validateAsset(&data.document, &reason, &data) == BL_UNSUPPORTED,
+            "unsupported emissive UV channel not silently zero");
+    inputs.emissive.texCoord = {true, 1};
+    inputs.emissive.unsupportedFeatures = BL_ASSET_UNSUPPORTED_EXTENSION;
+    require(l_validateAsset(&data.document, &reason, &data) == BL_UNSUPPORTED,
+            "emissive texture extension still explicitly unsupported");
+    inputs.emissive.unsupportedFeatures = 0;
     for (auto status : {BL_OK, BL_CANCELLED, BL_HOST_ERROR})
     {
         Allocations allocations = {};
@@ -563,6 +598,60 @@ static void textureProtocol3()
     }
 }
 
+static void materialSourcesAndFaults()
+{
+    unsigned failurePositions = 0;
+    for (size_t fault = 0; fault < 128; ++fault)
+    {
+        Allocations allocations = {};
+        bl_Runtime* r = runtime(&allocations);
+        if (fault)
+        {
+            allocations.failAt = allocations.calls + fault;
+        }
+        L_Material material = {};
+        material.pbrExtra = true;
+        material.pbrNormalTexture = {r, 1};
+        material.pbrOcclusionTexture = {r, 2};
+        material.pbrEmissiveTexture = {r, 3};
+        material.pbrNormalUv1 = true;
+        material.pbrOcclusionUv1 = true;
+        material.pbrEmissiveUv1 = true;
+        L_Text vertex = {};
+        L_Text fragment = {};
+        bl_Status status = l_pbrSources(r, true, &vertex, &fragment, true, true, true, true,
+                                        &material, true);
+        if (status == BL_OK)
+        {
+            require(strstr(vertex.data, "@location(8)tangent:vec4f") &&
+                        strstr(vertex.data, "cross(normalize(normal),T_local)*tangent.w") &&
+                        strstr(fragment.data, "normalUv=input.uv2;") &&
+                        strstr(fragment.data, "occlusionSampler_,input.uv2") &&
+                        strstr(fragment.data, "emissiveSampler,input.uv2") &&
+                        strstr(fragment.data, "surfaceFactors:vec4f") &&
+                        strstr(fragment.data, "horizonTemp*horizonTemp") &&
+                        strstr(fragment.data, "if(front!=mirrored){N=-N;}"),
+                    "source-derived all-role instanced tangent/UV/factor/horizon interface");
+        }
+        else
+        {
+            require(status == BL_OUT_OF_MEMORY, "source allocation failure status");
+            ++failurePositions;
+        }
+        l_free(r, vertex.data);
+        l_free(r, fragment.data);
+        allocations.failAt = 0;
+        require(bl_disposeRuntime(r) == BL_OK && !allocations.live,
+                "partial material source buffers released on every allocation failure");
+        if (fault && status == BL_OK)
+        {
+            break;
+        }
+    }
+    require(failurePositions > 10, "all-role source allocation positions actually exercised");
+    printf("Material source allocator failures: %u\n", failurePositions);
+}
+
 int main()
 {
     hierarchy();
@@ -570,5 +659,6 @@ int main()
     partialAdd();
     releasesAndFaults();
     textureProtocol3();
+    materialSourcesAndFaults();
     puts("Asset raw/schema/deep-hierarchy/locked-matrix/partial-add/reentry/releases/fault tests passed");
 }

@@ -114,8 +114,20 @@ bl_Status l_validateAssetTextures(const bl_ParsedGltf3* extended, const char** r
                 continue;
             }
             mask |= 1u << j;
-            if (input->index >= data->textureCount ||
-                (input->hasScale && !isfinite(input->scale)) ||
+            if (input->index >= data->textureCount)
+            {
+                const char* messages[5] = {"Base-color texture index is out of range",
+                                           "Metallic/roughness texture index is out of range",
+                                           "Normal texture index is out of range",
+                                           "Occlusion texture index is out of range",
+                                           "Emissive texture index is out of range"};
+                if (reason)
+                {
+                    *reason = messages[j];
+                }
+                return BL_INVALID_ARGUMENT;
+            }
+            if ((input->hasScale && !isfinite(input->scale)) ||
                 (input->hasStrength &&
                  (!isfinite(input->strength) || input->strength < 0 || input->strength > 1)) ||
                 (j != 2 && input->hasScale) || (j != 3 && input->hasStrength))
@@ -127,12 +139,6 @@ bl_Status l_validateAssetTextures(const bl_ParsedGltf3* extended, const char** r
             {
                 return unsupportedTexture(reason, "Texture extensions and UV channels beyond "
                                                   "TEXCOORD_0/1 are unsupported");
-            }
-            if (j >= 2)
-            {
-                return unsupportedTexture(
-                    reason, "Normal, occlusion and emissive texture bindings "
-                            "are not implemented in this initial static-material slice");
             }
         }
         if (mask != data->materials[i].textureInfoFields)
@@ -243,7 +249,10 @@ static void replaceMaterialTexture(bl_Runtime* runtime, bl_Texture2D* slot, bl_T
     }
     ++((L_Texture*)l_peek(runtime, texture._id))->references;
     *slot = texture;
-    bl_disposeTexture2D(old);
+    if (!L_NULL(old))
+    {
+        bl_disposeTexture2D(old);
+    }
 }
 
 bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data, uint32_t index,
@@ -281,5 +290,25 @@ bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data,
         material->pbrInfo.roughnessFactor =
             definition->hasRoughnessFactor ? definition->roughnessFactor : 1;
     }
+    const bl_AssetTextureInfo* roles[3] = {&inputs->normal, &inputs->occlusion, &inputs->emissive};
+    bl_Texture2D* slots[3] = {&material->pbrNormalTexture, &material->pbrOcclusionTexture,
+                              &material->pbrEmissiveTexture};
+    bool* uv1[3] = {&material->pbrNormalUv1, &material->pbrOcclusionUv1, &material->pbrEmissiveUv1};
+    for (unsigned i = 0; i < 3; ++i)
+    {
+        if (roles[i]->present)
+        {
+            bl_Texture2D texture = {};
+            L_TRY(imageTexture(asset, data, roles[i], i == 2, &texture));
+            replaceMaterialTexture(runtime, slots[i], texture);
+            *uv1[i] = roles[i]->texCoord.present && roles[i]->texCoord.value == 1;
+            material->pbrExtra = true;
+        }
+    }
+    material->pbrNormalScale =
+        inputs->normal.present && inputs->normal.hasScale ? inputs->normal.scale : 1;
+    material->pbrInfo.occlusionStrength =
+        inputs->occlusion.present ? (inputs->occlusion.hasStrength ? inputs->occlusion.strength : 1)
+                                  : 0;
     return BL_OK;
 }

@@ -253,6 +253,7 @@ int main(int argc, char** argv)
     init.swapChain.flags = BGFX_SWAP_CHAIN_MSAA_X4;
     require(bgfx::init(init), "real native GPU");
     unsigned resourceProofs = 0;
+    unsigned uniqueResourceProofs = 0;
     {
         Context context;
         setup(context);
@@ -267,11 +268,24 @@ int main(int argc, char** argv)
         parsed.document.version = BL_ASSET_DOCUMENT_VERSION_3;
         require(context.provider.parseGltf(context.provider.userData, {bytes.data(), bytes.size()},
                                            {}, &parsed.document) == BL_OK, "independent raw descriptors");
-        const bl_AssetTextureInfo* inputs[2] = {&parsed.materialInputs[0].baseColor,
-                                                &parsed.materialInputs[0].metallicRoughness};
-        bl_Texture2D handles[2] = {material->pbrInfo.baseColorTexture, material->pbrInfo.ormTexture};
-        for (unsigned i = 0; i < 2; ++i)
+        const bl_AssetTextureInfo* inputs[5] = {
+            &parsed.materialInputs[0].baseColor, &parsed.materialInputs[0].metallicRoughness,
+            &parsed.materialInputs[0].normal, &parsed.materialInputs[0].occlusion,
+            &parsed.materialInputs[0].emissive};
+        bl_Texture2D handles[5] = {
+            material->pbrInfo.baseColorTexture, material->pbrInfo.ormTexture,
+            material->pbrNormalTexture, material->pbrOcclusionTexture, material->pbrEmissiveTexture};
+        bl_PbrMaterialInfo publicInfo = {};
+        require(bl_getPbrMaterialInfo({context.runtime, material->record.id}, &publicInfo) == BL_OK &&
+                    publicInfo.occlusionStrength ==
+                        (inputs[3]->present ? (inputs[3]->hasStrength ? inputs[3]->strength : 1) : 0),
+                "existing public occlusionStrength reports authored/default/absent value");
+        for (unsigned i = 0; i < 5; ++i)
         {
+            if (!inputs[i]->present)
+            {
+                continue;
+            }
             const auto& texture = parsed.textures[inputs[i]->index];
             const auto& image = parsed.images[texture.source.value];
             const auto& view = parsed.document.bufferViews[image.bufferView.value];
@@ -283,7 +297,8 @@ int main(int argc, char** argv)
             auto gpu = readGpu(record, 0);
             require(record->info.width == decoded.width && record->info.height == decoded.height &&
                         record->mipCount > 1 &&
-                        record->info.srgb == (i == 0), "actual dimensions/mips/color-space metadata");
+                        record->info.srgb == (i == 0 || i == 4),
+                    "actual dimensions/mips/role-specific color-space metadata");
             for (uint32_t y = 0; y < decoded.height; ++y)
             {
                 require(!memcmp(gpu.data() + size_t(y) * decoded.width * 4,
@@ -300,6 +315,15 @@ int main(int argc, char** argv)
             }
             context.base.releaseImage(context.base.userData, &decoded);
             ++resourceProofs;
+            bool unique = true;
+            for (unsigned previous = 0; previous < i; ++previous)
+            {
+                unique &= handles[previous]._id != handles[i]._id;
+            }
+            if (unique)
+            {
+                ++uniqueResourceProofs;
+            }
         }
         bl_Material shared = {};
         require(l_createPbrFactorMaterial(context.engine, parsed.document.materials, &shared) == BL_OK &&
@@ -307,11 +331,24 @@ int main(int argc, char** argv)
                 "second material shares actual image cache");
         auto* second = reinterpret_cast<L_Material*>(l_peek(context.runtime, shared._id));
         require(second->pbrInfo.baseColorTexture._id == handles[0]._id &&
-                    second->pbrInfo.ormTexture._id == handles[1]._id,
+                    second->pbrInfo.ormTexture._id == handles[1]._id &&
+                    second->pbrNormalTexture._id == handles[2]._id &&
+                    second->pbrOcclusionTexture._id == handles[3]._id &&
+                    second->pbrEmissiveTexture._id == handles[4]._id,
                 "source image/material sharing preserves texture identities");
+        if (inputs[2]->present && inputs[3]->present && inputs[4]->present &&
+            inputs[0]->index == inputs[1]->index && inputs[0]->index == inputs[2]->index &&
+            inputs[0]->index == inputs[3]->index && inputs[0]->index == inputs[4]->index)
+        {
+            require(handles[0]._id == handles[4]._id && handles[1]._id == handles[2]._id &&
+                        handles[1]._id == handles[3]._id && handles[0]._id != handles[1]._id,
+                    "same authored texture shares within color-space, separates sRGB/linear roles");
+        }
         require(bl_disposePbrMaterial({context.runtime, shared._id}) == BL_OK &&
                     !l_peek(context.runtime, handles[0]._id)->disposed,
                 "another material release retains original image owner");
+        auto* linear = reinterpret_cast<L_Texture*>(l_peek(context.runtime, handles[1]._id));
+        auto linearBeforeSrgbUpdate = readGpu(linear, 0);
         const uint8_t changed[4] = {41, 53, 79, 255};
         require(bl_updateTexture2DFromPixels(context.engine, handles[0], {changed, 4}, 0, 0, 1, 1) ==
                     BL_OK, "existing pixel-update API updates authored mip texture");
@@ -326,12 +363,58 @@ int main(int argc, char** argv)
                     "all physical mip levels refreshed by pixel update");
             updatedOffset += physical.size();
         }
+        require(readGpu(linear, 0) == linearBeforeSrgbUpdate,
+                "sRGB pixel update does not mutate another color-space's owned resource");
+        for (unsigned i = 1; i < 5; ++i)
+        {
+            if (!inputs[i]->present)
+            {
+                continue;
+            }
+            bool alreadyUpdated = false;
+            for (unsigned previous = 0; previous < i; ++previous)
+            {
+                alreadyUpdated |= handles[previous]._id == handles[i]._id;
+            }
+            if (alreadyUpdated)
+            {
+                continue;
+            }
+            const uint8_t roleUpdate[4] = {uint8_t(37 + i), uint8_t(67 + i), uint8_t(113 + i),
+                                           uint8_t(19 + i)};
+            require(bl_updateTexture2DFromPixels(context.engine, handles[i], {roleUpdate, 4},
+                                                 0, 0, 1, 1) == BL_OK,
+                    "existing update API writes actual normal/occlusion/emissive/MR resources");
+            auto* role = reinterpret_cast<L_Texture*>(l_peek(context.runtime, handles[i]._id));
+            size_t offset = 0;
+            for (uint8_t mip = 0; mip < role->mipCount; ++mip)
+            {
+                auto physical = readGpu(role, mip);
+                require(!memcmp(physical.data(), role->mipPixels + offset, physical.size()),
+                        "role update refreshes all physical native mips");
+                if (!mip)
+                {
+                    require(!memcmp(physical.data(), roleUpdate, 4),
+                            "role update including linear alpha is actual GPU data");
+                }
+                offset += physical.size();
+            }
+        }
         context.provider.releaseGltf(context.provider.userData, &parsed.document);
         require(bl_disposeAssetContainer(asset) == BL_OK, "last image/material owner retires safely");
         finish(context);
     }
     unsigned faultCases = 0;
-    for (unsigned at = 1; at <= 2; ++at)
+    unsigned imageInvocations = 0;
+    {
+        Context context;
+        setup(context);
+        bl_AssetContainer asset = {};
+        require(load(context, bytes, &asset) == BL_OK, "discover complete authored role IO count");
+        imageInvocations = static_cast<unsigned>(context.imageCalls);
+        finish(context);
+    }
+    for (unsigned at = 1; at <= imageInvocations; ++at)
     {
         for (bool empty : {false, true})
         {
@@ -362,7 +445,7 @@ int main(int argc, char** argv)
         ++faultCases;
     }
     unsigned allocationCases = 0;
-    for (size_t failure = 1; failure < 256; ++failure)
+    for (size_t failure = 1; failure < 1024; ++failure)
     {
         Context context;
         setup(context);
@@ -406,10 +489,14 @@ int main(int argc, char** argv)
         finish(context);
     }
     std::ofstream result(argv[2]);
-    result << "{\"realJpegPngGpuResourcesByteExact\":" << resourceProofs
+    result << "{\"realJpegPngGpuResourcesByteExact\":" << uniqueResourceProofs
+           << ",\"authoredGpuRoleComparisonsByteExact\":" << resourceProofs
+           << ",\"uniqueAuthoredGpuResourcesByteExact\":" << uniqueResourceProofs
            << ",\"sharedMaterialTextureIdentities\":true,\"partialEmptyImageFaults\":" << faultCases
            << ",\"trackedAllocationFailurePositions\":" << allocationCases
            << ",\"allPhysicalMipsUploadedAndPixelUpdateRefreshed\":true,"
+              "\"normalOcclusionEmissiveRoleGpuResourcesCheckedWhenPresent\":true,"
+              "\"allPresentRoleUpdatesAndColorSpaceIsolation\":true,"
               "\"texturedOwnerChurnIterations\":16,\"texturedOwnerPlateau\":true,"
               "\"exactOnceImageAndParseRelease\":true,\"allAllocatorTeardownZero\":true}\n";
     wait(nullptr);

@@ -102,7 +102,10 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
             continue;
         }
         L_PbrPacket* packet = scene->pbrPackets + i;
-        if (packet->material == material && packet->instances == mesh->hasInstances)
+        bool tangents = !L_NULL(material->pbrNormalTexture) &&
+                        (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_TANGENT));
+        if (packet->material == material && packet->instances == mesh->hasInstances &&
+            packet->tangents == tangents)
         {
             if (packet->environment != scene->environment)
             {
@@ -114,9 +117,9 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         }
         L_Text vertex = {};
         L_Text fragment = {};
-        bl_Status status = l_pbrSources(runtime, mesh->hasInstances, &vertex, &fragment,
-                                        material->pbrInfo.doubleSided, material->pbrBaseImage,
-                                        material->pbrBaseUv1, material->pbrOrmUv1);
+        bl_Status status = l_pbrSources(
+            runtime, mesh->hasInstances, &vertex, &fragment, material->pbrInfo.doubleSided,
+            material->pbrBaseImage, material->pbrBaseUv1, material->pbrOrmUv1, material, tangents);
         const bl_InstanceAttributeDeclaration instances[4] = {{{"world0", 6}, 3, 0, 0, 64},
                                                               {{"world1", 6}, 4, 1, 16, 64},
                                                               {{"world2", 6}, 5, 2, 32, 64},
@@ -146,6 +149,7 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         packet->material = material;
         packet->environment = scene->environment;
         packet->instances = mesh->hasInstances;
+        packet->tangents = tangents;
         l_pin(&material->record);
         l_pin(&packet->environment->record);
     }
@@ -227,7 +231,7 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     {
         meshData[i] = (float)mesh->node.world.values[i];
     }
-    float materialData[12] = {1, 1, 0.04f, 1, 1, 1, 1, 1};
+    float materialData[16] = {1, 1, 0.04f, 1, 1, 1, 1, 1};
     const bl_PbrMaterialInfo* info = &material->pbrInfo;
     materialData[0] = (float)info->environmentIntensity;
     materialData[1] = (float)info->directIntensity;
@@ -235,10 +239,15 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     materialData[3] = (float)info->alpha;
     materialData[4] = (float)info->metallicFactor;
     materialData[5] = (float)info->roughnessFactor;
+    materialData[6] = (float)material->pbrNormalScale;
     materialData[8] = (float)info->baseColorFactor.r;
     materialData[9] = (float)info->baseColorFactor.g;
     materialData[10] = (float)info->baseColorFactor.b;
     materialData[11] = (float)info->baseColorFactor.a;
+    materialData[12] = (float)material->pbrEmissiveFactor.x;
+    materialData[13] = (float)material->pbrEmissiveFactor.y;
+    materialData[14] = (float)material->pbrEmissiveFactor.z;
+    materialData[15] = (float)info->occlusionStrength;
     bl_Bytes blocks[3] = {};
     if (packet->pipeline.blockCount != 3)
     {
@@ -257,8 +266,8 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
         }
         else if (l_name(block->name, "material"))
         {
-            blocks[i] = {(const uint8_t*)materialData,
-                         material->pbrBaseImage ? sizeof(materialData) : sizeof(float) * 8};
+            size_t floats = material->pbrExtra ? 16 : material->pbrBaseImage ? 12 : 8;
+            blocks[i] = {(const uint8_t*)materialData, sizeof(float) * floats};
         }
         else
         {
@@ -283,11 +292,14 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
         }
         else
         {
-            bl_Texture2D handle = l_name(binding->name, "baseColorTexture") ? info->baseColorTexture
-                                  : l_name(binding->name, "ormTexture")     ? info->ormTexture
-                                  : l_name(binding->name, "brdfLUT")
-                                      ? packet->environment->info.brdfLut
-                                      : bl_Texture2D{};
+            bl_Texture2D handle =
+                l_name(binding->name, "baseColorTexture")   ? info->baseColorTexture
+                : l_name(binding->name, "ormTexture")       ? info->ormTexture
+                : l_name(binding->name, "normalTexture")    ? material->pbrNormalTexture
+                : l_name(binding->name, "occlusionTexture") ? material->pbrOcclusionTexture
+                : l_name(binding->name, "emissiveTexture")  ? material->pbrEmissiveTexture
+                : l_name(binding->name, "brdfLUT")          ? packet->environment->info.brdfLut
+                                                            : bl_Texture2D{};
             L_Record* record = l_peek(runtime, handle._id);
             if (!record || record->disposed || record->kind != L_TEXTURE)
             {
@@ -303,7 +315,8 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
             else
             {
                 bool authored = l_name(binding->name, "baseColorTexture") ? material->pbrBaseImage
-                                                                          : material->pbrOrmImage;
+                                : l_name(binding->name, "ormTexture")     ? material->pbrOrmImage
+                                                                          : true;
                 flags = authored ? (uint32_t)resource->flags
                                  : BGFX_SAMPLER_MIN_ANISOTROPIC | BGFX_SAMPLER_MAG_ANISOTROPIC;
                 if (authored)

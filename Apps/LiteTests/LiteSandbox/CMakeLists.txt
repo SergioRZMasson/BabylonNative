@@ -27,6 +27,13 @@ target_include_directories(LiteAssetDecoder3Tests PRIVATE "${PROJECT_SOURCE_DIR}
 target_compile_features(LiteAssetDecoder3Tests PRIVATE cxx_std_17)
 warnings_as_errors(LiteAssetDecoder3Tests)
 add_test(NAME LiteAssetDecoder3Tests COMMAND LiteAssetDecoder3Tests)
+add_executable(LiteAssetMaterialOracleTests Sandbox.cpp AssetIO.cpp)
+target_compile_features(LiteAssetMaterialOracleTests PRIVATE cxx_std_20)
+target_compile_definitions(LiteAssetMaterialOracleTests PRIVATE UNICODE _UNICODE
+    LITE_ASSET_MATERIAL_ORACLE_TEST=1)
+target_link_libraries(LiteAssetMaterialOracleTests PRIVATE LiteLayer LiteShaderCompiler
+    LiteAssetDecoder bgfx user32 shell32 windowscodecs ole32)
+warnings_as_errors(LiteAssetMaterialOracleTests)
 set_property(TARGET LiteSandbox PROPERTY FOLDER Apps/LiteTests)
 set(LITE_SANDBOX_ASSET_DIRECTORY "" CACHE PATH "Existing licensed environment and BRDF source directory.")
 if(LITE_SANDBOX_ASSET_DIRECTORY)

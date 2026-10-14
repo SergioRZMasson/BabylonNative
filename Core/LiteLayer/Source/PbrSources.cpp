@@ -131,11 +131,11 @@ static bool appendDoubleSidedBody(bl_Runtime* runtime, L_Text* fragment)
                         {"var N_geom=normalize(input.worldNormal);"
                          "let mirrored=determinant(mat3x3f(mesh.world[0].xyz,"
                          "mesh.world[1].xyz,mesh.world[2].xyz))>0.0;"
-                         "if(front==mirrored){N_geom=-N_geom;}",
+                         "if(front!=mirrored){N_geom=-N_geom;}",
                          strlen("var N_geom=normalize(input.worldNormal);"
                                 "let mirrored=determinant(mat3x3f(mesh.world[0].xyz,"
                                 "mesh.world[1].xyz,mesh.world[2].xyz))>0.0;"
-                                "if(front==mirrored){N_geom=-N_geom;}")}) &&
+                                "if(front!=mirrored){N_geom=-N_geom;}")}) &&
            l_appendText(runtime, fragment, {afterNormal, strlen(afterNormal)});
 }
 
@@ -162,9 +162,70 @@ static bool replacePbrText(bl_Runtime* runtime, L_Text* text, const char* needle
     return true;
 }
 
-bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
-                       bool doubleSided, bool baseImage, bool baseUv1, bool ormUv1)
+static bool appendNormalSource(bl_Runtime* runtime, L_Text* vertex, L_Text* fragment, bool tangents,
+                               bool doubleSided)
 {
+    if (tangents)
+    {
+        const char* output = "@location(2)uv:vec2f";
+        const char* varyings = "@location(4)worldTangent:vec3f,"
+                               "@location(5)worldBitangent:vec3f,@location(2)uv:vec2f";
+        if (!replacePbrText(runtime, vertex, output, varyings) ||
+            !replacePbrText(runtime, fragment, output, varyings) ||
+            !replacePbrText(runtime, vertex, "@location(1)normal:vec3f,\n@location(2)uv:vec2f",
+                            "@location(1)normal:vec3f,\n"
+                            "@location(8)tangent:vec4f,@location(2)uv:vec2f") ||
+            !replacePbrText(runtime, vertex, "out.uv=uv;",
+                            "let T_local=normalize(tangent.xyz);"
+                            "let B_local=cross(normalize(normal),T_local)*tangent.w;"
+                            "out.worldTangent=(finalWorld*vec4f(T_local,0)).xyz;"
+                            "out.worldBitangent=(finalWorld*vec4f(B_local,0)).xyz;out.uv=uv;"))
+        {
+            return false;
+        }
+    }
+    const char* tangentNormal =
+        "let normalMapRaw=textureSample(normalTexture,normalSampler_,normalUv).rgb*2.0-1.0;"
+        "let scaledNormal=vec3f(normalMapRaw.xy*material.normalScale,normalMapRaw.z);"
+        "let TBN=mat3x3f(input.worldTangent,input.worldBitangent,input.worldNormal);"
+        "var N=normalize(TBN*normalize(scaledNormal));";
+    // The source cotangent frame uses +dpdy and the negated bitangent, not an image-channel flip.
+    const char* cotangentNormal =
+        "let normalMapSample=textureSample(normalTexture,normalSampler_,normalUv).rgb*2.0-1.0;"
+        "let scaledNormalCT=vec3f(normalMapSample.xy*material.normalScale,normalMapSample.z);"
+        "let frameNormal=normalize(input.worldNormal);"
+        "let dp1=dpdx(input.worldPos);let dp2=dpdy(input.worldPos);"
+        "let duv1=dpdx(normalUv);let duv2=dpdy(normalUv);"
+        "let dp2perp=cross(dp2,frameNormal);let dp1perp=cross(frameNormal,dp1);"
+        "let tangent_ct=dp2perp*duv1.x+dp1perp*duv2.x;"
+        "let bitangent_ct=-(dp2perp*duv1.y+dp1perp*duv2.y);"
+        "let det=max(dot(tangent_ct,tangent_ct),dot(bitangent_ct,bitangent_ct));"
+        "let invmax=select(inverseSqrt(det),0.0,det==0.0);"
+        "let cotangentFrame=mat3x3f(tangent_ct*invmax,bitangent_ct*invmax,frameNormal);"
+        "var N=normalize(cotangentFrame*normalize(scaledNormalCT));";
+    L_Text normal = {};
+    bool appended = l_appendText(runtime, &normal, {"let normalUv=input.uv;", 22}) &&
+                    l_appendText(runtime, &normal,
+                                 {tangents ? tangentNormal : cotangentNormal,
+                                  strlen(tangents ? tangentNormal : cotangentNormal)});
+    if (appended && doubleSided)
+    {
+        const char* flip = "if(front!=mirrored){N=-N;}";
+        appended = l_appendText(runtime, &normal, {flip, strlen(flip)});
+    }
+    bool result = appended && replacePbrText(runtime, fragment, "var N=N_geom;", normal.data);
+    l_free(runtime, normal.data);
+    return result;
+}
+
+bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
+                       bool doubleSided, bool baseImage, bool baseUv1, bool ormUv1,
+                       const L_Material* material, bool tangents)
+{
+    bool extra = material && material->pbrExtra;
+    bool normal = material && !L_NULL(material->pbrNormalTexture);
+    bool occlusion = material && !L_NULL(material->pbrOcclusionTexture);
+    bool emissive = material && !L_NULL(material->pbrEmissiveTexture);
     const char* body = instances ? vertexInstanced : vertexPlain;
     if (!l_appendText(runtime, vertex, {declarations, sizeof(declarations) - 1}) ||
         !l_appendText(runtime, vertex, {body, strlen(body)}) ||
@@ -177,21 +238,77 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
     {
         return BL_OUT_OF_MEMORY;
     }
-    if (baseImage)
+    if (baseImage || extra)
     {
         const char* needle = "normalScale:f32,lightFalloffMode:f32";
         const char* replacement = "normalScale:f32,lightFalloffMode:f32,baseColorFactor:vec4f";
         if (!replacePbrText(runtime, vertex, needle, replacement) ||
-            !replacePbrText(runtime, fragment, needle, replacement) ||
-            !replacePbrText(runtime, fragment,
-                            "textureSample(baseColorTexture,baseColorSampler,input.uv);",
-                            "textureSample(baseColorTexture,baseColorSampler,input.uv)"
-                            "*material.baseColorFactor;"))
+            !replacePbrText(runtime, fragment, needle, replacement))
         {
             return BL_OUT_OF_MEMORY;
         }
     }
-    if (baseUv1 || ormUv1)
+    if (baseImage && !replacePbrText(runtime, fragment,
+                                     "textureSample(baseColorTexture,baseColorSampler,input.uv);",
+                                     "textureSample(baseColorTexture,baseColorSampler,input.uv)"
+                                     "*material.baseColorFactor;"))
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    if (extra)
+    {
+        const char* field = "baseColorFactor:vec4f";
+        const char* fields = "baseColorFactor:vec4f,surfaceFactors:vec4f";
+        if (!replacePbrText(runtime, vertex, field, fields) ||
+            !replacePbrText(runtime, fragment, field, fields) ||
+            !replacePbrText(runtime, fragment, "var emissive:vec3f;",
+                            "var emissive=material.surfaceFactors.xyz;"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (normal)
+    {
+        const char* binding = "@group(1)@binding(10)var normalTexture:texture_2d<f32>;"
+                              "@group(1)@binding(11)var normalSampler_:sampler;";
+        if (!l_appendText(runtime, fragment, {binding, strlen(binding)}) ||
+            !appendNormalSource(runtime, vertex, fragment, tangents, doubleSided) ||
+            !replacePbrText(runtime, fragment, "let eho=1.0;",
+                            "let horizonR=reflect(-V,N);"
+                            "let horizonTemp=saturate(1.0+1.1*dot(horizonR,N_geom));"
+                            "let eho=horizonTemp*horizonTemp;"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (occlusion)
+    {
+        const char* binding = "@group(1)@binding(12)var occlusionTexture:texture_2d<f32>;"
+                              "@group(1)@binding(13)var occlusionSampler_:sampler;";
+        if (!l_appendText(runtime, fragment, {binding, strlen(binding)}) ||
+            !replacePbrText(runtime, fragment, "var occlusion=1.0;",
+                            "let sampledOcclusion=textureSample(occlusionTexture,"
+                            "occlusionSampler_,input.uv).r;"
+                            "var occlusion=mix(1.0,sampledOcclusion,material.surfaceFactors.w);"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (emissive)
+    {
+        const char* binding = "@group(1)@binding(14)var emissiveTexture:texture_2d<f32>;"
+                              "@group(1)@binding(15)var emissiveSampler:sampler;";
+        if (!l_appendText(runtime, fragment, {binding, strlen(binding)}) ||
+            !replacePbrText(runtime, fragment, "var emissive=material.surfaceFactors.xyz;",
+                            "var emissive=material.surfaceFactors.xyz*"
+                            "textureSample(emissiveTexture,emissiveSampler,input.uv).rgb;"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (baseUv1 || ormUv1 ||
+        (extra &&
+         (material->pbrNormalUv1 || material->pbrOcclusionUv1 || material->pbrEmissiveUv1)))
     {
         const char* output = "@location(2)uv:vec2f";
         const char* extended = "@location(2)uv:vec2f,@location(3)uv2:vec2f";
@@ -215,6 +332,17 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
         return BL_OUT_OF_MEMORY;
     }
     if (ormUv1 && !replacePbrText(runtime, fragment, "ormSampler,input.uv", "ormSampler,input.uv2"))
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    if ((normal && material->pbrNormalUv1 &&
+         !replacePbrText(runtime, fragment, "normalUv=input.uv;", "normalUv=input.uv2;")) ||
+        (occlusion && material->pbrOcclusionUv1 &&
+         !replacePbrText(runtime, fragment, "occlusionSampler_,input.uv",
+                         "occlusionSampler_,input.uv2")) ||
+        (emissive && material->pbrEmissiveUv1 &&
+         !replacePbrText(runtime, fragment, "emissiveSampler,input.uv",
+                         "emissiveSampler,input.uv2")))
     {
         return BL_OUT_OF_MEMORY;
     }
