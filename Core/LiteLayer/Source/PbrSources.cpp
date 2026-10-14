@@ -220,8 +220,9 @@ static bool appendNormalSource(bl_Runtime* runtime, L_Text* vertex, L_Text* frag
 
 bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
                        bool doubleSided, bool baseImage, bool baseUv1, bool ormUv1,
-                       const L_Material* material, bool tangents)
+                       const L_Material* material, bool tangents, bool colors, bool flatNormal)
 {
+    tangents = tangents && !flatNormal;
     bool extra = material && material->pbrExtra;
     bool normal = material && !L_NULL(material->pbrNormalTexture);
     bool occlusion = material && !L_NULL(material->pbrOcclusionTexture);
@@ -272,11 +273,50 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
         const char* binding = "@group(1)@binding(10)var normalTexture:texture_2d<f32>;"
                               "@group(1)@binding(11)var normalSampler_:sampler;";
         if (!l_appendText(runtime, fragment, {binding, strlen(binding)}) ||
-            !appendNormalSource(runtime, vertex, fragment, tangents, doubleSided) ||
+            !appendNormalSource(runtime, vertex, fragment, tangents, doubleSided && !flatNormal) ||
             !replacePbrText(runtime, fragment, "let eho=1.0;",
                             "let horizonR=reflect(-V,N);"
                             "let horizonTemp=saturate(1.0+1.1*dot(horizonR,N_geom));"
                             "let eho=horizonTemp*horizonTemp;"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (flatNormal)
+    {
+        const char* flat =
+            "var N_geom=normalize(cross(dpdx(input.worldPos),dpdy(input.worldPos)));"
+            "if(dot(N_geom,scene.vEyePosition.xyz-input.worldPos)<0.0){N_geom=-N_geom;}";
+        const char* original = doubleSided ? "var N_geom=normalize(input.worldNormal);"
+                                             "let mirrored=determinant(mat3x3f(mesh.world[0].xyz,"
+                                             "mesh.world[1].xyz,mesh.world[2].xyz))>0.0;"
+                                             "if(front!=mirrored){N_geom=-N_geom;}"
+                                           : "var N_geom=normalize(input.worldNormal);";
+        if (!replacePbrText(runtime, fragment, original, flat) ||
+            (normal &&
+             !replacePbrText(runtime, fragment, "let frameNormal=normalize(input.worldNormal);",
+                             "let frameNormal=N_geom;")))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (colors)
+    {
+        const char* varying = "@location(2)uv:vec2f,@location(6)vColor:vec4f";
+        if (!replacePbrText(runtime, vertex, "@location(2)uv:vec2f", varying) ||
+            !replacePbrText(runtime, fragment, "@location(2)uv:vec2f", varying) ||
+            !replacePbrText(runtime, vertex,
+                            instances ? "@location(2)uv:vec2f,@location(3)world0"
+                                      : "@location(2)uv:vec2f)->VertexOutput",
+                            instances ? "@location(9)color:vec4f,@location(2)uv:vec2f,"
+                                        "@location(3)world0"
+                                      : "@location(9)color:vec4f,"
+                                        "@location(2)uv:vec2f)->VertexOutput") ||
+            !replacePbrText(runtime, vertex, "out.uv=uv;", "out.uv=uv;out.vColor=color;") ||
+            !replacePbrText(runtime, fragment, "var baseColor=baseColorSample.rgb;",
+                            "var baseColor=baseColorSample.rgb*input.vColor.rgb;") ||
+            !replacePbrText(runtime, fragment, "var alpha=baseColorSample.a;",
+                            "var alpha=baseColorSample.a;alpha*=input.vColor.a;"))
         {
             return BL_OUT_OF_MEMORY;
         }
@@ -357,6 +397,12 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
         if (material->testing &&
             !replacePbrText(runtime, fragment, "return vec4f(color,alpha*material.materialAlpha);",
                             "if(alpha*material.materialAlpha<material.alphaCutoff){discard;}"
+                            "return vec4f(color,1.0);"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+        if (colors && !material->testing && !material->blending &&
+            !replacePbrText(runtime, fragment, "return vec4f(color,alpha*material.materialAlpha);",
                             "return vec4f(color,1.0);"))
         {
             return BL_OUT_OF_MEMORY;

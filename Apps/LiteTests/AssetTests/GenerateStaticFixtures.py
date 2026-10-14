@@ -34,6 +34,8 @@ for triangle in range(2):
                           "componentType": 5126, "count": 3, "type": shape})
     accessors.append({"bufferView": 1, "byteOffset": triangle * 6,
                       "componentType": 5123, "count": 3, "type": "SCALAR"})
+    accessors[triangle * 5]["min"] = [triangle * 1.5, 0, 0]
+    accessors[triangle * 5]["max"] = [triangle * 1.5 + 1, 1, 0]
 primitives = []
 for i in (0, 5):
     primitives.append({"attributes": {"POSITION": i, "NORMAL": i + 1,

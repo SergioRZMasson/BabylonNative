@@ -59,6 +59,7 @@ struct Provider
     bool malformed;
     bl_AssetBuffer buffer;
     bool version3;
+    bool version4;
     bool badPrefix;
     const bl_ParsedGltf* originalPrefix;
 };
@@ -73,6 +74,12 @@ static bl_Status parse(void* user, bl_Bytes, bl_String, bl_ParsedGltf* out)
         require(out->structSize == sizeof(bl_ParsedGltf3) &&
                     out->version == BL_ASSET_DOCUMENT_VERSION_3,
                 "advertised service3 receives actual full caller-owned storage");
+    }
+    if (provider->version4)
+    {
+        require(out->structSize == sizeof(bl_ParsedGltf4) &&
+                    out->version == BL_ASSET_DOCUMENT_VERSION_4,
+                "advertised service4 receives full nested first-member storage");
     }
     if (provider->reentry)
     {
@@ -139,7 +146,8 @@ static bl_Runtime* runtime(Allocations* state, Provider* provider = NULL)
     options.structSize = sizeof(options);
     options.version = 2;
     options.base.allocator = {state, allocate, release};
-    bl_AssetService service = {sizeof(service), provider && provider->version3 ? 3u : 2u,
+    bl_AssetService service = {sizeof(service), provider && provider->version4 ? 4u
+                                              : provider && provider->version3 ? 3u : 2u,
                               provider, parse, releaseParsed,
                               parseEnvironment, releaseEnvironment};
     bl_IOService io = {};
@@ -185,6 +193,22 @@ static void hierarchy()
     data.buffers = &buffer;
     data.bufferCount = 1;
     require(l_validateAsset(&data) == BL_OK, "minimal raw document");
+    data.cameraCount = 2;
+    require(l_validateAsset(&data) == BL_OK, "unused camera definitions ignored in raw v2");
+    bl_AssetNode cameraNode = {};
+    cameraNode.camera = {true, 1};
+    cameraNode.hasTranslation = true;
+    cameraNode.translation = {1, 2, 3};
+    data.nodes = &cameraNode;
+    data.nodeCount = 1;
+    require(l_validateAsset(&data) == BL_OK, "camera attachment retains ordinary node transforms");
+    cameraNode.camera.value = 2;
+    require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "ignored camera reference still checked");
+    data.cameraCount = SIZE_MAX;
+    require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "raw camera count overflow rejected");
+    data.cameraCount = 0;
+    data.nodes = NULL;
+    data.nodeCount = 0;
     data.nodeCount = SIZE_MAX;
     require(l_validateAsset(&data) == BL_INVALID_ARGUMENT, "huge top-level count");
     data.nodeCount = 0;
@@ -423,6 +447,31 @@ static void partialAdd()
 
 static void releasesAndFaults()
 {
+    for (auto expected : {BL_OK, BL_CANCELLED, BL_NOT_READY, BL_HOST_ERROR, BL_INVALID_ARGUMENT})
+    {
+        Allocations allocations = {};
+        Provider provider = {};
+        provider.version4 = true;
+        provider.status = expected;
+        const uint8_t bytes[4] = {};
+        provider.buffer = {{bytes, 4}, 4, {}};
+        bl_Runtime* r = runtime(&allocations, &provider);
+        L_Engine* e = engine(r);
+        provider.engine = {r, e->record.id};
+        bl_AssetSource source = {BL_ASSET_SOURCE_BYTES, {}, {bytes, sizeof(bytes)}};
+        bl_AssetContainer out = {r, UINT64_MAX};
+        require(bl_loadGltf(provider.engine, &source, &out) == expected &&
+                    provider.parseCalls == 1 && provider.releases == 1 &&
+                    (expected == BL_OK || out._id == UINT64_MAX),
+                "v4 full-storage success/partial/cancel/error exact original-prefix release");
+        provider.status = BL_OK;
+        provider.badPrefix = true;
+        out = {r, UINT64_MAX};
+        require(bl_loadGltf(provider.engine, &source, &out) == BL_INVALID_ARGUMENT &&
+                    provider.releases == 2 && out._id == UINT64_MAX,
+                "v4 returned prefix corruption rejected without tail reinterpretation");
+        require(bl_disposeRuntime(r) == BL_OK && !allocations.live, "v4 partial result teardown0");
+    }
     for (size_t fault = 0; fault < 40; ++fault)
     {
         Allocations allocations = {};
@@ -626,6 +675,51 @@ static void textureProtocol3()
 
 static void materialSourcesAndFaults()
 {
+    for (bool flat : {false, true})
+    {
+        unsigned coloredFaults = 0;
+        for (size_t fault = 1; fault < 160; ++fault)
+        {
+            Allocations allocations = {};
+            bl_Runtime* r = runtime(&allocations);
+            allocations.failAt = allocations.calls + fault;
+            L_Material material = {};
+            material.testing = true;
+            material.pbrExtra = true;
+            material.pbrNormalTexture = {r, 1};
+            material.pbrNormalUv1 = true;
+            L_Text vertex = {};
+            L_Text fragment = {};
+            bl_Status status = l_pbrSources(r, true, &vertex, &fragment, true, true, true, true,
+                                            &material, !flat, true, flat);
+            if (status == BL_OK)
+            {
+                require(strstr(vertex.data, "@location(9)color:vec4f") &&
+                            strstr(fragment.data, "alpha*=input.vColor.a;") &&
+                            strstr(fragment.data, "input.vColor.rgb") &&
+                            (!flat || (strstr(fragment.data, "cross(dpdx(input.worldPos)") &&
+                                       strstr(fragment.data, "let frameNormal=N_geom;") &&
+                                       !strstr(vertex.data, "@location(8)tangent:vec4f"))),
+                        "colored authored/flat mapped instanced source and tangent-ignore variants");
+            }
+            else
+            {
+                require(status == BL_OUT_OF_MEMORY, "colored/flat source OOM status");
+                ++coloredFaults;
+            }
+            l_free(r, vertex.data);
+            l_free(r, fragment.data);
+            allocations.failAt = 0;
+            require(bl_disposeRuntime(r) == BL_OK && !allocations.live,
+                    "colored/flat partial source allocations released");
+            if (status == BL_OK)
+            {
+                break;
+            }
+        }
+        require(coloredFaults > 20, "colored/flat source fault positions really exercised");
+        printf("Colored source flat%d OOM positions: %u\n", flat, coloredFaults);
+    }
     unsigned failurePositions = 0;
     for (size_t fault = 0; fault < 128; ++fault)
     {

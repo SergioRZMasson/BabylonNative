@@ -136,22 +136,6 @@ bl_Status bl_removeAssetContainerFromScene(bl_SceneContext sceneHandle, bl_Asset
     return bl_removeFromScene(sceneHandle, asset->root);
 }
 
-static const uint8_t* accessorBytes(const bl_ParsedGltf* data, uint32_t index, size_t element = 0)
-{
-    const bl_AssetAccessor* accessor = data->accessors + index;
-    const bl_AssetBufferView* view = data->bufferViews + accessor->bufferView.value;
-    size_t width = accessor->componentType == BL_ASSET_COMPONENT_U8    ? 1
-                   : accessor->componentType == BL_ASSET_COMPONENT_U16 ? 2
-                                                                       : 4;
-    size_t components = accessor->shape == BL_ASSET_VEC4   ? 4
-                        : accessor->shape == BL_ASSET_VEC3 ? 3
-                        : accessor->shape == BL_ASSET_VEC2 ? 2
-                                                           : 1;
-    size_t stride = view->byteStride.present ? view->byteStride.value : width * components;
-    return data->buffers[view->buffer].bytes.data + view->byteOffset + accessor->byteOffset +
-           element * stride;
-}
-
 static bl_Status appendAssetNode(L_Asset* asset, bl_SceneNode node)
 {
     if (asset->nodeCount == asset->nodeCapacity)
@@ -203,7 +187,8 @@ static void composeInstance(float* out, const float* translation, const float* r
     out[15] = 1;
 }
 
-static bl_Status setInstances(bl_Mesh mesh, const bl_ParsedGltf* data, const bl_AssetNode* node)
+static bl_Status setInstances(bl_Mesh mesh, const bl_ParsedGltf* data, const bl_AssetNode* node,
+                              const bl_ParsedGltf4* full)
 {
     if (!node->hasInstancing)
     {
@@ -211,12 +196,14 @@ static bl_Status setInstances(bl_Mesh mesh, const bl_ParsedGltf* data, const bl_
     }
     const bl_AssetOptionalIndex* accessors[3] = {&node->instanceTranslation,
                                                  &node->instanceRotation, &node->instanceScale};
+    L_AssetAccessorReader readers[3] = {};
     size_t count = 0;
     for (unsigned i = 0; i < 3; ++i)
     {
         if (accessors[i]->present)
         {
             const bl_AssetAccessor* input = data->accessors + accessors[i]->value;
+            L_TRY(l_assetAccessorReader(data, accessors[i]->value, full, readers + i));
             if (count && count != input->count)
             {
                 return l_error(mesh._runtime, BL_INVALID_ARGUMENT, __func__,
@@ -246,8 +233,12 @@ static bl_Status setInstances(bl_Mesh mesh, const bl_ParsedGltf* data, const bl_
         {
             if (accessors[j]->present)
             {
-                memcpy(values[j], accessorBytes(data, accessors[j]->value, i),
-                       (j == 1 ? 4 : 3) * sizeof(float));
+                double components[4] = {};
+                l_assetAccessorElement(readers + j, i, components);
+                for (unsigned k = 0; k < (j == 1 ? 4u : 3u); ++k)
+                {
+                    values[j][k] = (float)components[k];
+                }
             }
         }
         composeInstance(matrices + i * 16, accessors[0]->present ? values[0] : NULL,
@@ -264,12 +255,13 @@ static bl_Status setInstances(bl_Mesh mesh, const bl_ParsedGltf* data, const bl_
 }
 
 static bl_Status copyAccessor(bl_Runtime* runtime, const bl_ParsedGltf* data, uint32_t index,
-                              bl_F32Span* out)
+                              bl_F32Span* out, const bl_ParsedGltf4* full, bool color = false)
 {
     const bl_AssetAccessor* accessor = data->accessors + index;
-    size_t components = accessor->shape == BL_ASSET_VEC4   ? 4
-                        : accessor->shape == BL_ASSET_VEC2 ? 2
-                                                           : 3;
+    L_AssetAccessorReader reader;
+    L_TRY(l_assetAccessorReader(data, index, full, &reader));
+    size_t sourceComponents = reader.rows * reader.columns;
+    size_t components = color ? 4 : sourceComponents;
     size_t count;
     size_t bytes;
     if (!l_size(accessor->count, components, &count) || !l_size(count, sizeof(float), &bytes) ||
@@ -284,25 +276,17 @@ static bl_Status copyAccessor(bl_Runtime* runtime, const bl_ParsedGltf* data, ui
     }
     for (size_t i = 0; i < accessor->count; ++i)
     {
-        const uint8_t* source = accessorBytes(data, index, i);
+        double element[16];
+        l_assetAccessorElement(&reader, i, element);
         for (size_t j = 0; j < components; ++j)
         {
-            float value;
-            if (accessor->componentType == BL_ASSET_COMPONENT_F32)
+            double value = j < sourceComponents ? element[j] : 1;
+            if (!isfinite(value) || !isfinite((float)value) || (color && (value < 0 || value > 1)))
             {
-                memcpy(&value, source + j * sizeof(float), sizeof(float));
+                l_free(runtime, values);
+                return BL_INVALID_ARGUMENT;
             }
-            else if (accessor->componentType == BL_ASSET_COMPONENT_U16)
-            {
-                uint16_t integer;
-                memcpy(&integer, source + j * sizeof(uint16_t), sizeof(uint16_t));
-                value = (float)integer / 65535;
-            }
-            else
-            {
-                value = (float)source[j] / 255;
-            }
-            values[i * components + j] = value;
+            values[i * components + j] = (float)value;
         }
     }
     *out = {values, count};
@@ -369,22 +353,26 @@ static bl_Status generateAssetNormals(bl_Runtime* runtime, bl_MeshGeometry* geom
 
 static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t nodeIndex,
                            const bl_AssetPrimitive* primitive, bl_TransformNode parent,
-                           const bl_ParsedGltf3* extended)
+                           const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     bl_MeshGeometry geometry = {};
     size_t vertices = 0;
+    bool authoredNormal = false;
     bl_Status status = BL_OK;
     for (size_t i = 0; i < primitive->attributeCount && status == BL_OK; ++i)
     {
         const bl_AssetAttribute* input = primitive->attributes + i;
         const bl_AssetAccessor* descriptor = data->accessors + input->accessor;
+        authoredNormal |= l_name(input->semantic, "NORMAL");
         bl_F32Span* stream = l_name(input->semantic, "POSITION")     ? &geometry.positions
                              : l_name(input->semantic, "NORMAL")     ? &geometry.normals
                              : l_name(input->semantic, "TEXCOORD_0") ? &geometry.uvs
                              : l_name(input->semantic, "TEXCOORD_1") ? &geometry.uvs2
+                             : l_name(input->semantic, "COLOR_0")    ? &geometry.colors
                                                                      : &geometry.tangents;
-        status = copyAccessor(runtime, data, input->accessor, stream);
+        status =
+            copyAccessor(runtime, data, input->accessor, stream, full, stream == &geometry.colors);
         vertices = descriptor->count;
     }
     if (status == BL_OK && !geometry.uvs.data)
@@ -400,46 +388,11 @@ static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t n
             geometry.uvs = {uvs, vertices * 2};
         }
     }
-    const bl_AssetAccessor* index =
-        primitive->indices.present ? data->accessors + primitive->indices.value : NULL;
-    size_t indexCount = index ? index->count : vertices;
-    size_t indexBytes;
-    uint32_t* indices = NULL;
-    if (!l_size(indexCount, sizeof(uint32_t), &indexBytes) || indexBytes > UINT32_MAX)
-    {
-        status = BL_INVALID_ARGUMENT;
-    }
     if (status == BL_OK)
     {
-        indices = (uint32_t*)l_alloc(runtime, indexBytes ? indexBytes : sizeof(uint32_t));
-        if (!indices)
-        {
-            status = BL_OUT_OF_MEMORY;
-        }
+        status =
+            l_assetTriangleIndices(runtime, data, primitive, vertices, full, &geometry.indices);
     }
-    for (size_t i = 0; i < indexCount && status == BL_OK; ++i)
-    {
-        const uint8_t* bytes = index ? accessorBytes(data, primitive->indices.value, i) : NULL;
-        if (!index)
-        {
-            indices[i] = (uint32_t)i;
-        }
-        else if (index->componentType == BL_ASSET_COMPONENT_U8)
-        {
-            indices[i] = *bytes;
-        }
-        else if (index->componentType == BL_ASSET_COMPONENT_U16)
-        {
-            uint16_t value;
-            memcpy(&value, bytes, 2);
-            indices[i] = value;
-        }
-        else
-        {
-            memcpy(indices + i, bytes, 4);
-        }
-    }
-    geometry.indices = {indices, indexCount};
     if (status == BL_OK && !geometry.normals.data)
     {
         status = generateAssetNormals(runtime, &geometry);
@@ -455,16 +408,19 @@ static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t n
     {
         status = bl_createMeshFromData({runtime, asset->engine->record.id}, name, &geometry, &mesh);
     }
-    l_free(runtime, indices);
+    l_free(runtime, (void*)geometry.indices.data);
     l_free(runtime, (void*)geometry.positions.data);
     l_free(runtime, (void*)geometry.normals.data);
     l_free(runtime, (void*)geometry.uvs.data);
     l_free(runtime, (void*)geometry.uvs2.data);
     l_free(runtime, (void*)geometry.tangents.data);
+    l_free(runtime, (void*)geometry.colors.data);
     if (status != BL_OK)
     {
         return status;
     }
+    L_Mesh* nativeMesh = (L_Mesh*)l_peek(runtime, mesh._id);
+    nativeMesh->assetFlatNormal = !authoredNormal;
     L_TRY(appendAssetNode(asset, {runtime, mesh._id}));
     size_t materialIndex = primitive->material.present ? primitive->material.value + 1 : 0;
     if (L_NULL(asset->materials[materialIndex]))
@@ -478,12 +434,13 @@ static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t n
         l_pin(l_peek(runtime, material._id));
         if (extended && primitive->material.present)
         {
-            L_TRY(l_applyAssetMaterialInputs(asset, extended, primitive->material.value, material));
+            L_TRY(l_applyAssetMaterialInputs(asset, extended, primitive->material.value, material,
+                                             full));
         }
     }
     bl_MeshProperties2 properties = {asset->materials[materialIndex], {}, false};
     L_TRY(bl_setMeshProperties2(mesh, &properties));
-    L_TRY(setInstances(mesh, data, data->nodes + nodeIndex));
+    L_TRY(setInstances(mesh, data, data->nodes + nodeIndex, full));
     L_TRY(bl_appendNodeChild(parent, {runtime, mesh._id}));
     return bl_setNodeParent({runtime, mesh._id}, parent);
 }
@@ -521,7 +478,8 @@ struct L_AssetBuildFrame
 };
 
 static bl_Status buildNode(L_Asset* asset, const bl_ParsedGltf* data, uint32_t index,
-                           bl_TransformNode parent, const bl_ParsedGltf3* extended)
+                           bl_TransformNode parent, const bl_ParsedGltf3* extended,
+                           const bl_ParsedGltf4* full)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     size_t bytes;
@@ -556,7 +514,7 @@ static bl_Status buildNode(L_Asset* asset, const bl_ParsedGltf* data, uint32_t i
             for (size_t i = 0; i < mesh->primitiveCount && status == BL_OK; ++i)
             {
                 status = buildMesh(asset, data, frame->index, mesh->primitives + i, frame->node,
-                                   extended);
+                                   extended, full);
             }
         }
         --depth;
@@ -599,10 +557,15 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
     }
     bl_ParsedGltf legacy = {};
     bl_ParsedGltf3 extended = {};
+    bl_ParsedGltf4 full = {};
     bool version3 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_3;
-    bl_ParsedGltf& parsed = version3 ? extended.document : legacy;
-    parsed.structSize = version3 ? sizeof(extended) : sizeof(legacy);
-    parsed.version = version3 ? BL_ASSET_DOCUMENT_VERSION_3 : BL_ASSET_DOCUMENT_VERSION;
+    bool version4 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_4;
+    bl_ParsedGltf3* textures = version4 ? &full.document3 : version3 ? &extended : NULL;
+    bl_ParsedGltf& parsed = textures ? textures->document : legacy;
+    parsed.structSize = version4 ? sizeof(full) : version3 ? sizeof(extended) : sizeof(legacy);
+    parsed.version = version4   ? BL_ASSET_DOCUMENT_VERSION_4
+                     : version3 ? BL_ASSET_DOCUMENT_VERSION_3
+                                : BL_ASSET_DOCUMENT_VERSION;
     bool invoked = false;
     const char* validationReason = NULL;
     if (status != BL_OK)
@@ -617,7 +580,7 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
     }
     if (status == BL_OK)
     {
-        status = l_validateAsset(&parsed, &validationReason, version3 ? &extended : NULL);
+        status = l_validateAsset(&parsed, &validationReason, textures, version4 ? &full : NULL);
     }
     if (status == BL_OK)
     {
@@ -667,7 +630,7 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
             {
                 status = BL_OUT_OF_MEMORY;
             }
-            if (status == BL_OK && version3 && parsed.textureCount)
+            if (status == BL_OK && textures && parsed.textureCount)
             {
                 size_t bytes;
                 if (!l_size(parsed.textureCount, 2, &asset->textureCount) ||
@@ -701,7 +664,7 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
             for (size_t i = 0; i < parsed.scenes[scene].rootCount && status == BL_OK; ++i)
             {
                 status = buildNode(asset, &parsed, parsed.scenes[scene].roots[i], asset->root,
-                                   version3 ? &extended : NULL);
+                                   textures, version4 ? &full : NULL);
             }
         }
     }

@@ -1,5 +1,11 @@
 # Native GLB sandbox
 
+The accepted geometry revision includes sparse accessors, vertex colors,
+triangle-strip/fan conversion and non-blocking authored cameras. A parent review
+also removed a spurious rejection of a valid single strided element whose view
+omits unused tail padding. Existing API functions and prior record layouts remain
+unchanged; the optional decoder explicitly advertises the additive raw v4 data.
+
 `LiteSandbox` is a plain native Win32 application calling the C99 Babylon Lite API.
 It uses no browser, JavaScript runtime, generated model plan, or NativeEngine adapter.
 Loading is synchronous. The default mode stays open until its window is closed.
@@ -39,8 +45,26 @@ route. There is no asset-name/hash/count dispatch or regeneration step.
 Implemented static geometry includes multiple nodes, meshes, primitives and
 PBR materials; ordinary TRS and locked affine matrices; mirrored-node winding;
 double-sided surfaces; tightly packed/interleaved FLOAT attributes; normalized
-U8/U16 UVs; U8/U16/U32 indices and nonindexed triangles. Missing normals are generated
-in native Core. Source POSITION, NORMAL, TEXCOORD_0/1 and TANGENT streams are retained.
+U8/U16 UVs; U8/U16/U32 indices and nonindexed triangles. TRIANGLE_STRIP and TRIANGLE_FAN
+are expanded into native triangle lists with alternating/cyclic winding and retained
+degenerate triples. Source POSITION, NORMAL, TEXCOORD_0/1, TANGENT and COLOR_0 streams
+are retained. RGB/RGBA FLOAT and normalized U8/U16 vertex colors become linear F32 RGBA;
+RGB supplies alpha 1. Colors multiply base RGB and MASK/BLEND coverage once, never
+emissive or a second sRGB transfer. OPAQUE still outputs alpha 1.
+
+The sandbox explicitly requests the additive raw-service/document v4 protocol.
+Sparse accessors retain their original raw descriptors and are resolved in Core:
+optional zero base, packed/interleaved base, checked U8/U16/U32 sparse indices and
+tightly packed value replacements, final typed bounds and normalization. Provider
+Accessor ranges end at the final element, not at a full trailing stride: a single
+12-byte VEC3 element may use stride 16 in a 12-byte view, and interleaved final
+elements need no extra trailing padding. Stride limits and checked overruns remain.
+v2/v3 defaults/layouts remain unchanged and still reject sparse inputs explicitly.
+Camera and texture behavior is retained across v4; environment parsing stays v2.
+Missing normals keep the original generated CPU storage, but imported PBR derives
+flat face normals, including its mapped-normal fallback. Authored tangents are
+ignored for shading when NORMAL is absent. Shared materials select per-mesh
+color/flat/authored-normal variants and follow geometry color-layout replacement.
 
 Embedded bufferView PNG/JPEG base-color, metallic/roughness, normal, occlusion and
 emissive textures are supported
@@ -78,6 +102,12 @@ non-mip LOD0 clamping are retained. Core uploads a complete native-generated mip
 the existing pixel-update API refreshes its levels. Exact per-sampler anisotropy remains
 deferred (source requests up to 4, effective native support is 1).
 
+Authored glTF camera definitions and attachments are ignored for rendering.
+Camera-bearing nodes retain their ordinary transforms, meshes, children and scene
+membership; no authored camera is instantiated or selected. The sandbox continues
+to use its native auto-framed orbit camera. Raw camera counts and attachment indices
+are retained, and malformed camera references or unsafe schema values still fail.
+
 This is an expanding common-static-model subset, **not full glTF support**.
 Broader valid-GLB compatibility remains the current priority; unsupported domains
 below are pending feature batches, not silently ignored or considered complete.
@@ -87,8 +117,8 @@ support must retain all clips, autoplay the first and allow selection; the
 current executable does not yet implement animations.
 
 Skins, animation playback, morph targets, compressed geometry/images, external/data
-buffer or image URIs, unsupported vertex semantics, imported cameras, non-triangle
-modes, unsupported material extensions, and mirrored instancing scales
+buffer or image URIs, unsupported vertex semantics, point/line
+modes, quantization, unsupported material extensions, and mirrored instancing scales
 produce explicit errors rather than dropping parts or substituting models.
 
 The existing runtime shader compiler and PBR/environment path are provisional.
@@ -152,6 +182,17 @@ they are not relicensed by this application. Lighting assets must also retain th
 own notices. No test models are generated or selected by filename in Core.
 
 Build `LiteAssetDecoder3Tests` for the registered raw-provider CTest. Build
+`LiteAssetDecoder4Tests` and `LiteAssetAccessorTests` for nested-prefix/presence/
+sparse-padding/bounds/normalization/topology/fault checks. `GenerateGeometryFixtures.py`,
+`LiteAssetGeometryTests` and `VerifyGeometryCaptures.py` separate independent CPU
+byte oracles, unmodified production RGBA rendering, and explicitly labeled vertex/
+normal diagnostic probes. The unchanged licensed `SimpleSparseAccessor.gltf/.bin`
+reference has no upstream GLB variant; its test GLB is labeled a container adaptation
+with only BIN URI removal, container encoding and padding, not an unchanged real GLB.
+`GenerateCameraFixtures.py` covers ignored perspective/orthographic definitions,
+camera-bearing transformed mesh hierarchies and camera-free equivalents.
+
+Build
 `LiteAssetTextureTests` and run it with an unchanged embedded JPEG-plus-PNG GLB
 and a new result-file path for GPU upload/mip/update, shared-owner, fault,
 allocation-failure and retirement checks. Its actual GPU staging checks do not

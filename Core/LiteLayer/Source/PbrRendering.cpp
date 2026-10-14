@@ -102,10 +102,13 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
             continue;
         }
         L_PbrPacket* packet = scene->pbrPackets + i;
-        bool tangents = !L_NULL(material->pbrNormalTexture) &&
+        bool colors = (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_COLOR)) != 0;
+        bool flatNormal = mesh->assetFlatNormal;
+        bool tangents = !flatNormal && !L_NULL(material->pbrNormalTexture) &&
                         (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_TANGENT));
         if (packet->material == material && packet->instances == mesh->hasInstances &&
-            packet->tangents == tangents)
+            packet->tangents == tangents && packet->colors == colors &&
+            packet->flatNormal == flatNormal)
         {
             if (packet->environment != scene->environment)
             {
@@ -117,9 +120,10 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         }
         L_Text vertex = {};
         L_Text fragment = {};
-        bl_Status status = l_pbrSources(
-            runtime, mesh->hasInstances, &vertex, &fragment, material->pbrInfo.doubleSided,
-            material->pbrBaseImage, material->pbrBaseUv1, material->pbrOrmUv1, material, tangents);
+        bl_Status status = l_pbrSources(runtime, mesh->hasInstances, &vertex, &fragment,
+                                        material->pbrInfo.doubleSided, material->pbrBaseImage,
+                                        material->pbrBaseUv1, material->pbrOrmUv1, material,
+                                        tangents, colors, flatNormal);
         const bl_InstanceAttributeDeclaration instances[4] = {{{"world0", 6}, 3, 0, 0, 64},
                                                               {{"world1", 6}, 4, 1, 16, 64},
                                                               {{"world2", 6}, 5, 2, 32, 64},
@@ -150,6 +154,8 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         packet->environment = scene->environment;
         packet->instances = mesh->hasInstances;
         packet->tangents = tangents;
+        packet->colors = colors;
+        packet->flatNormal = flatNormal;
         l_pin(&material->record);
         l_pin(&packet->environment->record);
     }

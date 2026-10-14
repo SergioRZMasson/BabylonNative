@@ -609,6 +609,41 @@ static void descriptors(J_Result* storage, const Json& json, bl_Bytes binary,
     out->textureCount = array(json, "textures").size();
     out->samplerCount = array(json, "samplers").size();
     out->cameraCount = array(json, "cameras").size();
+    for (const Json& camera : array(json, "cameras"))
+    {
+        object(camera);
+        const Json& type = camera.at("type");
+        if (type == "perspective")
+        {
+            const Json& projection = camera.at("perspective");
+            object(projection);
+            double nearPlane = number(projection.at("znear"));
+            double fov = number(projection.at("yfov"));
+            if (nearPlane <= 0 || fov <= 0 ||
+                (projection.contains("zfar") && number(projection.at("zfar")) <= nearPlane) ||
+                (projection.contains("aspectRatio") && number(projection.at("aspectRatio")) <= 0))
+            {
+                fail("Invalid ignored perspective camera definition");
+            }
+        }
+        else if (type == "orthographic")
+        {
+            const Json& projection = camera.at("orthographic");
+            object(projection);
+            double xmag = number(projection.at("xmag"));
+            double ymag = number(projection.at("ymag"));
+            double nearPlane = number(projection.at("znear"));
+            double farPlane = number(projection.at("zfar"));
+            if (xmag == 0 || ymag == 0 || nearPlane < 0 || farPlane <= nearPlane)
+            {
+                fail("Invalid ignored orthographic camera definition");
+            }
+        }
+        else
+        {
+            fail("Unknown ignored camera type");
+        }
+    }
 }
 
 static bl_AssetTextureInfo textureInfo(const Json& object, const char* key)
@@ -706,6 +741,83 @@ static void textureDescriptors(J_Result* storage, const Json& json, bl_ParsedGlt
     }
 }
 
+static bl_AssetOptionalSize optionalSize(const Json& value, const char* key)
+{
+    if (!value.contains(key))
+    {
+        return {};
+    }
+    return {true, (size_t)integer(value.at(key))};
+}
+
+static bl_NumberSpan bounds(J_Result* storage, const Json& item, const char* key)
+{
+    const Json& values = array(item, key);
+    double* data = (double*)allocate(storage, values.size(), sizeof(double));
+    for (size_t i = 0; i < values.size(); ++i)
+    {
+        data[i] = number(values[i]);
+    }
+    return {data, values.size()};
+}
+
+static void accessorDescriptors(J_Result* storage, const Json& json, bl_ParsedGltf4* out)
+{
+    bl_ParsedGltf* document = &out->document3.document;
+    const Json& accessors = array(json, "accessors");
+    bl_AssetAccessorInputs* inputs =
+        (bl_AssetAccessorInputs*)allocate(storage, accessors.size(), sizeof(bl_AssetAccessorInputs));
+    out->accessorInputs = inputs;
+    for (size_t i = 0; i < accessors.size(); ++i)
+    {
+        const Json& item = accessors[i];
+        inputs[i].hasByteOffset = item.contains("byteOffset");
+        inputs[i].hasNormalized = item.contains("normalized");
+        inputs[i].hasMin = item.contains("min");
+        inputs[i].hasMax = item.contains("max");
+        if (inputs[i].hasMin)
+        {
+            inputs[i].min = bounds(storage, item, "min");
+        }
+        if (inputs[i].hasMax)
+        {
+            inputs[i].max = bounds(storage, item, "max");
+        }
+        if (document->accessors[i].sparsePresent)
+        {
+            const Json& sparse = item.at("sparse");
+            object(sparse);
+            const Json& indices = sparse.at("indices");
+            const Json& values = sparse.at("values");
+            object(indices);
+            object(values);
+            bl_AssetSparseAccessor* target = &inputs[i].sparse;
+            target->count = (size_t)integer(sparse.at("count"));
+            if (!target->count)
+            {
+                fail("Sparse count must be positive");
+            }
+            target->indicesBufferView = (uint32_t)integer(indices.at("bufferView"), UINT32_MAX);
+            target->indicesByteOffset = optionalSize(indices, "byteOffset");
+            target->indicesComponentType =
+                (bl_AssetComponentType)integer(indices.at("componentType"), UINT32_MAX);
+            target->valuesBufferView = (uint32_t)integer(values.at("bufferView"), UINT32_MAX);
+            target->valuesByteOffset = optionalSize(values, "byteOffset");
+            document->unsupportedFeatures |=
+                extensions(sparse) | extensions(indices) | extensions(values);
+        }
+    }
+    const Json& views = array(json, "bufferViews");
+    bl_AssetBufferViewInputs* viewInputs = (bl_AssetBufferViewInputs*)allocate(
+        storage, views.size(), sizeof(bl_AssetBufferViewInputs));
+    out->bufferViewInputs = viewInputs;
+    for (size_t i = 0; i < views.size(); ++i)
+    {
+        viewInputs[i].hasByteOffset = views[i].contains("byteOffset");
+        viewInputs[i].target = optionalIndex(views[i], "target");
+    }
+}
+
 static bl_Status diagnostic(J_Result* storage, bl_AssetDiagnostic* target,
     const char* message, uint32_t code, bl_Status status)
 {
@@ -725,7 +837,7 @@ static bl_Status diagnostic(J_Result* storage, bl_AssetDiagnostic* target,
 }
 
 static bl_Status parseGltfCommon(void* user, bl_Bytes bytes, bl_String base, bl_ParsedGltf* out,
-    bl_ParsedGltf3* extended)
+    bl_ParsedGltf3* extended, bl_ParsedGltf4* full = NULL)
 {
     (void)base;
     if (!user || !out || !bytes.data || !bytes.count)
@@ -773,6 +885,10 @@ static bl_Status parseGltfCommon(void* user, bl_Bytes bytes, bl_String base, bl_
         {
             textureDescriptors(storage, json, extended);
         }
+        if (full)
+        {
+            accessorDescriptors(storage, json, full);
+        }
         return BL_OK;
     }
     catch (const J_Failure& error)
@@ -811,6 +927,18 @@ static bl_Status parseGltf3(void* user, bl_Bytes bytes, bl_String base, bl_Parse
         return BL_INVALID_ARGUMENT;
     }
     return parseGltfCommon(user, bytes, base, out, (bl_ParsedGltf3*)out);
+}
+
+static bl_Status parseGltf4(void* user, bl_Bytes bytes, bl_String base, bl_ParsedGltf* out)
+{
+    if (!out || out->structSize != sizeof(bl_ParsedGltf4) ||
+        out->version != BL_ASSET_DOCUMENT_VERSION_4 ||
+        (uintptr_t)out % alignof(bl_ParsedGltf4))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    bl_ParsedGltf4* full = (bl_ParsedGltf4*)out;
+    return parseGltfCommon(user, bytes, base, out, &full->document3, full);
 }
 
 static bl_Status parseEnvironment(void* user, bl_Bytes bytes, bl_ParsedEnvironment* out)
@@ -970,5 +1098,16 @@ bl_Status bl_assetDecoderService3(bl_AssetDecoder* decoder, bl_AssetService* ser
     }
     *service = {sizeof(bl_AssetService), BL_ASSET_SERVICE_VERSION_3, decoder, parseGltf3,
         releaseGltf3, parseEnvironment, releaseEnvironment};
+    return BL_OK;
+}
+
+bl_Status bl_assetDecoderService4(bl_AssetDecoder* decoder, bl_AssetService* service)
+{
+    if (!decoder || !service)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    *service = {sizeof(bl_AssetService), BL_ASSET_SERVICE_VERSION_4, decoder, parseGltf4,
+        releaseGltf, parseEnvironment, releaseEnvironment};
     return BL_OK;
 }

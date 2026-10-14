@@ -33,6 +33,18 @@ target_include_directories(LiteAssetDecoder3Tests PRIVATE "${PROJECT_SOURCE_DIR}
 target_compile_features(LiteAssetDecoder3Tests PRIVATE cxx_std_17)
 warnings_as_errors(LiteAssetDecoder3Tests)
 add_test(NAME LiteAssetDecoder3Tests COMMAND LiteAssetDecoder3Tests)
+add_executable(LiteAssetDecoder4Tests ../AssetTests/DecoderV4.cpp)
+target_link_libraries(LiteAssetDecoder4Tests PRIVATE LiteAssetDecoder)
+target_include_directories(LiteAssetDecoder4Tests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Include")
+target_compile_features(LiteAssetDecoder4Tests PRIVATE cxx_std_17)
+warnings_as_errors(LiteAssetDecoder4Tests)
+add_test(NAME LiteAssetDecoder4Tests COMMAND LiteAssetDecoder4Tests)
+add_executable(LiteAssetGeometryTests ../AssetTests/GpuGeometry.cpp AssetIO.cpp)
+target_compile_features(LiteAssetGeometryTests PRIVATE cxx_std_20)
+target_include_directories(LiteAssetGeometryTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+target_link_libraries(LiteAssetGeometryTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder
+    Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+warnings_as_errors(LiteAssetGeometryTests)
 add_executable(LiteAssetMaterialOracleTests Sandbox.cpp AssetIO.cpp)
 target_compile_features(LiteAssetMaterialOracleTests PRIVATE cxx_std_20)
 target_compile_definitions(LiteAssetMaterialOracleTests PRIVATE UNICODE _UNICODE

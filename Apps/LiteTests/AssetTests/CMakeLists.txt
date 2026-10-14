@@ -5,6 +5,13 @@ target_include_directories(LiteAssetContractTests PRIVATE
 target_compile_features(LiteAssetContractTests PRIVATE cxx_std_20)
 warnings_as_errors(LiteAssetContractTests)
 add_test(NAME LiteAssetContractTests COMMAND LiteAssetContractTests)
+add_executable(LiteAssetAccessorTests Accessors.cpp)
+target_link_libraries(LiteAssetAccessorTests PRIVATE LiteLayer bgfx)
+target_include_directories(LiteAssetAccessorTests PRIVATE
+    "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+target_compile_features(LiteAssetAccessorTests PRIVATE cxx_std_20)
+warnings_as_errors(LiteAssetAccessorTests)
+add_test(NAME LiteAssetAccessorTests COMMAND LiteAssetAccessorTests)
 if(WIN32)
     add_executable(LiteAssetDataOnlyTests DataOnly.cpp)
     target_link_libraries(LiteAssetDataOnlyTests PRIVATE LiteLayer)

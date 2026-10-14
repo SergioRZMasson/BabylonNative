@@ -157,7 +157,8 @@ static bl_AddressMode addressMode(bl_AssetOptionalIndex value)
 }
 
 static bl_Status imageTexture(L_Asset* asset, const bl_ParsedGltf3* data,
-                              const bl_AssetTextureInfo* input, bool srgb, bl_Texture2D* out)
+                              const bl_AssetTextureInfo* input, bool srgb, bl_Texture2D* out,
+                              const bl_ParsedGltf4* full)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     size_t cache = (size_t)input->index * 2 + (srgb ? 1 : 0);
@@ -174,7 +175,8 @@ static bl_Status imageTexture(L_Asset* asset, const bl_ParsedGltf3* data,
     const bl_AssetTexture* texture = data->textures + input->index;
     const bl_AssetImage* source = data->images + texture->source.value;
     const bl_AssetBufferView* view = data->document.bufferViews + source->bufferView.value;
-    const uint8_t* bytes = data->document.buffers[view->buffer].bytes.data + view->byteOffset;
+    const uint8_t* bytes = data->document.buffers[view->buffer].bytes.data +
+                           l_assetViewOffset(&data->document, source->bufferView.value, full);
     const bl_AssetSampler defaults = {};
     const bl_AssetSampler* sampler =
         texture->sampler.present ? data->samplers + texture->sampler.value : &defaults;
@@ -256,7 +258,7 @@ static void replaceMaterialTexture(bl_Runtime* runtime, bl_Texture2D* slot, bl_T
 }
 
 bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data, uint32_t index,
-                                     bl_Material handle)
+                                     bl_Material handle, const bl_ParsedGltf4* full)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     L_Material* material = (L_Material*)l_peek(runtime, handle._id);
@@ -265,7 +267,7 @@ bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data,
     if (inputs->baseColor.present)
     {
         bl_Texture2D texture = {};
-        L_TRY(imageTexture(asset, data, &inputs->baseColor, true, &texture));
+        L_TRY(imageTexture(asset, data, &inputs->baseColor, true, &texture, full));
         replaceMaterialTexture(runtime, &material->pbrInfo.baseColorTexture, texture);
         material->pbrBaseImage = true;
         material->pbrBaseUv1 =
@@ -282,7 +284,7 @@ bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data,
     if (inputs->metallicRoughness.present)
     {
         bl_Texture2D texture = {};
-        L_TRY(imageTexture(asset, data, &inputs->metallicRoughness, false, &texture));
+        L_TRY(imageTexture(asset, data, &inputs->metallicRoughness, false, &texture, full));
         replaceMaterialTexture(runtime, &material->pbrInfo.ormTexture, texture);
         material->pbrOrmImage = true;
         material->pbrOrmUv1 = inputs->metallicRoughness.texCoord.present &&
@@ -301,7 +303,7 @@ bl_Status l_applyAssetMaterialInputs(L_Asset* asset, const bl_ParsedGltf3* data,
         if (roles[i]->present)
         {
             bl_Texture2D texture = {};
-            L_TRY(imageTexture(asset, data, roles[i], i == 2, &texture));
+            L_TRY(imageTexture(asset, data, roles[i], i == 2, &texture, full));
             replaceMaterialTexture(runtime, slots[i], texture);
             *uv1[i] = roles[i]->texCoord.present && roles[i]->texCoord.value == 1;
             material->pbrExtra = true;

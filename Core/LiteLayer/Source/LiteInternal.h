@@ -66,6 +66,7 @@ struct L_Mesh
     uint64_t instanceGpuVersion;
     bool hasInstances;
     bool instanceWorldBounds;
+    bool assetFlatNormal;
     uint16_t instanceBufferIndex;
 };
 

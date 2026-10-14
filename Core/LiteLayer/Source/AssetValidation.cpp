@@ -10,18 +10,20 @@ static bl_Status unsupported(const char** reason, const char* message)
 }
 
 static bl_Status accessor(const bl_ParsedGltf* data, uint32_t index, bl_AssetAccessorShape shape,
-                          bool indices, size_t* count, bool normalizedUv = false)
+                          bool indices, size_t* count, bool normalizedAttribute = false,
+                          const bl_ParsedGltf4* full = NULL)
 {
     if (index >= data->accessorCount)
     {
         return BL_INVALID_ARGUMENT;
     }
     const bl_AssetAccessor* input = data->accessors + index;
-    if (input->shape != shape || input->sparsePresent)
+    if (input->shape != shape || (input->sparsePresent && !full))
     {
         return input->shape != shape ? BL_INVALID_ARGUMENT : BL_UNSUPPORTED;
     }
-    bool integerUv = normalizedUv && input->normalized &&
+    bool normalized = (!full || full->accessorInputs[index].hasNormalized) && input->normalized;
+    bool integerUv = normalizedAttribute && normalized &&
                      (input->componentType == BL_ASSET_COMPONENT_U8 ||
                       input->componentType == BL_ASSET_COMPONENT_U16);
     if ((!indices && input->componentType != BL_ASSET_COMPONENT_F32 && !integerUv) ||
@@ -31,47 +33,25 @@ static bl_Status accessor(const bl_ParsedGltf* data, uint32_t index, bl_AssetAcc
     {
         return BL_UNSUPPORTED;
     }
-    if (input->normalized && !integerUv)
+    if (normalized && !integerUv)
     {
         return BL_UNSUPPORTED;
     }
-    if (!input->bufferView.present || input->bufferView.value >= data->bufferViewCount)
+    if (!full && !input->bufferView.present)
     {
         return BL_UNSUPPORTED;
     }
-    const bl_AssetBufferView* view = data->bufferViews + input->bufferView.value;
-    size_t components = shape == BL_ASSET_VEC4   ? 4
-                        : shape == BL_ASSET_VEC3 ? 3
-                        : shape == BL_ASSET_VEC2 ? 2
-                                                 : 1;
-    size_t width = input->componentType == BL_ASSET_COMPONENT_U8    ? 1
-                   : input->componentType == BL_ASSET_COMPONENT_U16 ? 2
-                                                                    : 4;
-    size_t elementBytes;
-    size_t stride;
-    size_t bytes;
-    if (!l_size(components, width, &elementBytes))
+    L_AssetAccessorReader reader;
+    L_TRY(l_assetAccessorReader(data, index, full, &reader));
+    if (input->bufferView.present)
     {
-        return BL_INVALID_ARGUMENT;
-    }
-    stride = view->byteStride.present ? view->byteStride.value : elementBytes;
-    if (stride < elementBytes ||
-        (view->byteStride.present && (indices || stride < 4 || stride > 252 || stride % 4)))
-    {
-        return BL_INVALID_ARGUMENT;
-    }
-    if (!l_size(input->count ? input->count - 1 : 0, stride, &bytes) ||
-        (input->count && elementBytes > SIZE_MAX - bytes))
-    {
-        return BL_INVALID_ARGUMENT;
-    }
-    bytes += input->count ? elementBytes : 0;
-    if (input->count > UINT32_MAX || bytes > UINT32_MAX || input->byteOffset > view->byteLength ||
-        bytes > view->byteLength - input->byteOffset ||
-        ((uintptr_t)data->buffers[view->buffer].bytes.data + view->byteOffset + input->byteOffset) %
-            width)
-    {
-        return BL_INVALID_ARGUMENT;
+        const bl_AssetBufferView* view = data->bufferViews + input->bufferView.value;
+        size_t offset = !full || full->accessorInputs[index].hasByteOffset ? input->byteOffset : 0;
+        if ((indices && view->byteStride.present) ||
+            (!indices && (offset % 4 || reader.stride % 4)))
+        {
+            return BL_INVALID_ARGUMENT;
+        }
     }
     *count = input->count;
     return BL_OK;
@@ -85,11 +65,14 @@ static bool assetSpan(const void* pointer, size_t count, size_t size, size_t ali
 }
 
 bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
-                          const bl_ParsedGltf3* extended)
+                          const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full)
 {
-    size_t expectedSize = extended ? sizeof(*extended) : sizeof(*data);
-    uint32_t expectedVersion = extended ? BL_ASSET_DOCUMENT_VERSION_3 : BL_ASSET_DOCUMENT_VERSION;
+    size_t expectedSize = full ? sizeof(*full) : extended ? sizeof(*extended) : sizeof(*data);
+    uint32_t expectedVersion = full       ? BL_ASSET_DOCUMENT_VERSION_4
+                               : extended ? BL_ASSET_DOCUMENT_VERSION_3
+                                          : BL_ASSET_DOCUMENT_VERSION;
     if ((extended && &extended->document != data) || data->structSize != expectedSize ||
+        (full && (extended != &full->document3 || (uintptr_t)full % alignof(bl_ParsedGltf4))) ||
         data->version != expectedVersion || data->gltfVersion != 2 ||
         !assetSpan(data->buffers, data->bufferCount, sizeof(bl_AssetBuffer),
                    alignof(bl_AssetBuffer)) ||
@@ -106,6 +89,13 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                    alignof(bl_String)) ||
         !assetSpan(data->extensionsRequired, data->extensionsRequiredCount, sizeof(bl_String),
                    alignof(bl_String)))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    if (full && (!assetSpan(full->accessorInputs, data->accessorCount,
+                            sizeof(bl_AssetAccessorInputs), alignof(bl_AssetAccessorInputs)) ||
+                 !assetSpan(full->bufferViewInputs, data->bufferViewCount,
+                            sizeof(bl_AssetBufferViewInputs), alignof(bl_AssetBufferViewInputs))))
     {
         return BL_INVALID_ARGUMENT;
     }
@@ -129,10 +119,9 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         return unsupported(reason, "This raw decoder service does not yet provide embedded "
                                    "image, texture and sampler descriptors");
     }
-    if (data->cameraCount)
+    if (data->cameraCount > UINT32_MAX)
     {
-        return unsupported(reason, "Imported glTF cameras are not supported; the sandbox uses "
-                                   "native automatic model framing");
+        return BL_INVALID_ARGUMENT;
     }
     bool instancingUsed = false;
     for (size_t i = 0; i < data->extensionsUsedCount; ++i)
@@ -173,8 +162,12 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
     for (size_t i = 0; i < data->bufferViewCount; ++i)
     {
         const bl_AssetBufferView* view = data->bufferViews + i;
-        if (view->buffer != 0 || view->byteOffset > buffer->declaredByteLength ||
-            view->byteLength > buffer->declaredByteLength - view->byteOffset)
+        size_t offset = l_assetViewOffset(data, (uint32_t)i, full);
+        if (view->buffer != 0 || offset > buffer->declaredByteLength ||
+            view->byteLength > buffer->declaredByteLength - offset ||
+            (full && full->bufferViewInputs[i].target.present &&
+             full->bufferViewInputs[i].target.value != 34962 &&
+             full->bufferViewInputs[i].target.value != 34963))
         {
             return BL_INVALID_ARGUMENT;
         }
@@ -197,10 +190,14 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         {
             return BL_INVALID_ARGUMENT;
         }
-        if (input->sparsePresent)
+        if (input->sparsePresent && !full)
         {
             return unsupported(reason, "Sparse accessors are not implemented");
         }
+    }
+    if (full)
+    {
+        L_TRY(l_validateAssetAccessorBounds(data, full));
     }
     for (size_t i = 0; i < data->materialCount; ++i)
     {
@@ -255,17 +252,22 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                 return BL_INVALID_ARGUMENT;
             }
             if (primitive->unsupportedFeatures || primitive->morphTargetCount ||
-                (primitive->hasMode && primitive->mode != BL_ASSET_MODE_TRIANGLES))
+                (primitive->hasMode && primitive->mode != BL_ASSET_MODE_TRIANGLES &&
+                 primitive->mode != BL_ASSET_MODE_TRIANGLE_STRIP &&
+                 primitive->mode != BL_ASSET_MODE_TRIANGLE_FAN))
             {
                 return unsupported(reason,
-                                   "Only uncompressed static TRIANGLES primitives are "
-                                   "implemented; morph targets and other modes are unsupported");
+                                   "Only static triangle lists, strips and fans are implemented; "
+                                   "morph targets and point/line modes are unsupported");
             }
             size_t indexCount = 0;
             if (primitive->indices.present)
             {
-                L_TRY(accessor(data, primitive->indices.value, BL_ASSET_SCALAR, true, &indexCount));
-                if (indexCount % 3)
+                L_TRY(accessor(data, primitive->indices.value, BL_ASSET_SCALAR, true, &indexCount,
+                               false, full));
+                if ((!primitive->hasMode || primitive->mode == BL_ASSET_MODE_TRIANGLES)
+                        ? indexCount % 3 != 0
+                        : indexCount < 3)
                 {
                     return BL_INVALID_ARGUMENT;
                 }
@@ -297,15 +299,64 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                 {
                     shape = BL_ASSET_VEC4;
                 }
+                else if (l_name(attribute->semantic, "COLOR_0"))
+                {
+                    if (attribute->accessor >= data->accessorCount)
+                    {
+                        return BL_INVALID_ARGUMENT;
+                    }
+                    shape = data->accessors[attribute->accessor].shape;
+                    if (shape != BL_ASSET_VEC3 && shape != BL_ASSET_VEC4)
+                    {
+                        return BL_INVALID_ARGUMENT;
+                    }
+                    const bl_AssetAccessor* color = data->accessors + attribute->accessor;
+                    bool normalized =
+                        (!full || full->accessorInputs[attribute->accessor].hasNormalized) &&
+                        color->normalized;
+                    if (color->componentType == BL_ASSET_COMPONENT_F32
+                            ? normalized
+                            : (color->componentType != BL_ASSET_COMPONENT_U8 &&
+                               color->componentType != BL_ASSET_COMPONENT_U16) ||
+                                  !normalized)
+                    {
+                        return BL_INVALID_ARGUMENT;
+                    }
+                }
                 else if (!l_name(attribute->semantic, "POSITION") &&
                          !l_name(attribute->semantic, "NORMAL"))
                 {
                     return unsupported(reason, "Unsupported vertex semantic; use POSITION, NORMAL, "
-                                               "TEXCOORD_0/1 and TANGENT");
+                                               "TEXCOORD_0/1, TANGENT and COLOR_0");
                 }
                 size_t count;
                 L_TRY(accessor(data, attribute->accessor, shape, false, &count,
-                               shape == BL_ASSET_VEC2));
+                               shape == BL_ASSET_VEC2 || l_name(attribute->semantic, "COLOR_0"),
+                               full));
+                if (l_name(attribute->semantic, "COLOR_0"))
+                {
+                    L_AssetAccessorReader reader;
+                    L_TRY(l_assetAccessorReader(data, attribute->accessor, full, &reader));
+                    for (size_t element = 0; element < count; ++element)
+                    {
+                        double values[4];
+                        L_TRY(l_assetAccessorElement(&reader, element, values));
+                        for (size_t component = 0; component < reader.rows; ++component)
+                        {
+                            if (!isfinite(values[component]) || values[component] < 0 ||
+                                values[component] > 1)
+                            {
+                                return BL_INVALID_ARGUMENT;
+                            }
+                        }
+                    }
+                }
+                if (full && l_name(attribute->semantic, "POSITION") &&
+                    (!full->accessorInputs[attribute->accessor].hasMin ||
+                     !full->accessorInputs[attribute->accessor].hasMax))
+                {
+                    return BL_INVALID_ARGUMENT;
+                }
                 if (vertices == SIZE_MAX)
                 {
                     vertices = count;
@@ -324,7 +375,10 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
             {
                 return unsupported(reason, "A triangle primitive needs POSITION data");
             }
-            if (!primitive->indices.present && vertices % 3)
+            if (!primitive->indices.present &&
+                ((!primitive->hasMode || primitive->mode == BL_ASSET_MODE_TRIANGLES)
+                     ? vertices % 3 != 0
+                     : vertices < 3))
             {
                 return BL_INVALID_ARGUMENT;
             }
@@ -354,6 +408,7 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         if ((node->hasName && !l_string(node->name)) ||
             !assetSpan(node->children, node->childCount, sizeof(uint32_t), alignof(uint32_t)) ||
             (node->mesh.present && node->mesh.value >= data->meshCount) ||
+            (node->camera.present && node->camera.value >= data->cameraCount) ||
             (node->unsupportedFeatures & ~UINT64_C(15)) ||
             (node->hasTranslation && !l_vec(node->translation)) ||
             (node->hasRotation && !l_quat(node->rotation)) ||
@@ -361,9 +416,9 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         {
             return BL_INVALID_ARGUMENT;
         }
-        if (node->camera.present || node->skin.present || node->unsupportedFeatures)
+        if (node->skin.present || node->unsupportedFeatures)
         {
-            return unsupported(reason, "Node requires an unsupported camera, skin or extension");
+            return unsupported(reason, "Node requires an unsupported skin or extension");
         }
         bl_TransformNodeOptions options;
         L_TRY(l_composeAssetMatrix(node, &options));
@@ -389,23 +444,19 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                 {
                     size_t count;
                     L_TRY(accessor(data, indices[j]->value, j == 1 ? BL_ASSET_VEC4 : BL_ASSET_VEC3,
-                                   false, &count));
+                                   false, &count, false, full));
                     if (instances != SIZE_MAX && instances != count)
                     {
                         return BL_INVALID_ARGUMENT;
                     }
                     instances = count;
-                    const bl_AssetAccessor* input = data->accessors + indices[j]->value;
-                    const bl_AssetBufferView* view = data->bufferViews + input->bufferView.value;
-                    const uint8_t* bytes = data->buffers[view->buffer].bytes.data +
-                                           view->byteOffset + input->byteOffset;
+                    L_AssetAccessorReader reader;
+                    L_TRY(l_assetAccessorReader(data, indices[j]->value, full, &reader));
                     size_t components = j == 1 ? 4 : 3;
-                    size_t stride = view->byteStride.present ? view->byteStride.value
-                                                             : components * sizeof(float);
                     for (size_t k = 0; k < count; ++k)
                     {
-                        float values[4] = {};
-                        memcpy(values, bytes + k * stride, components * sizeof(float));
+                        double values[4] = {};
+                        L_TRY(l_assetAccessorElement(&reader, k, values));
                         for (size_t component = 0; component < components; ++component)
                         {
                             if (!isfinite(values[component]))

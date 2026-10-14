@@ -45,6 +45,8 @@ for values, shape in streams:
                       "componentType": 5126, "count": 4, "type": shape})
 accessors.append({"bufferView": view(struct.pack("<6H", 0, 1, 2, 0, 2, 3)),
                   "componentType": 5123, "count": 6, "type": "SCALAR"})
+accessors[0]["min"] = [-1, -1, 0]
+accessors[0]["max"] = [1, 1, 0]
 accessors.append({"bufferView": view(struct.pack("<16f", *([1, 0, 0, -1] * 4))),
                   "componentType": 5126, "count": 4, "type": "VEC4"})
 accessors.append({"bufferView": view(struct.pack("<8f", *([0, 0] * 4))),

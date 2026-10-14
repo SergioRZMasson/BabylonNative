@@ -640,7 +640,7 @@ int wmain(int argc, wchar_t** argv)
         bl_Allocator allocator = {&host.memory, allocate, release};
         bl_AssetService assets = {};
         checked(bl_createAssetDecoder(&allocator, &host.decoder, &assets), "Create raw GLB decoder");
-        checked(bl_assetDecoderService3(host.decoder, &assets), "Advertise embedded GLB texture inputs");
+        checked(bl_assetDecoderService4(host.decoder, &assets), "Advertise raw GLB geometry inputs");
         host.decoderService = assets;
         assets.userData = &host;
         assets.parseGltf = parseForHost;

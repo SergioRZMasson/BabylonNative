@@ -311,6 +311,13 @@ valid GLB" from a passing subset or silently ignore unsupported required feature
 The sandbox remains an outside-Core host. Pixel-perfect scene35 diagnostics,
 exact anisotropy and full camera controls remain deferred, not new prerequisites.
 
+User camera policy (2026-10-14): authored glTF cameras are ignored for viewing,
+not a reason to reject a model. Keep the sandbox's auto-framing/orbit camera.
+Retain camera-bearing nodes, their transforms, meshes, children and scene
+membership; do not remove subtrees or apply authored projection/view settings.
+Preserve ordinary safe-input/reference validation and other feature errors.
+Full imported-camera support is not a loading acceptance gate.
+
 1. Read this policy, the entire relevant public contract, original TS bodies,
    existing native tests and the performance report before designing changes.
    Keep implementation exploration isolated from NativeEngine/generated engine

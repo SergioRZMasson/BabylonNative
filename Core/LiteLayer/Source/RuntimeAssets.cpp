@@ -15,7 +15,8 @@ bl_Status bl_createRuntime2(const bl_RuntimeOptions2* options, bl_Runtime** out)
     const bl_ShaderCompilerService2* compiler = options->shaderCompiler2;
     if (assets && (assets->structSize != sizeof(*assets) ||
                    (assets->version != BL_ASSET_SERVICE_VERSION &&
-                    assets->version != BL_ASSET_SERVICE_VERSION_3) ||
+                    assets->version != BL_ASSET_SERVICE_VERSION_3 &&
+                    assets->version != BL_ASSET_SERVICE_VERSION_4) ||
                    !assets->parseGltf || !assets->releaseGltf || !assets->parseEnvironment ||
                    !assets->releaseEnvironment))
     {

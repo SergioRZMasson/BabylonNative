@@ -103,16 +103,37 @@ EXT instancing and factor-only PBR (including the existing raw alpha fields).
 The additive service/document v3
 protocol keeps all 199 function signatures and prior record layouts unchanged,
 and exposes encoded images, textures, samplers and material inputs as raw POD.
+The additive service/document **v4** keeps those layouts and all 199 Core functions
+frozen. Its four PODs describe sparse index/value locations, accessor/view field
+presence, view targets and original double min/max bounds through checked nested
+first-member full storage. The optional separate decoder's explicit
+`bl_assetDecoderService4` factory is used by the sandbox; v2/v3 factories stay
+unchanged and sparse remains unsupported on those older raw protocols.
+Core owns sparse/implicit-zero accessor resolution, typed matrix-column padding,
+normalization and final bounds validation. RGB/RGBA FLOAT and normalized U8/U16
+COLOR_0 becomes linear F32 RGBA and modulates base RGB/coverage once, preserving
+OPAQUE alpha 1 and precise MASK/BLEND image/factor alpha. Triangle strips/fans are
+expanded to checked native lists with correct winding and retained degenerates.
+Imported missing-NORMAL PBR shading uses derivative flat normals and ignores
+authored tangents for that shading path, while generic CPU geometry factories and
+generated-normal storage remain unchanged. Mapped fallback still uses the disclosed
+original-Lite cotangent adaptation, not a new MikkTSpace implementation.
+Per-mesh color/flat/instance/tangent variants handle shared materials and color-layout
+replacement without first-mesh shader reuse.
 The current native loader supports multiple meshes/primitives/materials,
 packed/interleaved FLOAT attributes, normalized U8/U16 UVs, U8/U16/U32 or generated
-indices, native-generated missing normals, mirrored ordinary nodes and opaque
+indices, native-generated missing CPU normals, mirrored ordinary nodes and opaque
 double-sided PBR, plus core glTF MASK and straight-alpha source-over BLEND.
 Embedded PNG/JPEG base-color, metallic/roughness, normal,
 occlusion and emissive inputs use real sRGB/linear resources, UV0/1, native mip
 chains and writable pixel updates. Normal scale, authored tangents/cotangent
 fallback, occlusion strength and emissive factors retain their source semantics.
 Unsupported material/texture features, extensions, skinning, morphs, animation
-and backgrounds fail explicitly. Complete authored RGBD environments still
+and backgrounds fail explicitly. Authored glTF cameras are ignored for rendering,
+not a loading blocker: camera counts/reference validation remain, camera-bearing
+node transforms/meshes/children/membership remain, and the sandbox uses native
+auto-framed orbit controls rather than instantiating or selecting authored cameras.
+Complete authored RGBD environments still
 require an explicit BRDF resource.
 Environment skip flags default to false; the source scene explicitly skips both
 background features. Native loading is synchronous; the JS Promise projection is

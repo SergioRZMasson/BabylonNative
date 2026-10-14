@@ -2093,6 +2093,8 @@ bl_Status bl_disposeStandardMaterial(bl_StandardMaterial material);
 #define BL_ASSET_DOCUMENT_VERSION UINT32_C(2)
 #define BL_ASSET_SERVICE_VERSION_3 UINT32_C(3)
 #define BL_ASSET_DOCUMENT_VERSION_3 UINT32_C(3)
+#define BL_ASSET_SERVICE_VERSION_4 UINT32_C(4)
+#define BL_ASSET_DOCUMENT_VERSION_4 UINT32_C(4)
 #define BL_SHADER_COMPILER_SERVICE_VERSION_2 UINT32_C(2)
 #define BL_SHADER_COMPILE_VERSION_2 UINT32_C(2)
 
@@ -2403,6 +2405,53 @@ typedef struct bl_ParsedGltf3
     const bl_AssetMaterialInputs* materialInputs;
 } bl_ParsedGltf3;
 
+typedef struct bl_AssetSparseAccessor
+{
+    size_t count;
+    uint32_t indicesBufferView;
+    bl_AssetOptionalSize indicesByteOffset;
+    bl_AssetComponentType indicesComponentType;
+    uint32_t valuesBufferView;
+    bl_AssetOptionalSize valuesByteOffset;
+} bl_AssetSparseAccessor;
+
+typedef struct bl_AssetAccessorInputs
+{
+    bool hasByteOffset;
+    bool hasNormalized;
+    bool hasMin;
+    bl_NumberSpan min;
+    bool hasMax;
+    bl_NumberSpan max;
+    bl_AssetSparseAccessor sparse;
+} bl_AssetAccessorInputs;
+
+typedef struct bl_AssetBufferViewInputs
+{
+    bool hasByteOffset;
+    bl_AssetOptionalIndex target;
+} bl_AssetBufferViewInputs;
+
+/*
+ * Explicit service4 receives &result.document3.document in FULL caller-owned
+ * bl_ParsedGltf4 storage, with sizeof(bl_ParsedGltf4)/version4 in that prefix.
+ * The old v2/v3 records, callback signatures and factory defaults are frozen.
+ * accessorInputs and bufferViewInputs have document.accessorCount and
+ * document.bufferViewCount elements. sparsePresent in the old accessor controls
+ * sparse presence; absent sparse/min/max/optional values are ignored.
+ * Min/max retain original JSON doubles, including raw integer normalized bounds.
+ * Every span is provider-owned until exactly-once release on the SAME prefix,
+ * including malformed/partial results. Release must not access a tail based on
+ * an altered prefix, or clear full v4 storage after rejecting short storage.
+ * Service4 environment callbacks still use the unchanged version2 record.
+ */
+typedef struct bl_ParsedGltf4
+{
+    bl_ParsedGltf3 document3;
+    const bl_AssetAccessorInputs* accessorInputs;
+    const bl_AssetBufferViewInputs* bufferViewInputs;
+} bl_ParsedGltf4;
+
 typedef enum bl_EnvironmentFace
 {
     BL_ENVIRONMENT_POSITIVE_X = 0,
@@ -2671,10 +2720,15 @@ bl_Status bl_getTextureCubeInfo(bl_TextureCube texture, bl_TextureCubeInfo* info
  * Failure publishes no identities/scene mutations, outputs unchanged; submitted
  * setup retires safely but cannot be unsubmitted. Success does not imply GPU idle.
  *
- * Raw self-contained magic-selected GLB only: indexed triangles/F32 normals,
- * ordinary supported node transforms and EXT_mesh_gpu_instancing. Missing UV0
- * ->zeros, missing tangents/UV2 absent; unsupported textures/normal generation/
- * colors/sparse/overstride/skins/morph/animation/other extensions error, no proxy.
+ * Raw self-contained magic-selected GLB: triangle lists, strips/fans expanded
+ * natively, F32 attributes, normalized U8/U16 UV/color, and EXT instancing.
+ * Missing UV0 ->zeros; missing tangents/UV2/color stay absent. Missing NORMAL
+ * retains generated CPU normals but imported PBR uses flat geometric shading,
+ * ignoring authored tangents on that path. Core resolves v4 sparse/zero bases;
+ * old v2/v3 sparse descriptors remain explicit UNSUPPORTED. Authored cameras
+ * are ignored for rendering, with reference/schema safety and all node/mesh/
+ * child transforms preserved. Unsupported resources, point/line modes, skins,
+ * morphs, animations and other extensions error without proxies or dropping.
  * Core source root reflection(-1,1,1), local instance TRS and visible world bounds
  * frame default camera. No asset-name/hash/count specialization.
  *

@@ -21,6 +21,8 @@ bl_Status bl_createAssetDecoder(const bl_Allocator* allocator, bl_AssetDecoder**
 void bl_destroyAssetDecoder(bl_AssetDecoder* decoder);
 /* Advertises full caller-owned GLB document3 storage; environment remains v2. */
 bl_Status bl_assetDecoderService3(bl_AssetDecoder* decoder, bl_AssetService* service);
+/* Explicit full nested GLB document4 storage; old factories/environment frozen. */
+bl_Status bl_assetDecoderService4(bl_AssetDecoder* decoder, bl_AssetService* service);
 
 #ifdef __cplusplus
 }
