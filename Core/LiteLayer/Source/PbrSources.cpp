@@ -220,7 +220,8 @@ static bool appendNormalSource(bl_Runtime* runtime, L_Text* vertex, L_Text* frag
 
 bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
                        bool doubleSided, bool baseImage, bool baseUv1, bool ormUv1,
-                       const L_Material* material, bool tangents, bool colors, bool flatNormal)
+                       const L_Material* material, bool tangents, bool colors, bool flatNormal,
+                       bool cpuSkin)
 {
     tangents = tangents && !flatNormal;
     bool specGloss = material && material->pbrSpecularGlossiness;
@@ -451,6 +452,44 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
         if (colors && !material->testing && !material->blending &&
             !replacePbrText(runtime, fragment, "return vec4f(color,alpha*material.materialAlpha);",
                             "return vec4f(color,1.0);"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    if (cpuSkin)
+    {
+        if (!replacePbrText(runtime, vertex, "vec4f(normalize(normal),0)", "vec4f(normal,0)"))
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+        if (tangents)
+        {
+            const char* fetch = "@group(1)@binding(16)var skinBitangents:texture_2d<f32>;\n";
+            if (!l_appendText(runtime, vertex, {fetch, strlen(fetch)}) ||
+                !replacePbrText(runtime, vertex, "@vertex fn main(",
+                                "@vertex fn main(@builtin(vertex_index)skinVertex:u32,") ||
+                !replacePbrText(runtime, vertex, "let T_local=normalize(tangent.xyz);",
+                                "let T_local=tangent.xyz;") ||
+                !replacePbrText(runtime, vertex,
+                                "let B_local=cross(normalize(normal),T_local)*tangent.w;",
+                                "let skinWidth=textureDimensions(skinBitangents).x;"
+                                "let B_local=textureLoad(skinBitangents,"
+                                "vec2i(i32(skinVertex%skinWidth),"
+                                "i32(skinVertex/skinWidth)),0).xyz;"))
+            {
+                return BL_OUT_OF_MEMORY;
+            }
+        }
+        const char* guard = "\nfn safeSkinNormal(v:vec3f,p:vec3f)->vec3f{"
+                            "let g=cross(dpdx(p),dpdy(p));let g2=dot(g,g);"
+                            "let len2=dot(v,v);if(len2>0){return v*inverseSqrt(len2);}"
+                            "if(g2>0){return g*inverseSqrt(g2);}return vec3f(0,0,1);}\n";
+        if (!l_appendText(runtime, fragment, {guard, strlen(guard)}) ||
+            (!flatNormal && !replacePbrText(runtime, fragment, "normalize(input.worldNormal)",
+                                            "safeSkinNormal(input.worldNormal,input.worldPos)")) ||
+            (tangents &&
+             !replacePbrText(runtime, fragment, "normalize(TBN*normalize(scaledNormal))",
+                             "safeSkinNormal(TBN*normalize(scaledNormal),input.worldPos)")))
         {
             return BL_OUT_OF_MEMORY;
         }

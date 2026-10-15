@@ -434,6 +434,10 @@ bl_Status bl_setNodeParent(bl_SceneNode h, bl_SceneNode p)
 {
     L_NODE_GET(h, n);
     L_Node* parent = NULL;
+    if (n->assetParentLocked)
+    {
+        return BL_UNSUPPORTED;
+    }
     if (!L_NULL(p))
     {
         if (p._runtime != h._runtime)
@@ -472,6 +476,10 @@ bl_Status bl_appendNodeChild(bl_SceneNode h, bl_SceneNode ch)
         return BL_WRONG_RUNTIME;
     }
     L_NODE_GET(ch, child);
+    if (n->assetChildrenLocked || child->assetParentLocked)
+    {
+        return BL_UNSUPPORTED;
+    }
     if (containsChild(h._runtime, child, n, 0))
     {
         return L_FAIL(h._runtime, BL_INVALID_ARGUMENT, "Child cycle");
@@ -514,6 +522,10 @@ bl_Status bl_removeNodeChild(bl_SceneNode h, bl_SceneNode ch)
     }
     L_Node* child;
     L_TRY(l_node(ch, &child, true));
+    if (n->assetChildrenLocked || (child && child->assetParentLocked))
+    {
+        return BL_UNSUPPORTED;
+    }
     for (size_t i = 0; i < n->childCount; ++i)
     {
         if (n->children[i]._id == ch._id)

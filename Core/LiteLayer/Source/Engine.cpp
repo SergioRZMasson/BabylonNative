@@ -1242,7 +1242,7 @@ bl_Status bl_removeSceneCallback(bl_SceneContext h, bl_CallbackToken token)
             if ((*p)->id == token.value)
             {
                 L_Callback* old = *p;
-                if (old->control)
+                if (old->control || old->asset)
                 {
                     return BL_INVALID_ARGUMENT;
                 }
@@ -1275,7 +1275,20 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
     l_enterDispatch(r);
     for (L_Callback* p = s->before; p; p = p->next)
     {
-        p->before(p->user, s->properties.fixedDeltaMs > 0 ? s->properties.fixedDeltaMs : delta);
+        double step = s->properties.fixedDeltaMs > 0 ? s->properties.fixedDeltaMs : delta;
+        if (p->asset)
+        {
+            bl_Status status = l_tickAssetMotion(p->asset, s, step);
+            if (status != BL_OK)
+            {
+                l_leaveDispatch(r);
+                return status;
+            }
+        }
+        else
+        {
+            p->before(p->user, step);
+        }
         if (p->control && p->control->failure != BL_OK)
         {
             l_leaveDispatch(r);
@@ -1384,6 +1397,7 @@ static bl_Status render(L_Engine* e, double delta, bool driven)
     e->inFrame = true;
     l_enterFrame(r);
     e->stats.drawCallCount = 0;
+    ++e->frameSerial;
     bl_Status status = BL_OK;
     unsigned view = 0;
     for (L_Scene* s = e->scenes; s; s = s->next, ++view)

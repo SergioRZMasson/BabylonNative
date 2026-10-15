@@ -12,6 +12,7 @@ struct L_PbrPacket
     bool tangents;
     bool colors;
     bool flatNormal;
+    bool cpuSkin;
 };
 
 bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene);
@@ -22,6 +23,7 @@ uint64_t l_pbrDrawState(const L_Material* material, double determinant, bool dep
 bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
                        bool doubleSided = false, bool baseImage = false, bool baseUv1 = false,
                        bool ormUv1 = false, const L_Material* material = NULL,
-                       bool tangents = false, bool colors = false, bool flatNormal = false);
+                       bool tangents = false, bool colors = false, bool flatNormal = false,
+                       bool cpuSkin = false);
 
 #endif

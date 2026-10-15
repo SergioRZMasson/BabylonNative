@@ -68,6 +68,7 @@ struct L_Mesh
     bool instanceWorldBounds;
     bool assetFlatNormal;
     uint16_t instanceBufferIndex;
+    struct L_AssetDeformation* skin;
 };
 
 struct L_Draw
@@ -107,6 +108,8 @@ static_assert(offsetof(L_Mesh, node) == 0 && offsetof(L_Node, record) == 0,
               "Checked records must be convertible through their first member");
 
 void l_meshCleanup(bl_Runtime* r, L_Record* record);
+bl_Status l_tickAssetMotion(struct L_Asset* asset, L_Scene* scene, double delta);
+void l_detachAssetSkin(L_Mesh* mesh);
 bl_Status l_meshWorldBounds(bl_Runtime* runtime, L_Mesh* mesh, bl_Vec3* minimum, bl_Vec3* maximum,
                             bool* hasBounds);
 void l_geometryCleanup(bl_Runtime* r, L_Geometry* g);

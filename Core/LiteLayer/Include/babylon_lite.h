@@ -2491,6 +2491,68 @@ typedef struct bl_ParsedGltf5
     const bl_AssetSpecularGlossinessInputs* specularGlossinessInputs;
 } bl_ParsedGltf5;
 
+/*
+ * SERVICE (the default) uses the copied legacy asset-service callbacks.
+ * NATIVE opts subsequent loads into the optional private cgltf importer; it
+ * still uses host IO/image services. Existing assets are unaffected. Native
+ * JSON schema numbers are adapted through cgltf Float32; public double APIs
+ * and the legacy service's original JSON number precision are unchanged.
+ * Native mode is unavailable when built without BABYLON_LITE_ENABLE_GLTF.
+ */
+typedef enum bl_GltfImportMode
+{
+    BL_GLTF_IMPORT_SERVICE = 0,
+    BL_GLTF_IMPORT_NATIVE = 1
+} bl_GltfImportMode;
+
+bl_Status bl_setGltfImportMode(bl_Runtime* runtime, bl_GltfImportMode mode);
+
+typedef struct bl_AnimationGroup
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_AnimationGroup;
+
+typedef struct bl_AnimationGroups
+{
+    const bl_AnimationGroup* data;
+    size_t count;
+} bl_AnimationGroups;
+
+typedef struct bl_AnimationGroupInfo
+{
+    bl_String name;
+    double duration;
+    double frameRate;
+    double currentTime;
+    double speedRatio;
+    bool isPlaying;
+    bool loopAnimation;
+    size_t targetedAnimationCount;
+    bool isStopped;
+} bl_AnimationGroupInfo;
+
+/* Groups/names are stable borrowed views until container disposal. All clips
+ * remain in source order; first autoplays, default loop=true/speed=1/frameRate=60.
+ * One exclusive evaluator and one clock per asset/engine frame. Shared scenes
+ * use the earliest registered owner's delta. Controls do not advance time.
+ * Pause holds time; stop resets time0 but holds published pose. Seek(frame/60)
+ * pauses and immediately wraps/clamps/evaluates. Nonloop endpoints stay playing
+ * but clamped. Selection (including same-index Restart) resets all clip-targeted
+ * paths to source rest and immediately plays selected time0. Outputs/state are
+ * unchanged on failure. No Manager/blending/bone-control/event API is implied.
+ * Skin-owned source/proxy topology is protected; import-root parenting is allowed.
+ * Geometry writes on skinned drawables are explicitly unsupported. */
+bl_Status bl_getAssetContainerAnimationGroups(bl_AssetContainer container,
+                                              bl_AnimationGroups* groups);
+bl_Status bl_getAnimationGroupInfo(bl_AnimationGroup group, bl_AnimationGroupInfo* info);
+bl_Status bl_playAnimation(bl_AnimationGroup group);
+bl_Status bl_pauseAnimation(bl_AnimationGroup group);
+bl_Status bl_stopAnimation(bl_AnimationGroup group);
+bl_Status bl_goToFrame(bl_AnimationGroup group, double frame);
+bl_Status bl_setAnimationPlayback(bl_AnimationGroup group, double speedRatio, bool loopAnimation);
+bl_Status bl_selectAssetContainerAnimation(bl_AssetContainer container, size_t index);
+
 typedef enum bl_EnvironmentFace
 {
     BL_ENVIRONMENT_POSITIVE_X = 0,

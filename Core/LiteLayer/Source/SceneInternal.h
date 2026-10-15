@@ -27,6 +27,8 @@ struct L_Node
     uint64_t version;
     uint64_t parentVersion;
     bl_CameraProperties camera;
+    bool assetParentLocked;
+    bool assetChildrenLocked;
 };
 
 struct L_Callback
@@ -37,6 +39,8 @@ struct L_Callback
     bl_SceneDisposeCallback dispose;
     void* user;
     struct L_Control* control;
+    struct L_Asset* asset;
+    size_t assetOwners;
 };
 
 struct L_Scene
@@ -95,6 +99,7 @@ struct L_Engine
     bl_EngineStats stats;
     struct L_ViewReservation* reservedViews;
     uint16_t assetViewCount;
+    uint64_t frameSerial;
 };
 
 struct L_ViewReservation

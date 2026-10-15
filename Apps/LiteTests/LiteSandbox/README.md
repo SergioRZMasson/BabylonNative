@@ -19,6 +19,7 @@ BABYLON_NATIVE_BUILD_LITE_LAYER=ON
 BABYLON_NATIVE_BUILD_LITE_SHADER_COMPILER=ON
 BABYLON_NATIVE_BUILD_LITE_ASSET_DECODER=ON
 BABYLON_NATIVE_BUILD_LITE_SANDBOX=ON
+BABYLON_LITE_ENABLE_GLTF=ON
 ```
 
 Build the `LiteSandbox` target. The current renderer service requires D3D11.
@@ -38,7 +39,26 @@ native ArcRotate control. The initial host has a fixed 1280×720 client area.
 
 ## Current input scope
 
-The executable loads raw self-contained GLB2 files through `bl_loadGltf`, with
+With `BABYLON_LITE_ENABLE_GLTF=ON`, this sandbox explicitly selects the private
+native cgltf importer. It loads GLB2 or JSON glTF, including supported data/external
+buffers and PNG/JPEG images through the existing host IO/image services.
+`bl_loadGltf` itself defaults to the unchanged legacy service route for other
+consumers; feature-OFF sandbox builds also retain that route.
+Native loads own a copy of caller bytes through parsing/construction. The
+sandbox resolves relative external resources against the selected file's folder
+in `--memory` mode, without changing process CWD or the frozen byte-source record.
+Other embedding callers provide this base-folder policy through their IO service.
+The native UI counts actual selected native nodes/primitives, not a second raw
+parser projection; file-level source counts are unavailable on that route and
+smoke receipts mark `sourceCountsAvailable=false` and
+`sourceSceneIndexAvailable=false`; legacy-only source fields are placeholders,
+not inferred parser metadata. Empty-scene detection still
+uses the actual imported hierarchy. Skin/animation loading fails explicitly
+until native construction and full deformation/UI qualification are complete.
+Existing paused motion work and historical evidence are preserved, not claimed
+as finished animation support.
+
+The legacy service executable loads raw self-contained GLB2 files through `bl_loadGltf`, with
 arbitrary file paths and names. `--memory` exercises the same loader's raw byte-source
 route. There is no asset-name/hash/count dispatch or regeneration step.
 
@@ -52,7 +72,7 @@ are retained. RGB/RGBA FLOAT and normalized U8/U16 vertex colors become linear F
 RGB supplies alpha 1. Colors multiply base RGB and MASK/BLEND coverage once, never
 emissive or a second sRGB transfer. OPAQUE still outputs alpha 1.
 
-The sandbox explicitly requests the additive raw-service/document v5 protocol,
+The legacy sandbox explicitly requests the additive raw-service/document v5 protocol,
 which retains the full nested v4 geometry/accessor storage.
 Sparse accessors retain their original raw descriptors and are resolved in Core:
 optional zero base, packed/interleaved base, checked U8/U16/U32 sparse indices and

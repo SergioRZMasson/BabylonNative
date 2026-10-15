@@ -145,6 +145,7 @@ def main():
     parser.add_argument("--clang", required=True)
     parser.add_argument("--clang-format", required=True)
     parser.add_argument("--ui-enabled", action="store_true")
+    parser.add_argument("--gltf-enabled", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
     files = sorted(
@@ -161,6 +162,8 @@ def main():
         "UiGpu.cpp", "UiRmlAdapter.cpp", "UiLayers.cpp"
     )
     sources -= {(root / "Source" / name).resolve() for name in inactive_ui}
+    if not args.gltf_enabled:
+        sources = {source for source in sources if not source.name.startswith("Gltf")}
     checked = set()
     errors = set()
     for entry in database:

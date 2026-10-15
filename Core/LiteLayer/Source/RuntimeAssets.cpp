@@ -44,3 +44,24 @@ bl_Status bl_createRuntime2(const bl_RuntimeOptions2* options, bl_Runtime** out)
     *out = runtime;
     return BL_OK;
 }
+
+bl_Status bl_setGltfImportMode(bl_Runtime* runtime, bl_GltfImportMode mode)
+{
+    L_TRY(l_check(runtime));
+    if (l_inFrame() || l_inDispatch())
+    {
+        return BL_BUSY;
+    }
+    if (mode != BL_GLTF_IMPORT_SERVICE && mode != BL_GLTF_IMPORT_NATIVE)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+#if !defined(BL_GLTF_ENABLED)
+    if (mode == BL_GLTF_IMPORT_NATIVE)
+    {
+        return BL_UNSUPPORTED;
+    }
+#endif
+    runtime->gltfImportMode = mode;
+    return BL_OK;
+}

@@ -2,6 +2,7 @@
 #define BL_ASSET_INTERNAL_H
 
 #include "LiteInternal.h"
+#include "AssetMotionInput.h"
 
 struct L_Asset
 {
@@ -16,7 +17,17 @@ struct L_Asset
     size_t materialCapacity;
     bl_Texture2D* textures;
     size_t textureCount;
+    struct L_AssetMotion* motion;
 };
+
+bl_Status l_appendAssetNode(L_Asset* asset, bl_SceneNode node);
+bl_Status l_createAsset(L_Engine* engine, size_t nodes, size_t materials, size_t textures,
+                        L_Asset** out);
+void l_abortAsset(L_Asset* asset);
+bl_Status l_loadNativeGltf(L_Engine* engine, const bl_AssetSource* source, bl_AssetContainer* out);
+bl_Status l_generateAssetNormals(bl_Runtime* runtime, bl_MeshGeometry* geometry);
+void l_composeAssetInstance(float* out, const float* translation, const float* rotation,
+                            const float* scale);
 
 bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDefinition* source,
                                     bl_Material* material,
@@ -24,7 +35,8 @@ bl_Status l_createPbrFactorMaterial(bl_EngineContext engine, const bl_AssetPbrDe
 bl_Status l_composeAssetMatrix(const bl_AssetNode* source, bl_TransformNodeOptions* options);
 bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason = NULL,
                           const bl_ParsedGltf3* extended = NULL, const bl_ParsedGltf4* full = NULL,
-                          const bl_ParsedGltf5* materials = NULL);
+                          const bl_ParsedGltf5* materials = NULL,
+                          const bl_ParsedGltf6* motion = NULL);
 bl_Status l_validateAssetHierarchy(bl_Runtime* runtime, const bl_ParsedGltf* data);
 bl_Status l_validateAssetTextures(const bl_ParsedGltf3* data, const char** reason,
                                   const bl_ParsedGltf5* materials = NULL);
@@ -58,6 +70,18 @@ bl_Status l_validateAssetAccessorBounds(const bl_ParsedGltf* data, const bl_Pars
 bl_Status l_assetTriangleIndices(bl_Runtime* runtime, const bl_ParsedGltf* data,
                                  const bl_AssetPrimitive* primitive, size_t vertices,
                                  const bl_ParsedGltf4* full, bl_U32Span* indices);
+
+int l_assetInfluence(bl_String semantic, bool* joints);
+bl_Status l_validateAssetMotion(const bl_ParsedGltf6* data);
+bl_Status l_initAssetMotion(L_Asset* asset, const bl_ParsedGltf6* data);
+void l_cleanupAssetMotion(L_Asset* asset);
+bl_Status l_bindAssetSkin(L_Asset* asset, const bl_ParsedGltf6* data, uint32_t node,
+                          const bl_AssetPrimitive* primitive, L_Mesh* mesh);
+bl_Status l_finishAssetMotion(L_Asset* asset);
+bl_Status l_tickAssetMotion(L_Asset* asset, L_Scene* scene, double delta);
+bl_Status l_addAssetMotionOwner(L_Asset* asset, L_Scene* scene);
+void l_removeAssetMotionOwner(L_Asset* asset, L_Scene* scene);
+void l_detachAssetSkin(L_Mesh* mesh);
 
 static_assert(__is_trivial(bl_ParsedGltf5) && __is_standard_layout(bl_ParsedGltf5) &&
                   offsetof(bl_ParsedGltf5, document4) == 0 &&

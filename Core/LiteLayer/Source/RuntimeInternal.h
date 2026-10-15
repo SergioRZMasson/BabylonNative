@@ -29,7 +29,8 @@ enum L_Kind
     L_PBR,
     L_ASSET,
     L_ENVIRONMENT,
-    L_CUBE
+    L_CUBE,
+    L_ANIMATION
 };
 
 struct L_Record
@@ -67,6 +68,7 @@ struct bl_Runtime
     bool hasIO;
     bool hasAssets;
     bool hasCompiler2;
+    bl_GltfImportMode gltfImportMode;
     bool destroying;
     uint32_t thread;
     unsigned hostDepth;
@@ -74,7 +76,7 @@ struct bl_Runtime
     unsigned dispatchDepth;
     L_Record** records;
     L_Slot* slots;
-    size_t freeHeads[L_CUBE + 1];
+    size_t freeHeads[L_ANIMATION + 1];
     size_t count;
     size_t capacity;
     uint64_t matrixVersion;

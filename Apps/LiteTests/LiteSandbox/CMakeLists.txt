@@ -11,6 +11,9 @@ if(LITE_SANDBOX_OUTPUT_DIRECTORY)
 endif()
 target_compile_features(LiteSandbox PRIVATE cxx_std_20)
 target_compile_definitions(LiteSandbox PRIVATE UNICODE _UNICODE)
+if(BABYLON_LITE_ENABLE_GLTF)
+    target_compile_definitions(LiteSandbox PRIVATE LITE_SANDBOX_NATIVE_GLTF=1)
+endif()
 target_link_libraries(LiteSandbox PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder bgfx
     user32 shell32 windowscodecs ole32)
 target_link_options(LiteSandbox PRIVATE "/MAP:${CMAKE_CURRENT_BINARY_DIR}/LiteSandbox.map")
@@ -39,6 +42,8 @@ target_include_directories(LiteAssetDecoder4Tests PRIVATE "${PROJECT_SOURCE_DIR}
 target_compile_features(LiteAssetDecoder4Tests PRIVATE cxx_std_17)
 warnings_as_errors(LiteAssetDecoder4Tests)
 add_test(NAME LiteAssetDecoder4Tests COMMAND LiteAssetDecoder4Tests)
+# Paused raw-v6 skin fixtures are preserved, but are not an advertised service.
+# Native motion construction will qualify them against the private importer.
 add_executable(LiteAssetEmptyTests ../AssetTests/Empty.cpp)
 target_compile_features(LiteAssetEmptyTests PRIVATE cxx_std_20)
 target_include_directories(LiteAssetEmptyTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
@@ -82,6 +87,20 @@ target_include_directories(LiteAssetGeometryTests PRIVATE "${PROJECT_SOURCE_DIR}
 target_link_libraries(LiteAssetGeometryTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder
     Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
 warnings_as_errors(LiteAssetGeometryTests)
+if(BABYLON_LITE_ENABLE_GLTF)
+    add_executable(LiteNativeGltfTests ../AssetTests/NativeGltf.cpp AssetIO.cpp)
+    target_compile_features(LiteNativeGltfTests PRIVATE cxx_std_20)
+    target_include_directories(LiteNativeGltfTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+    target_link_libraries(LiteNativeGltfTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder
+        Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+    warnings_as_errors(LiteNativeGltfTests)
+    add_executable(LiteNativeGltfMaterialTests ../AssetTests/NativeGltfMaterials.cpp AssetIO.cpp)
+    target_compile_features(LiteNativeGltfMaterialTests PRIVATE cxx_std_20)
+    target_include_directories(LiteNativeGltfMaterialTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+    target_link_libraries(LiteNativeGltfMaterialTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder
+        Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+    warnings_as_errors(LiteNativeGltfMaterialTests)
+endif()
 add_executable(LiteAssetMaterialOracleTests Sandbox.cpp AssetIO.cpp)
 target_compile_features(LiteAssetMaterialOracleTests PRIVATE cxx_std_20)
 target_compile_definitions(LiteAssetMaterialOracleTests PRIVATE UNICODE _UNICODE
@@ -101,4 +120,9 @@ if(LITE_SANDBOX_ASSET_DIRECTORY)
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${LITE_SANDBOX_ASSET_DIRECTORY}/${asset}" "$<TARGET_FILE_DIR:LiteSandbox>/Assets/${asset}")
     endforeach()
+    if(EXISTS "${LITE_SANDBOX_ASSET_DIRECTORY}/Notices")
+        add_custom_command(TARGET LiteSandbox POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${LITE_SANDBOX_ASSET_DIRECTORY}/Notices" "$<TARGET_FILE_DIR:LiteSandbox>/Assets/Notices")
+    endif()
 endif()

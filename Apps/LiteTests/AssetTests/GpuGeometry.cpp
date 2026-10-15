@@ -331,6 +331,10 @@ static void setup(Context& context, bgfx::FrameBufferHandle framebuffer)
     options.assets = &assets;
     options.shaderCompiler2 = &shader;
     require(bl_createRuntime2(&options, &context.runtime) == BL_OK, "tracked native runtime");
+#if defined(LITE_TEST_NATIVE_GLTF)
+    require(bl_setGltfImportMode(context.runtime, BL_GLTF_IMPORT_NATIVE) == BL_OK,
+            "explicit private native importer");
+#endif
     bl_NativeEngineOptions native = {};
     native.ownership = BL_BGFX_BORROWED;
     native.backend = BL_RENDERER_D3D11;
@@ -701,7 +705,11 @@ static Json faults(const std::filesystem::path& fixture, bgfx::FrameBufferHandle
             {"nativeAllocationAndSlotPlateau", true}, {"allTrackedTeardownBytes", 0}};
 }
 
+#if defined(LITE_TEST_NATIVE_GLTF)
+int legacyGeometryMain(int argc, char** argv)
+#else
 int main(int argc, char** argv)
+#endif
 {
     require(argc == 4 || argc == 5, "fixtures, lighting, output, optional normal/geometric/fetch probe");
     std::filesystem::path fixtures(argv[1]);
@@ -773,4 +781,5 @@ int main(int argc, char** argv)
     CoUninitialize();
     printf("Geometry actual GPU %zu cases, %zu malformed; %zu assertions; all teardown0\n",
             rendered, rejected, assertions);
+    return 0;
 }

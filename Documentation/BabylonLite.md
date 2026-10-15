@@ -6,7 +6,8 @@ based on original TypeScript at
 `2e064d88ec7422af946f8ec7f089ac6519f99295`. Its only public header is
 `Core/LiteLayer/Include/babylon_lite.h`; its direct link dependencies are `bgfx`
 and `bx`, plus explicitly optional `RmlUi::Core` when
-`BABYLON_LITE_ENABLE_UI=ON`. It contains no JavaScript runtime, NAPI, NativeEngine, SDL, Dawn/WebGPU
+`BABYLON_LITE_ENABLE_UI=ON` and private `LiteCgltf` when
+`BABYLON_LITE_ENABLE_GLTF=ON`. It contains no JavaScript runtime, NAPI, NativeEngine, SDL, Dawn/WebGPU
 renderer, generated Babylon engine or bblitec runtime.
 
 The original Babylon Lite source is Apache-2.0 licensed. Its license is retained
@@ -31,6 +32,57 @@ raw services/API compatibility, native resource ownership, strict Core coding
 and host IO/codecs remain intact. Preserve ongoing skinning/animation work and
 qualify the integration against the same complete local corpus without copying,
 mutating or uploading its assets. Shader investigation remains paused.
+
+The optional private importer is implemented in `Source/Gltf*.cpp`. Call
+`bl_setGltfImportMode(runtime, BL_GLTF_IMPORT_NATIVE)` before `bl_loadGltf` to
+select it for future loads. The default remains `BL_GLTF_IMPORT_SERVICE`; the
+existing raw services 2..5, factories, callbacks and runtime option layouts
+are unchanged. Native mode does not require a glTF parser service, but file and
+image operations still require the existing host IO callbacks. Environment
+parsing still uses the asset service. Feature-disabled builds return
+`BL_UNSUPPORTED` without changing mode. Runtime/thread/dispatch guards apply.
+
+The importer adapts the parse/load-buffers/accessors/decode/upload flow of
+Gary Hsu's `bghgary/BabylonLiteNativePort` at
+`ca5b8fdafdbc034982982210d1daa20dbe210218`, `Source/GltfLoader.cpp`, under the
+user's explicit investigation reuse permission. This is not a blanket license
+assertion for the prototype. Its STL objects, WIC implementation, detached
+worker, first-material flattening, recenter/rescale and Z flip are not copied.
+The adapted path constructs the existing Core-owned node/mesh/material/texture
+identities and GPU resources, preserving the single -X source-root reflection,
+selected-scene hierarchy, MR/SG factors, maps, alpha and retirement rules.
+
+`Dependencies/LiteCgltf.cmake` pins the unchanged MIT-noticed cgltf 1.15 header
+from bgfx `cc39a9f963ca73a9b3da25d07c7ead899ec2d71b`, SHA256
+`efb169dee911696b5d35fc8e3f7ea0c56d679debc529eba9ca6aa6443ba9d5e9`.
+This does not upgrade the renderer. A matching cached source directory may be
+supplied with `FETCHCONTENT_SOURCE_DIR_LITECGLTFSOURCE`; the hash is always checked.
+No cgltf types enter the public C99 header.
+
+Native URI and caller-BYTES inputs are copied before parsing and retained until
+cgltf and all CPU construction finish. JSON glTF, GLB, data buffers and external
+buffers/images are supported through the host callbacks. Relative resources
+in BYTES mode have no source URI in the frozen API and therefore use the host
+IO service's relative-path policy; callers must supply an appropriate resolver.
+Missing/failed resources are errors, never empty-texture success. Native schema
+numbers are cgltf Float32 inputs; public double APIs and legacy JSON precision
+are unchanged. Sparse values are resolved independently of the base stride,
+avoiding the pinned helper's interleaved-sparse stride assumption. Sparse index
+ranges are checked after replacement, not against superseded base values.
+Final primitive indices also reject the reserved component maximum
+(`255`, `65535` or `4294967295`), even when the vertex count would permit it.
+The pinned parser's partial-array allocation-failure cleanup required a private
+C-only `setjmp` boundary: an allocation transaction is released on parser OOM
+before that unsafe cleanup runs. The boundary encloses only cgltf parsing and
+POD allocation helpers; it never jumps through an active host callback, C++
+destructor or native GPU construction. Vendor bytes remain unchanged. Other IO/image/buffer errors use
+ordinary explicit statuses and exactly-once release.
+
+Skin/animation construction is explicitly unsupported on this direct path
+until its full motion/UI/readback/fault qualification is completed. The paused
+Core interpolation, deformation, mutable basis and lifecycle implementation is
+preserved privately; its former experimental raw-v6 public protocol is not
+advertised. This integration is not complete glTF/Babylon.js extension coverage.
 
 User decision, 2026-10-14: focus **100% on GLB loading implementation** and do
 not resume shader-compilation investigation until broad valid-GLB loading is

@@ -244,6 +244,7 @@ static bl_Status gpuGeometry(bl_Runtime* r, L_Geometry* g)
 void l_meshCleanup(bl_Runtime* r, L_Record* record)
 {
     L_Mesh* m = (L_Mesh*)record;
+    l_detachAssetSkin(m);
     bl_Material material = l_meshMaterial(m);
     if (!L_NULL(material))
     {
@@ -666,6 +667,10 @@ static bl_Status replaceGeometry(bl_EngineContext h, bl_Mesh mesh, const bl_Mesh
 {
     L_Mesh* m;
     L_TRY(meshForEngine(h, mesh, &m));
+    if (m->skin)
+    {
+        return BL_UNSUPPORTED;
+    }
     bl_Runtime* r = h._runtime;
     L_TRY(validateGeometry(r, g));
     L_Geometry* old = &m->geometry;
@@ -765,6 +770,10 @@ static bl_Status attributeUpdate(bl_EngineContext h, bl_Mesh mesh, bl_F32Span va
 {
     L_Mesh* m;
     L_TRY(meshForEngine(h, mesh, &m));
+    if (m->skin)
+    {
+        return BL_UNSUPPORTED;
+    }
     L_Geometry* g = &m->geometry;
     if (!(g->attributeMask & (1u << attr)) ||
         !l_typedSpan(values.data, values.count, alignof(float)) ||

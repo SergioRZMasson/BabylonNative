@@ -1,4 +1,5 @@
 #include "PbrInternal.h"
+#include "AssetMotionInternal.h"
 
 static void cleanupPacket(bl_Runtime* runtime, L_PbrPacket* packet)
 {
@@ -104,11 +105,12 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         L_PbrPacket* packet = scene->pbrPackets + i;
         bool colors = (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_COLOR)) != 0;
         bool flatNormal = mesh->assetFlatNormal;
+        bool cpuSkin = mesh->skin != NULL;
         bool tangents = !flatNormal && !L_NULL(material->pbrNormalTexture) &&
                         (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_TANGENT));
         if (packet->material == material && packet->instances == mesh->hasInstances &&
             packet->tangents == tangents && packet->colors == colors &&
-            packet->flatNormal == flatNormal)
+            packet->flatNormal == flatNormal && packet->cpuSkin == cpuSkin)
         {
             if (packet->environment != scene->environment)
             {
@@ -123,7 +125,7 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         bl_Status status = l_pbrSources(runtime, mesh->hasInstances, &vertex, &fragment,
                                         material->pbrInfo.doubleSided, material->pbrBaseImage,
                                         material->pbrBaseUv1, material->pbrOrmUv1, material,
-                                        tangents, colors, flatNormal);
+                                        tangents, colors, flatNormal, cpuSkin);
         const bl_InstanceAttributeDeclaration instances[4] = {{{"world0", 6}, 3, 0, 0, 64},
                                                               {{"world1", 6}, 4, 1, 16, 64},
                                                               {{"world2", 6}, 5, 2, 32, 64},
@@ -156,6 +158,7 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         packet->tangents = tangents;
         packet->colors = colors;
         packet->flatNormal = flatNormal;
+        packet->cpuSkin = cpuSkin;
         l_pin(&material->record);
         l_pin(&packet->environment->record);
     }
@@ -297,7 +300,16 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
         uint8_t maxLod = 128;
         uint16_t layerCount = 1;
         uint32_t flags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP;
-        if (l_name(binding->name, "iblTexture"))
+        if (l_name(binding->name, "skinBitangents"))
+        {
+            if (!mesh->skin || mesh->skin->gpuDirty || !bgfx::isValid(mesh->skin->bitangentTexture))
+            {
+                return BL_NOT_READY;
+            }
+            texture = mesh->skin->bitangentTexture;
+            flags |= BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_MIP_POINT;
+        }
+        else if (l_name(binding->name, "iblTexture"))
         {
             L_Cube* cube = (L_Cube*)l_peek(runtime, packet->environment->info.specularCube._id);
             texture = cube->texture;

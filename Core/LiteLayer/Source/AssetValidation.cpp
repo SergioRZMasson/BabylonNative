@@ -71,20 +71,24 @@ static bool unitFactor(double value)
 
 bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                           const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full,
-                          const bl_ParsedGltf5* materials)
+                          const bl_ParsedGltf5* materials, const bl_ParsedGltf6* motion)
 {
-    size_t expectedSize = materials  ? sizeof(*materials)
-                          : full     ? sizeof(*full)
-                          : extended ? sizeof(*extended)
-                                     : sizeof(*data);
-    uint32_t expectedVersion = materials  ? BL_ASSET_DOCUMENT_VERSION_5
-                               : full     ? BL_ASSET_DOCUMENT_VERSION_4
-                               : extended ? BL_ASSET_DOCUMENT_VERSION_3
-                                          : BL_ASSET_DOCUMENT_VERSION;
+    size_t expectedSize = motion      ? sizeof(*motion)
+                          : materials ? sizeof(*materials)
+                          : full      ? sizeof(*full)
+                          : extended  ? sizeof(*extended)
+                                      : sizeof(*data);
+    uint32_t expectedVersion = motion      ? BL_ASSET_DOCUMENT_VERSION_6
+                               : materials ? BL_ASSET_DOCUMENT_VERSION_5
+                               : full      ? BL_ASSET_DOCUMENT_VERSION_4
+                               : extended  ? BL_ASSET_DOCUMENT_VERSION_3
+                                           : BL_ASSET_DOCUMENT_VERSION;
     if ((extended && &extended->document != data) || data->structSize != expectedSize ||
         (full && (extended != &full->document3 || (uintptr_t)full % alignof(bl_ParsedGltf4))) ||
         (materials &&
          (full != &materials->document4 || (uintptr_t)materials % alignof(bl_ParsedGltf5))) ||
+        (motion &&
+         (materials != &motion->document5 || (uintptr_t)motion % alignof(bl_ParsedGltf6))) ||
         data->version != expectedVersion || data->gltfVersion != 2 ||
         !assetSpan(data->buffers, data->bufferCount, sizeof(bl_AssetBuffer),
                    alignof(bl_AssetBuffer)) ||
@@ -127,7 +131,7 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
             reason, "Use a self-contained GLB2 with at most one BIN buffer and no unsupported "
                     "extensions or external buffer URIs");
     }
-    if (data->animationCount || data->skinCount)
+    if (!motion && (data->animationCount || data->skinCount))
     {
         return unsupported(reason, "Skins and animation playback are not supported by the "
                                    "initial static-model loader");
@@ -349,6 +353,35 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
                         return BL_INVALID_ARGUMENT;
                     }
                 }
+                bool jointAttribute = false;
+                int influence = l_assetInfluence(attribute->semantic, &jointAttribute);
+                if (motion && influence != -1)
+                {
+                    if (influence < 0 || attribute->accessor >= data->accessorCount)
+                    {
+                        return BL_INVALID_ARGUMENT;
+                    }
+                    const bl_AssetAccessor* input = data->accessors + attribute->accessor;
+                    bool integer = input->componentType == BL_ASSET_COMPONENT_U8 ||
+                                   input->componentType == BL_ASSET_COMPONENT_U16;
+                    if (input->shape != BL_ASSET_VEC4 ||
+                        (jointAttribute
+                             ? (!integer || input->normalized)
+                             : (integer ? !input->normalized
+                                        : input->componentType != BL_ASSET_COMPONENT_F32 ||
+                                              input->normalized)))
+                    {
+                        return BL_INVALID_ARGUMENT;
+                    }
+                    L_AssetAccessorReader reader;
+                    L_TRY(l_assetAccessorReader(data, attribute->accessor, full, &reader));
+                    if (vertices != SIZE_MAX && vertices != input->count)
+                    {
+                        return BL_INVALID_ARGUMENT;
+                    }
+                    vertices = input->count;
+                    continue;
+                }
                 bl_AssetAccessorShape shape = BL_ASSET_VEC3;
                 if (l_name(attribute->semantic, "TEXCOORD_0") ||
                     l_name(attribute->semantic, "TEXCOORD_1"))
@@ -485,9 +518,17 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
         {
             return BL_INVALID_ARGUMENT;
         }
-        if (node->skin.present || node->unsupportedFeatures)
+        if (node->unsupportedFeatures || (!motion && node->skin.present))
         {
             return unsupported(reason, "Node requires an unsupported skin or extension");
+        }
+        if (node->skin.present && (!node->mesh.present || node->skin.value >= data->skinCount))
+        {
+            return BL_INVALID_ARGUMENT;
+        }
+        if (node->skin.present && node->hasInstancing)
+        {
+            return unsupported(reason, "Skinned EXT_mesh_gpu_instancing is not implemented");
         }
         bl_TransformNodeOptions options;
         L_TRY(l_composeAssetMatrix(node, &options));
@@ -564,7 +605,7 @@ bl_Status l_validateAsset(const bl_ParsedGltf* data, const char** reason,
     {
         return BL_INVALID_ARGUMENT;
     }
-    return BL_OK;
+    return motion ? l_validateAssetMotion(motion) : BL_OK;
 }
 
 bl_Status l_validateAssetHierarchy(bl_Runtime* runtime, const bl_ParsedGltf* data)

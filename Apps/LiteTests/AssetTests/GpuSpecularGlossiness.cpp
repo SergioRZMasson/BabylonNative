@@ -293,6 +293,10 @@ static void setup(Context& context, bgfx::FrameBufferHandle framebuffer)
     options.assets = &service;
     options.shaderCompiler2 = &shader;
     require(bl_createRuntime2(&options, &context.runtime) == BL_OK, "tracked GPU runtime");
+#if defined(LITE_TEST_NATIVE_GLTF)
+    require(bl_setGltfImportMode(context.runtime, BL_GLTF_IMPORT_NATIVE) == BL_OK,
+            "explicit native material importer");
+#endif
     bl_NativeEngineOptions native = {};
     native.ownership = BL_BGFX_BORROWED;
     native.backend = BL_RENDERER_D3D11;
@@ -688,7 +692,11 @@ static void sharingUpdates(const std::vector<uint8_t>& bytes,
     finish(context);
 }
 
+#if defined(LITE_TEST_NATIVE_GLTF)
+int legacyMaterialMain(int argc, char** argv)
+#else
 int main(int argc, char** argv)
+#endif
 {
     require(argc == 3, "synthetic fixture directory and new ignored output directory");
     std::filesystem::path fixtures(argv[1]);
@@ -781,4 +789,5 @@ int main(int argc, char** argv)
     CoUninitialize();
     printf("SpecGloss GPU %zu rendered/%zu rejected, %zu assertions, %zu fences, teardown0\n",
            rendered, rejected, assertions, fences);
+    return 0;
 }

@@ -201,6 +201,8 @@ struct Model
     size_t selectedNodes = 0;
     uint32_t selectedScene = 0;
     bool emptyCamera = false;
+    bl_AnimationGroups clips = {};
+    size_t selectedClip = 0;
 };
 
 struct Host
@@ -213,6 +215,7 @@ struct Host
     Capture capture;
     Model model;
     std::filesystem::path assets;
+    std::filesystem::path importBase;
     std::deque<std::wstring> pending;
     std::string message;
     bool quit = false;
@@ -223,7 +226,18 @@ struct Host
     bl_Status loadStatus = BL_OK;
     size_t successfulDrops = 0;
     size_t failedDrops = 0;
+    HWND clipSelector = nullptr;
+    HWND playPause = nullptr;
+    HWND restart = nullptr;
+    HWND loop = nullptr;
+    HWND animationState = nullptr;
+    std::wstring animationCaption;
 };
+
+static constexpr int ClipSelectorId = 5701;
+static constexpr int PlayPauseId = 5702;
+static constexpr int RestartId = 5703;
+static constexpr int LoopId = 5704;
 
 static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_ParsedGltf* out)
 {
@@ -326,6 +340,73 @@ static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_Par
     return status;
 }
 
+#if defined(LITE_SANDBOX_NATIVE_GLTF)
+static bl_Status countNativeEntities(Host& host, bl_AssetContainer asset)
+{
+    host.parsedCounts = {};
+    bl_AssetEntities roots = {};
+    bl_Status status = bl_getAssetContainerEntities(asset, &roots);
+    if (status != BL_OK)
+    {
+        return status;
+    }
+    std::vector<bl_SceneNode> pending(roots.data, roots.data + roots.count);
+    while (!pending.empty())
+    {
+        bl_SceneNode node = pending.back();
+        pending.pop_back();
+        bl_MeshProperties2 properties = {};
+        if (bl_getMeshProperties2({node._runtime, node._id}, &properties) == BL_OK)
+        {
+            ++host.parsedCounts.selectedPrimitives;
+        }
+        else
+        {
+            ++host.parsedCounts.selectedNodes;
+        }
+        bl_NodeChildren children = {};
+        status = bl_getNodeChildren(node, &children);
+        if (status != BL_OK)
+        {
+            return status;
+        }
+        if (children.count)
+        {
+            pending.insert(pending.end(), children.data, children.data + children.count);
+        }
+    }
+    if (host.parsedCounts.selectedNodes)
+    {
+        --host.parsedCounts.selectedNodes;
+    }
+    return BL_OK;
+}
+#endif
+
+static bl_Status readForHost(void* user, bl_String uri, bl_HostBuffer* out)
+{
+    auto* host = static_cast<Host*>(user);
+    try
+    {
+        std::filesystem::path path(wide(std::string(uri.data, uri.length)));
+        if (!host->importBase.empty() && !path.is_absolute())
+        {
+            path = host->importBase / path;
+        }
+        std::string resolved = utf8(path.wstring());
+        auto io = SandboxAssetIO();
+        return io.readFile(io.userData, span(resolved), out);
+    }
+    catch (const std::bad_alloc&)
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    catch (...)
+    {
+        return BL_HOST_ERROR;
+    }
+}
+
 static void releaseParsedForHost(void* user, bl_ParsedGltf* out)
 {
     auto* host = static_cast<Host*>(user);
@@ -362,6 +443,97 @@ static std::string lastError(Host& host, bl_Status status)
         return std::string(error.message.data, error.message.length);
     }
     return "Native status " + std::to_string(status);
+}
+
+static void animationControls(Host& host, bool populate)
+{
+    const auto& model = host.model;
+    bool available = model.clips.count != 0;
+    if (populate)
+    {
+        SendMessageW(host.clipSelector, CB_RESETCONTENT, 0, 0);
+        for (size_t i = 0; i < model.clips.count; ++i)
+        {
+            bl_AnimationGroupInfo info = {};
+            checked(bl_getAnimationGroupInfo(model.clips.data[i], &info), "Query clip");
+            std::wstring name = std::to_wstring(i + 1) + L" / " +
+                                std::to_wstring(model.clips.count) + L"  " +
+                                wide(std::string(info.name.data, info.name.length));
+            SendMessageW(host.clipSelector, CB_ADDSTRING, 0,
+                          reinterpret_cast<LPARAM>(name.c_str()));
+        }
+        SendMessageW(host.clipSelector, CB_SETCURSEL, model.selectedClip, 0);
+        EnableWindow(host.clipSelector, available);
+        EnableWindow(host.playPause, available);
+        EnableWindow(host.restart, available);
+        EnableWindow(host.loop, available);
+    }
+    std::wstring caption = L"No animation clips";
+    if (available)
+    {
+        bl_AnimationGroupInfo info = {};
+        checked(bl_getAnimationGroupInfo(model.clips.data[model.selectedClip], &info), "Clip state");
+        wchar_t text[256];
+        const wchar_t* state = info.isStopped ? L"Stopped"
+                               : !info.isPlaying ? L"Paused"
+                               : !info.loopAnimation && info.currentTime >= info.duration
+                                   ? L"Playing (end clamped)"
+                                   : L"Playing";
+        swprintf_s(text, L"%s | %.3f / %.3f s | %zu clips", state, info.currentTime,
+                    info.duration, model.clips.count);
+        caption = text;
+        SetWindowTextW(host.playPause, info.isPlaying ? L"Pause" : L"Play");
+        SendMessageW(host.loop, BM_SETCHECK, info.loopAnimation ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
+    if (caption != host.animationCaption)
+    {
+        SetWindowTextW(host.animationState, caption.c_str());
+        host.animationCaption = std::move(caption);
+    }
+}
+
+static void animationCommand(Host& host, int id, int notification)
+{
+    if (!host.model.clips.count)
+    {
+        return;
+    }
+    bl_AnimationGroup group = host.model.clips.data[host.model.selectedClip];
+    bl_AnimationGroupInfo info = {};
+    checked(bl_getAnimationGroupInfo(group, &info), "Clip state");
+    bl_Status status = BL_OK;
+    if (id == ClipSelectorId && notification == CBN_SELCHANGE)
+    {
+        LRESULT index = SendMessageW(host.clipSelector, CB_GETCURSEL, 0, 0);
+        if (index < 0)
+        {
+            return;
+        }
+        status = bl_selectAssetContainerAnimation(host.model.asset, static_cast<size_t>(index));
+        if (status == BL_OK)
+        {
+            host.model.selectedClip = static_cast<size_t>(index);
+        }
+        SendMessageW(host.clipSelector, CB_SETCURSEL, host.model.selectedClip, 0);
+    }
+    else if (id == PlayPauseId)
+    {
+        status = info.isPlaying ? bl_pauseAnimation(group) : bl_playAnimation(group);
+    }
+    else if (id == RestartId)
+    {
+        status = bl_selectAssetContainerAnimation(host.model.asset, host.model.selectedClip);
+    }
+    else if (id == LoopId)
+    {
+        bool loop = SendMessageW(host.loop, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        status = bl_setAnimationPlayback(group, info.speedRatio, loop);
+    }
+    if (status != BL_OK)
+    {
+        title(host, "Animation control failed: " + lastError(host, status));
+    }
+    animationControls(host, false);
 }
 
 static void disposeModel(Host& host, Model& model)
@@ -405,6 +577,7 @@ static void loadModel(Host& host, const std::wstring& path)
     auto io = SandboxAssetIO();
     if (host.memorySource)
     {
+        host.importBase = std::filesystem::absolute(path).parent_path();
         status = io.readFile(io.userData, span(file), &bytes);
         if (status != BL_OK)
         {
@@ -418,9 +591,20 @@ static void loadModel(Host& host, const std::wstring& path)
     {
         status = bl_loadGltf(host.engine, &source, &candidate.asset);
     }
+    host.importBase.clear();
     if (host.memorySource)
     {
         io.releaseBuffer(io.userData, &bytes);
+    }
+#if defined(LITE_SANDBOX_NATIVE_GLTF)
+    if (status == BL_OK)
+    {
+        status = countNativeEntities(host, candidate.asset);
+    }
+#endif
+    if (status == BL_OK)
+    {
+        status = bl_getAssetContainerAnimationGroups(candidate.asset, &candidate.clips);
     }
     if (status == BL_OK)
     {
@@ -507,11 +691,17 @@ static void loadModel(Host& host, const std::wstring& path)
     candidate.selectedNodes = host.parsedCounts.selectedNodes;
     candidate.selectedScene = host.parsedCounts.selectedScene;
     host.model = std::move(candidate);
+    animationControls(host, true);
     ++host.successfulDrops;
     title(host, "Loaded " + utf8(std::filesystem::path(path).filename().wstring()) + " | " +
+#if defined(LITE_SANDBOX_NATIVE_GLTF)
+                    std::to_string(host.model.selectedNodes) + " native source nodes / " +
+#else
                     std::to_string(host.model.sourceMeshes) + " source meshes / " +
                     std::to_string(host.model.sourceVertices) + " vertices / " +
                     std::to_string(host.model.sourceMaterials) + " materials / " +
+#endif
+                    std::to_string(host.model.clips.count) + " animation clips / " +
                     std::to_string(host.model.selectedPrimitives) + " selected primitives / " +
                     std::to_string(stats.drawCallCount) +
                     " actual draws | left-drag orbit, wheel zoom | drop another GLB");
@@ -574,6 +764,11 @@ static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam
                 DragQueryFileW(drop, i, path.data(), length + 1);
                 path.resize(length);
                 host->pending.push_back(std::move(path));
+            }
+            if (message == WM_COMMAND)
+            {
+                animationCommand(*host, LOWORD(wparam), HIWORD(wparam));
+                return 0;
             }
             DragFinish(drop);
             dropped = nullptr;
@@ -711,6 +906,27 @@ int wmain(int argc, wchar_t** argv)
         {
             throw std::runtime_error("Visible native window creation failed");
         }
+        auto control = [&](const wchar_t* kind, const wchar_t* text, DWORD flags,
+                           int x, int width, int id)
+        {
+            HWND child = CreateWindowExW(0, kind, text, WS_CHILD | WS_VISIBLE | flags,
+                                          x, 8, width, 26, host.window,
+                                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+                                          windowClass.hInstance, nullptr);
+            if (!child)
+            {
+                throw std::runtime_error("Animation control creation failed");
+            }
+            return child;
+        };
+        host.clipSelector = control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
+                                     8, 380, ClipSelectorId);
+        SetWindowPos(host.clipSelector, nullptr, 8, 8, 380, 300, SWP_NOZORDER);
+        host.playPause = control(L"BUTTON", L"Play", BS_PUSHBUTTON, 398, 70, PlayPauseId);
+        host.restart = control(L"BUTTON", L"Restart", BS_PUSHBUTTON, 478, 75, RestartId);
+        host.loop = control(L"BUTTON", L"Loop", BS_AUTOCHECKBOX, 563, 65, LoopId);
+        host.animationState = control(L"STATIC", L"No animation clips", SS_LEFT, 638, 600, 0);
+        animationControls(host, true);
         DragAcceptFiles(host.window, TRUE);
         ShowWindow(host.window, SW_SHOW);
         UpdateWindow(host.window);
@@ -731,7 +947,7 @@ int wmain(int argc, wchar_t** argv)
         bl_Allocator allocator = {&host.memory, allocate, release};
         bl_AssetService assets = {};
         checked(bl_createAssetDecoder(&allocator, &host.decoder, &assets), "Create raw GLB decoder");
-        checked(bl_assetDecoderService5(host.decoder, &assets), "Advertise raw GLB material inputs");
+        checked(bl_assetDecoderService5(host.decoder, &assets), "Advertise legacy GLB service");
         host.decoderService = assets;
         assets.userData = &host;
         assets.parseGltf = parseForHost;
@@ -744,10 +960,15 @@ int wmain(int argc, wchar_t** argv)
         compiler2 = materialOracleService(oracle);
 #endif
         auto io = SandboxAssetIO();
+        io.userData = &host;
+        io.readFile = readForHost;
         bl_RuntimeOptions2 options = {sizeof(options), 2,
                                      {allocator, nullptr, nullptr, &compiler, nullptr, &io},
                                      &assets, &compiler2};
         checked(bl_createRuntime2(&options, &host.runtime), "Create native runtime");
+#if defined(LITE_SANDBOX_NATIVE_GLTF)
+        checked(bl_setGltfImportMode(host.runtime, BL_GLTF_IMPORT_NATIVE), "Select native glTF importer");
+#endif
         bl_NativeEngineOptions native = {};
         native.ownership = BL_BGFX_BORROWED;
         native.backend = BL_RENDERER_D3D11;
@@ -757,7 +978,7 @@ int wmain(int argc, wchar_t** argv)
         native.waitForSubmittedWork = waitSubmitted;
         checked(bl_createEngine(host.runtime, &native, nullptr, &host.engine), "Create native engine");
         checked(bl_startEngine(host.engine, nullptr, nullptr), "Start native engine");
-        title(host, "Drag a self-contained static GLB here | left-drag orbit, wheel zoom | close to exit");
+        title(host, "Drag glTF/GLB here | left-drag orbit, wheel zoom | close to exit");
         std::deque<std::wstring> automated;
         std::ofstream report;
         if (!smoke.empty())
@@ -815,6 +1036,7 @@ int wmain(int argc, wchar_t** argv)
             if (host.model.scene._id)
             {
                 checked(bl_frame(host.engine, 1000.0 / 60), "Native frame");
+                animationControls(host, false);
             }
             else
             {
@@ -839,6 +1061,13 @@ int wmain(int argc, wchar_t** argv)
                 bl_EngineStats stats = {};
                 checked(bl_getEngineStats(host.engine, &stats), "Actual draw stats");
                 report << "{\"item\":" << item << ",\"status\":" << host.loadStatus
+#if defined(LITE_SANDBOX_NATIVE_GLTF)
+                       << ",\"nativeImporter\":true,\"sourceCountsAvailable\":false"
+                       << ",\"sourceSceneIndexAvailable\":false"
+#else
+                       << ",\"nativeImporter\":false,\"sourceCountsAvailable\":true"
+                       << ",\"sourceSceneIndexAvailable\":true"
+#endif
                        << ",\"memorySource\":" << (host.memorySource ? "true" : "false")
                        << ",\"success\":" << (host.loaded ? "true" : "false")
                        << ",\"activeAssetId\":" << host.model.asset._id
