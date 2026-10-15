@@ -78,11 +78,97 @@ POD allocation helpers; it never jumps through an active host callback, C++
 destructor or native GPU construction. Vendor bytes remain unchanged. Other IO/image/buffer errors use
 ordinary explicit statuses and exactly-once release.
 
-Skin/animation construction is explicitly unsupported on this direct path
-until its full motion/UI/readback/fault qualification is completed. The paused
-Core interpolation, deformation, mutable basis and lifecycle implementation is
-preserved privately; its former experimental raw-v6 public protocol is not
-advertised. This integration is not complete glTF/Babylon.js extension coverage.
+The native importer now constructs skeletal skins and node-TRS animation directly
+from `cgltf_skin`, `cgltf_animation` and checked accessors. The retained Core
+interpolation/deformation implementation is reused; there is no raw-v6 public
+protocol, provider factory or private full-document translation. Only owned
+runtime state survives `cgltf_free`: source-index/live-node mapping, source rest
+TRS/topology, joint indices/IBMs, influence slabs, copied clip/key/name data and
+preallocated pose/deformation storage. The public header remains the accepted
+208-function/156-record/38-enum contract, including the eight animation functions,
+three animation PODs and the import-mode setter. The older 199 functions, 153
+records, 37 enums and service/runtime/environment layouts remain frozen.
+
+### Native skinning and core TRS clips
+
+Core CPU linear-blend skinning updates actual per-drawable dynamic vertex buffers;
+it is not bind-pose loading or a one-time bake. All contiguous paired `JOINTS_n` /
+`WEIGHTS_n` sets participate, without a joint-uniform limit or half-float palette.
+Joints use U8/U16; weights use FLOAT or normalized U8/U16. Positive weights are
+normalized together across all sets. Invalid joint lanes, duplicate positive
+influences, nonfinite/negative weights and zero totals fail explicitly.
+Optional inverse-bind matrices default to identity, not inverse(rest pose).
+
+The source-RH palette is `G_joint * IBM`; skinned drawables have identity local
+TRS below the import root. Its -X reflection/world transform is applied once.
+The source mesh node remains in the hierarchy for ordinary children and joint
+relationships, but its transform is not multiplied into its own skinned geometry.
+This avoids inverse(mesh) and supports singular/negative source mesh transforms.
+If that source node is itself a joint or joint ancestor, its contribution to
+`G_joint` still has the ordinary joint-hierarchy meaning. Camera-bearing node TRS
+also affects children; authored camera projection/view remains ignored.
+
+Position, normal and tangent streams are deformed from immutable bind inputs,
+independently for each skin owner and unskinned source-mesh instance. Normals,
+tangents and a separately transformed bitangent follow original Lite's **linear**
+basis convention, not an inverse-transpose/Babylon nonuniform-normal parity claim.
+Mapped authored-tangent skins use a private mutable RGBA32F bitangent texture,
+fetched by vertex index through the existing shader-service2 LOAD interface.
+No post-deformation T normalization or `cross(deformed N, deformed T)` substitute
+is used. Missing NORMAL retains generated CPU data but renders flat normals from
+deformed positions; missing TANGENT retains the existing cotangent path.
+Deformed bounds feed normal world bounds, ordering and initial framing.
+
+Every source clip remains available in source order, including clips without a
+selected live target. First clip selection/autoplay and evaluation at time0
+happen before successful load/framing. STEP, vector LINEAR, shortest-path
+quaternion interpolation and time-scaled CUBICSPLINE are native Core algorithms.
+Cubic quaternion results normalize without hemisphere rewriting of values or
+tangents. Source payloads and pose/matrix storage stages are Float32; public
+clock/speed/frame APIs remain double. Invalid zero rotations/interpolants reject
+before pose/clock publication. Non-animated properties retain their live values.
+
+Clip time starts0, even before a sampler's first key, and duration is the largest
+last sampler time. Samplers clamp independently. Default loop is true, speed1,
+frameRate60. Pause holds the evaluator/time; stop sets time0 and `isStopped=true`
+but holds the published pose. Seek evaluates `frame/60`, pauses and wraps/clamps.
+Selection/restart stops other groups, restores the union of clip-targeted rest
+paths, evaluates selected time0 and plays it, retaining every clip identity.
+Only one evaluator per asset is enabled. Non-loop endpoints remain playing but
+clamped, matching original Lite rather than inventing completion events.
+Zero-duration clips stay0 without overflow/modulo; negative speed is supported.
+
+One clock advances per asset/engine frame. Shared scenes use the earliest
+registered owning scene's fixed delta (when positive) or engine delta, with no
+duplicate-add tick or unregistered wall-time catchup. Motion-owned imported
+source/proxy topology and child lists are protected against public reparent/list
+edits before mutation; import-root parenting remains allowed. Removing a scene
+preserves that protected hierarchy for remaining owners. Unrelated ordinary nodes
+retain their old behavior. Last-owner mesh retirement still occurs even while a
+container/clip handle exists; disposed geometry cannot be resurrected. Group/name
+views stay stable until container disposal, after which issued handles are stale.
+Public geometry writes on bound skins return `BL_UNSUPPORTED` before mutation.
+
+The sandbox exposes every clip, Play/Pause, Restart, Loop, time/duration and exact
+stopped state through C99 calls only. Interactive host elapsed time supplies the
+delta; all playback math/state is Core-owned. Candidate previews use delta0, and
+synchronous replacement time is not charged to the previous model's clock.
+MR/SG/maps/color/alpha/sparse/empty behavior remains active; the frozen SG-to-MR
+info getter still returns `BL_UNSUPPORTED` with output unchanged.
+
+The ignored `skin-animation-v1/cgltf-completion-v1` evidence includes independent
+numeric/clock tests, production GPU buffer/texture/post-VS readback, real Win32
+control automation and full local-private URI/BYTES acceptance runs. Parent
+acceptance loaded all 35 supplied models through both routes: 19 load, up from
+16, and 16 remain explicit failures. Every previous success is preserved; all
+41 original model/sidecar files remain byte-identical. Per-model details stay
+local and are not distributed. RenderDoc is an
+optional test tool, not a production dependency. Native allocator and structural
+resource-invalid/retry tests do not claim exhaustive driver-loss/backend-OOM
+rollback or a CPU-versus-GPU performance result. Morph geometry/weights animation,
+KHR_animation_pointer, LOD, blending/bone-control frameworks, skinned EXT
+instancing and other unimplemented domains still fail explicitly. This is not
+complete glTF/Babylon.js extension coverage.
 
 User decision, 2026-10-14: focus **100% on GLB loading implementation** and do
 not resume shader-compilation investigation until broad valid-GLB loading is
@@ -97,7 +183,7 @@ The user clarified the completion target as core glTF 2.0 plus Babylon.js loader
 extension coverage. The fixed comparison reference is Babylon.js 9.30.0 at
 `b248b370267f13bfaf5b2a0f8fd525bad7c99b52`; Lite's 1.32.0 source/API authority
 remains unchanged. Animation work must load all clips, autoplay the first and
-allow clip selection. Animation support and that UI are still pending.
+allow clip selection; the native path now implements that bounded skin/TRS slice.
 
 ### Implemented baseline: runtime GLB loading and manual sandbox
 
@@ -129,8 +215,8 @@ and BoomBox's five roles render through the same API. The pinned Avocado has no
 occlusion texture; BoomBox supplies the real shared metallic/roughness/occlusion
 case. Core glTF OPAQUE/MASK/BLEND alpha modes now use actual image alpha and precise
 factor-only alpha, default/equality cutoff handling and the existing ordered
-source-over transparent path. Deformation/animation, other resources and extensions remain
-pending, not silently ignored.
+source-over transparent path. Native skin/TRS animation is described above;
+other resources, deformation domains and extensions remain pending, not silently ignored.
 
 Canonical `KHR_materials_pbrSpecularGlossiness` now has a genuine native workflow,
 selected by extension presence even without textures. Linear diffuse RGBA, colored
@@ -161,7 +247,7 @@ source-perfect shader equivalence or a full GLB/first-frame/GPU benchmark.
 
 ### Scene35 asset slice (qualification in progress)
 
-The single C99 header now contains **199 functions**: the frozen 181-function
+The scene35 asset slice brought the C99 header to **199 functions**: the frozen 181-function
 baseline plus 18 reviewed asset/runtime-v2, PBR, instancing, environment and
 default-camera functions. The additions use 35 POD records and 10 enums.
 Older signatures, layouts and enum meanings remain frozen.
@@ -211,8 +297,9 @@ Embedded PNG/JPEG base-color, metallic/roughness, normal,
 occlusion and emissive inputs use real sRGB/linear resources, UV0/1, native mip
 chains and writable pixel updates. Normal scale, authored tangents/cotangent
 fallback, occlusion strength and emissive factors retain their source semantics.
-Other unsupported material/texture features, extensions, skinning, morphs, animation
-and backgrounds fail explicitly. Authored glTF cameras are ignored for rendering,
+Other unsupported material/texture features, extensions, morphs and backgrounds
+fail explicitly. Legacy raw-service loads still reject skins/animations; the
+direct native route supports the skin/TRS slice above. Authored cameras are ignored for rendering,
 not a loading blocker: camera counts/reference validation remain, camera-bearing
 node transforms/meshes/children/membership remain, and the sandbox uses native
 auto-framed orbit controls rather than instantiating or selecting authored cameras.

@@ -197,7 +197,8 @@ bl_Status l_evaluateAssetMotion(L_Asset* asset, L_AssetAnimation* group, double 
         size_t i = motion->order[n];
         if (!motion->matrixLocked[i])
         {
-            L_TRY(l_normalizeAssetQuaternion(&motion->nextPose[i].rotationQuaternion));
+            bl_Quat validated = motion->nextPose[i].rotationQuaternion;
+            L_TRY(l_normalizeAssetQuaternion(&validated));
             l_composeAssetPose(motion->nextPose + i, motion->locals + i);
         }
         int32_t parent = motion->parents[i];
@@ -242,14 +243,14 @@ bl_Status l_evaluateAssetMotion(L_Asset* asset, L_AssetAnimation* group, double 
 
 static double sampleTime(const bl_AnimationGroupInfo* info, double time)
 {
-    if (info->duration <= 0)
+    if (info->duration <= 0 || time == 0)
     {
         return 0;
     }
     if (info->loopAnimation)
     {
         double wrapped = fmod(time, info->duration);
-        return wrapped < 0 ? wrapped + info->duration : wrapped;
+        return wrapped == 0 ? 0 : wrapped < 0 ? wrapped + info->duration : wrapped;
     }
     return time < 0 ? 0 : time > info->duration ? info->duration : time;
 }
@@ -397,8 +398,10 @@ bl_Status l_tickAssetMotion(L_Asset* asset, L_Scene* scene, double delta)
         if (!group->info.isStopped)
         {
             active = group;
-            double next = group->info.currentTime +
-                          (group->info.isPlaying ? delta / 1000 * group->info.speedRatio : 0);
+            double next =
+                group->info.currentTime + (group->info.isPlaying && group->info.duration > 0
+                                               ? delta / 1000 * group->info.speedRatio
+                                               : 0);
             if (!isfinite(next))
             {
                 return BL_INVALID_ARGUMENT;

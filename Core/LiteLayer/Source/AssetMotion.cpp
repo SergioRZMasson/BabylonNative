@@ -102,52 +102,11 @@ void l_cleanupAssetMotion(L_Asset* asset)
     asset->motion = NULL;
 }
 
-static bl_Status copySampler(bl_Runtime* runtime, const bl_ParsedGltf6* full,
-                             const bl_AssetAnimationSampler* source, L_AssetSampler* target)
+bl_Status l_createAssetMotion(L_Asset* asset, size_t nodes, size_t skins, size_t groups)
 {
-    const bl_ParsedGltf* data = &full->document5.document4.document3.document;
-    L_AssetAccessorReader input;
-    L_AssetAccessorReader output;
-    L_TRY(l_assetAccessorReader(data, source->input, &full->document5.document4, &input));
-    L_TRY(l_assetAccessorReader(data, source->output, &full->document5.document4, &output));
-    target->count = input.accessor->count;
-    target->components = output.rows * output.columns;
-    target->interpolation = l_assetInterpolation(source);
-    target->times = (float*)motionArray(runtime, target->count, sizeof(float));
-    size_t components;
-    if (!l_size(output.accessor->count, target->components, &components))
+    if (nodes > INT32_MAX || skins > UINT32_MAX || groups > UINT32_MAX)
     {
         return BL_INVALID_ARGUMENT;
-    }
-    target->values = (float*)motionArray(runtime, components, sizeof(float));
-    if (!target->times || !target->values)
-    {
-        return BL_OUT_OF_MEMORY;
-    }
-    for (size_t i = 0; i < target->count; ++i)
-    {
-        double value;
-        L_TRY(l_assetAccessorElement(&input, i, &value));
-        target->times[i] = (float)value;
-    }
-    for (size_t i = 0; i < output.accessor->count; ++i)
-    {
-        double values[16];
-        L_TRY(l_assetAccessorElement(&output, i, values));
-        for (size_t c = 0; c < target->components; ++c)
-        {
-            target->values[i * target->components + c] = (float)values[c];
-        }
-    }
-    return BL_OK;
-}
-
-bl_Status l_initAssetMotion(L_Asset* asset, const bl_ParsedGltf6* full)
-{
-    const bl_ParsedGltf* data = &full->document5.document4.document3.document;
-    if (!data->skinCount && !data->animationCount)
-    {
-        return BL_OK;
     }
     bl_Runtime* runtime = asset->engine->runtime;
     L_AssetMotion* motion = (L_AssetMotion*)l_alloc(runtime, sizeof(*motion));
@@ -156,146 +115,62 @@ bl_Status l_initAssetMotion(L_Asset* asset, const bl_ParsedGltf6* full)
         return BL_OUT_OF_MEMORY;
     }
     asset->motion = motion;
-    motion->nodeCount = data->nodeCount;
-    motion->skinCount = data->skinCount;
-    motion->groupCount = data->animationCount;
-    motion->nodes = (L_Node**)motionArray(runtime, data->nodeCount, sizeof(L_Node*));
-    motion->parents = (int32_t*)motionArray(runtime, data->nodeCount, sizeof(int32_t));
-    motion->order = (uint32_t*)motionArray(runtime, data->nodeCount, sizeof(uint32_t));
-    motion->rest = (bl_TransformNodeOptions*)motionArray(runtime, data->nodeCount,
-                                                         sizeof(bl_TransformNodeOptions));
-    motion->nextPose = (bl_TransformNodeOptions*)motionArray(runtime, data->nodeCount,
-                                                             sizeof(bl_TransformNodeOptions));
-    motion->locals = (bl_Mat4*)motionArray(runtime, data->nodeCount, sizeof(bl_Mat4));
-    motion->worlds = (bl_Mat4*)motionArray(runtime, data->nodeCount, sizeof(bl_Mat4));
-    motion->targets = (uint8_t*)motionArray(runtime, data->nodeCount, 1);
-    motion->matrixLocked = (uint8_t*)motionArray(runtime, data->nodeCount, 1);
-    motion->skins =
-        (L_AssetSkinData*)motionArray(runtime, data->skinCount, sizeof(L_AssetSkinData));
-    motion->groups =
-        (bl_AnimationGroup*)motionArray(runtime, data->animationCount, sizeof(bl_AnimationGroup));
-    if ((data->nodeCount && (!motion->nodes || !motion->parents || !motion->order ||
-                             !motion->rest || !motion->nextPose || !motion->locals ||
-                             !motion->worlds || !motion->targets || !motion->matrixLocked)) ||
-        (data->skinCount && !motion->skins) || (data->animationCount && !motion->groups))
+    motion->nodeCount = nodes;
+    motion->skinCount = skins;
+    motion->groupCount = groups;
+    motion->nodes = (L_Node**)motionArray(runtime, nodes, sizeof(L_Node*));
+    motion->parents = (int32_t*)motionArray(runtime, nodes, sizeof(int32_t));
+    motion->order = (uint32_t*)motionArray(runtime, nodes, sizeof(uint32_t));
+    motion->rest =
+        (bl_TransformNodeOptions*)motionArray(runtime, nodes, sizeof(bl_TransformNodeOptions));
+    motion->nextPose =
+        (bl_TransformNodeOptions*)motionArray(runtime, nodes, sizeof(bl_TransformNodeOptions));
+    motion->locals = (bl_Mat4*)motionArray(runtime, nodes, sizeof(bl_Mat4));
+    motion->worlds = (bl_Mat4*)motionArray(runtime, nodes, sizeof(bl_Mat4));
+    motion->targets = (uint8_t*)motionArray(runtime, nodes, 1);
+    motion->matrixLocked = (uint8_t*)motionArray(runtime, nodes, 1);
+    motion->skins = (L_AssetSkinData*)motionArray(runtime, skins, sizeof(L_AssetSkinData));
+    motion->groups = (bl_AnimationGroup*)motionArray(runtime, groups, sizeof(bl_AnimationGroup));
+    if ((nodes && (!motion->nodes || !motion->parents || !motion->order || !motion->rest ||
+                   !motion->nextPose || !motion->locals || !motion->worlds || !motion->targets ||
+                   !motion->matrixLocked)) ||
+        (skins && !motion->skins) || (groups && !motion->groups))
     {
         return BL_OUT_OF_MEMORY;
     }
-    for (size_t i = 0; i < data->nodeCount; ++i)
+    return BL_OK;
+}
+
+bl_Status l_createAssetAnimation(L_Asset* asset, size_t index, bl_String name, size_t samplers,
+                                 size_t channels, L_AssetAnimation** out)
+{
+    bl_Runtime* runtime = asset->engine->runtime;
+    if (!l_string(name) || index >= asset->motion->groupCount || samplers > UINT32_MAX ||
+        channels > UINT32_MAX)
     {
-        motion->parents[i] = -1;
-        L_TRY(l_composeAssetMatrix(data->nodes + i, motion->rest + i));
-        L_TRY(l_normalizeAssetQuaternion(&motion->rest[i].rotationQuaternion));
-        if (data->nodes[i].hasMatrix)
-        {
-            motion->locals[i] = data->nodes[i].matrix;
-            motion->matrixLocked[i] = true;
-        }
+        return BL_INVALID_ARGUMENT;
     }
-    for (size_t i = 0; i < data->nodeCount; ++i)
+    L_Record* record;
+    L_TRY(l_record(runtime, sizeof(L_AssetAnimation), L_ANIMATION, 44, cleanupGroup, &record));
+    l_pin(record);
+    asset->motion->groups[index] = {runtime, record->id};
+    L_AssetAnimation* group = (L_AssetAnimation*)record;
+    group->asset = asset;
+    group->samplerCount = samplers;
+    group->channelCount = channels;
+    group->info.frameRate = 60;
+    group->info.speedRatio = 1;
+    group->info.loopAnimation = true;
+    group->info.isPlaying = index == 0;
+    group->info.isStopped = index != 0;
+    group->info.name = l_copyString(runtime, name);
+    group->samplers = (L_AssetSampler*)motionArray(runtime, samplers, sizeof(L_AssetSampler));
+    group->channels = (L_AssetChannel*)motionArray(runtime, channels, sizeof(L_AssetChannel));
+    if (!group->info.name.data || (samplers && !group->samplers) || (channels && !group->channels))
     {
-        for (size_t j = 0; j < data->nodes[i].childCount; ++j)
-        {
-            motion->parents[data->nodes[i].children[j]] = (int32_t)i;
-        }
+        return BL_OUT_OF_MEMORY;
     }
-    size_t count = 0;
-    for (size_t i = 0; i < data->nodeCount; ++i)
-    {
-        if (motion->parents[i] < 0)
-        {
-            motion->order[count++] = (uint32_t)i;
-        }
-    }
-    for (size_t i = 0; i < count; ++i)
-    {
-        const bl_AssetNode* node = data->nodes + motion->order[i];
-        for (size_t j = 0; j < node->childCount; ++j)
-        {
-            motion->order[count++] = node->children[j];
-        }
-    }
-    for (size_t i = 0; i < data->skinCount; ++i)
-    {
-        const bl_AssetSkin* source = full->skins + i;
-        L_AssetSkinData* target = motion->skins + i;
-        target->count = source->jointCount;
-        target->joints = (uint32_t*)motionArray(runtime, target->count, sizeof(uint32_t));
-        target->inverseBind = (float*)motionArray(runtime, target->count, 16 * sizeof(float));
-        target->palette = (float*)motionArray(runtime, target->count, 16 * sizeof(float));
-        if (!target->joints || !target->inverseBind || !target->palette)
-        {
-            return BL_OUT_OF_MEMORY;
-        }
-        memcpy(target->joints, source->joints, target->count * sizeof(uint32_t));
-        L_AssetAccessorReader reader = {};
-        if (source->inverseBindMatrices.present)
-        {
-            L_TRY(l_assetAccessorReader(data, source->inverseBindMatrices.value,
-                                        &full->document5.document4, &reader));
-        }
-        for (size_t j = 0; j < target->count; ++j)
-        {
-            double matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-            if (source->inverseBindMatrices.present)
-            {
-                L_TRY(l_assetAccessorElement(&reader, j, matrix));
-            }
-            for (size_t c = 0; c < 16; ++c)
-            {
-                target->inverseBind[j * 16 + c] = (float)matrix[c];
-            }
-        }
-    }
-    for (size_t i = 0; i < data->animationCount; ++i)
-    {
-        L_Record* record;
-        L_TRY(l_record(runtime, sizeof(L_AssetAnimation), L_ANIMATION, 44, cleanupGroup, &record));
-        l_pin(record);
-        motion->groups[i] = {runtime, record->id};
-        L_AssetAnimation* group = (L_AssetAnimation*)record;
-        const bl_AssetAnimation* source = full->animations + i;
-        group->asset = asset;
-        group->samplerCount = source->samplerCount;
-        group->channelCount = source->channelCount;
-        group->info.frameRate = 60;
-        group->info.speedRatio = 1;
-        group->info.loopAnimation = true;
-        group->info.isPlaying = i == 0;
-        group->info.isStopped = i != 0;
-        char fallback[64];
-        snprintf(fallback, sizeof(fallback), "animation_%zu", i);
-        group->info.name = l_copyString(runtime, source->hasName && source->name.length
-                                                     ? source->name
-                                                     : bl_String{fallback, strlen(fallback)});
-        group->samplers =
-            (L_AssetSampler*)motionArray(runtime, source->samplerCount, sizeof(L_AssetSampler));
-        group->channels =
-            (L_AssetChannel*)motionArray(runtime, source->channelCount, sizeof(L_AssetChannel));
-        if (!group->info.name.data || !group->samplers || !group->channels)
-        {
-            return BL_OUT_OF_MEMORY;
-        }
-        for (size_t j = 0; j < source->samplerCount; ++j)
-        {
-            L_TRY(copySampler(runtime, full, source->samplers + j, group->samplers + j));
-            const L_AssetSampler* sampler = group->samplers + j;
-            double duration = sampler->times[sampler->count - 1];
-            group->info.duration =
-                duration > group->info.duration ? duration : group->info.duration;
-        }
-        for (size_t j = 0; j < source->channelCount; ++j)
-        {
-            const bl_AssetAnimationChannel* channel = source->channels + j;
-            group->channels[j] = {channel->sampler,
-                                  channel->node.present ? channel->node.value : UINT32_MAX,
-                                  l_assetAnimationPath(channel->path)};
-            if (channel->node.present)
-            {
-                motion->targets[channel->node.value] |= (uint8_t)(1u << group->channels[j].path);
-            }
-        }
-    }
+    *out = group;
     return BL_OK;
 }
 
@@ -320,14 +195,12 @@ bl_Status l_finishAssetMotion(L_Asset* asset)
                                                                              motion->groups[0]._id)
                                                  : NULL;
     L_TRY(l_evaluateAssetMotion(asset, first, 0, false));
-    if (motion->skinCount)
+    // Source-node animation uses copied topology too, including containers without skins.
+    for (size_t i = 0; i < asset->nodeCount; ++i)
     {
-        for (size_t i = 0; i < asset->nodeCount; ++i)
-        {
-            L_Node* node = (L_Node*)l_peek(asset->engine->runtime, asset->nodes[i]._id);
-            node->assetParentLocked = asset->nodes[i]._id != asset->root._id;
-            node->assetChildrenLocked = true;
-        }
+        L_Node* node = (L_Node*)l_peek(asset->engine->runtime, asset->nodes[i]._id);
+        node->assetParentLocked = asset->nodes[i]._id != asset->root._id;
+        node->assetChildrenLocked = true;
     }
     return BL_OK;
 }
@@ -343,7 +216,12 @@ bl_Status l_addAssetMotionOwner(L_Asset* asset, L_Scene* scene)
     {
         if ((*tail)->asset == asset)
         {
-            ++(*tail)->assetOwners;
+            bool ownsRoot = false;
+            for (size_t i = 0; i < scene->memberCount; ++i)
+            {
+                ownsRoot |= scene->members[i]->record.id == asset->root._id;
+            }
+            (*tail)->assetOwners = ownsRoot ? (*tail)->assetOwners + 1 : 1;
             return BL_OK;
         }
         tail = &(*tail)->next;
@@ -367,7 +245,12 @@ void l_removeAssetMotionOwner(L_Asset* asset, L_Scene* scene)
         L_Callback* callback = *cursor;
         if (callback->asset == asset)
         {
-            if (!--callback->assetOwners)
+            bool ownsRoot = false;
+            for (size_t i = 0; i < scene->memberCount; ++i)
+            {
+                ownsRoot |= scene->members[i]->record.id == asset->root._id;
+            }
+            if (!ownsRoot || !--callback->assetOwners)
             {
                 *cursor = callback->next;
                 l_free(scene->engine->runtime, callback);

@@ -8,6 +8,7 @@
  * flattened scene, coordinate normalization, platform codec or detached worker.
  */
 #include "GltfInternal.h"
+#include "AssetMotionInternal.h"
 
 static void* allocate(void* user, cgltf_size bytes)
 {
@@ -259,12 +260,6 @@ static bl_Status validateFeatures(L_Gltf* gltf)
             return BL_UNSUPPORTED;
         }
     }
-    if (data->animations_count || data->skins_count)
-    {
-        gltf->reason =
-            "Native skin/animation construction is not yet qualified; no static fallback";
-        return BL_UNSUPPORTED;
-    }
     if (data->data_extensions_count || data->asset.extensions_count || data->lights_count)
     {
         gltf->reason = "Unsupported document or asset extension";
@@ -336,7 +331,7 @@ static bl_Status topology(L_Gltf* gltf)
     for (size_t i = 0; i < data->nodes_count && status == BL_OK; ++i)
     {
         const cgltf_node* node = data->nodes + i;
-        if (node->skin || node->weights_count || node->light || node->extensions_count)
+        if (node->weights_count || node->light || node->extensions_count)
         {
             status = BL_UNSUPPORTED;
         }
@@ -380,12 +375,21 @@ static bl_Status createNode(L_Gltf* gltf, L_Asset* asset, const cgltf_node* sour
         }
         options = {{}, {0, 0, 0, 1}, {1, 1, 1}};
     }
+    else if (asset->motion)
+    {
+        options.rotationQuaternion =
+            asset->motion->rest[source - gltf->data->nodes].rotationQuaternion;
+    }
     char fallback[64];
     snprintf(fallback, sizeof(fallback), "node_%zu", (size_t)(source - gltf->data->nodes));
     const char* name = source->name ? source->name : fallback;
     bl_TransformNode node = {};
     L_TRY(bl_createTransformNode(gltf->runtime, {name, strlen(name)}, &options, &node));
     L_TRY(l_appendAssetNode(asset, node));
+    if (asset->motion)
+    {
+        asset->motion->nodes[source - gltf->data->nodes] = (L_Node*)l_peek(gltf->runtime, node._id);
+    }
     if (source->has_matrix)
     {
         L_Node* record = (L_Node*)l_peek(gltf->runtime, node._id);
@@ -429,10 +433,11 @@ static bl_Status build(L_Gltf* gltf, L_Engine* engine, L_Asset** out)
     }
     L_TRY(l_createAsset(engine, capacity, data->materials_count + 1, textureCount, out));
     L_Asset* asset = *out;
+    L_TRY(l_gltfCreateMotion(gltf, asset));
     const cgltf_scene* scene = data->scene ? data->scene : data->scenes_count ? data->scenes : NULL;
     if (!scene)
     {
-        return BL_OK;
+        return l_finishAssetMotion(asset);
     }
     if (scene->extensions_count || scene->nodes_count > data->nodes_count)
     {
@@ -479,6 +484,10 @@ static bl_Status build(L_Gltf* gltf, L_Engine* engine, L_Asset** out)
     }
     l_free(gltf->runtime, seen);
     l_free(gltf->runtime, stack);
+    if (status == BL_OK)
+    {
+        status = l_finishAssetMotion(asset);
+    }
     return status;
 }
 
@@ -524,7 +533,13 @@ bl_Status l_loadNativeGltf(L_Engine* engine, const bl_AssetSource* source, bl_As
     }
     if (status == BL_OK)
     {
-        status = l_gltfResult(&gltf, l_cgltfValidatePresence(&gltf.options, gltf.data));
+        cgltf_result presence = l_cgltfValidatePresence(&gltf.options, gltf.data);
+        status = presence == cgltf_result_unknown_format ? BL_UNSUPPORTED
+                                                         : l_gltfResult(&gltf, presence);
+        if (presence == cgltf_result_unknown_format)
+        {
+            gltf.reason = "Unsupported animation interpolation or target extension";
+        }
     }
     if (status == BL_OK)
     {
@@ -537,6 +552,18 @@ bl_Status l_loadNativeGltf(L_Engine* engine, const bl_AssetSource* source, bl_As
     if (status == BL_OK)
     {
         status = l_gltfValidateAccessors(&gltf);
+    }
+    if (status == BL_OK)
+    {
+        status = l_gltfValidateMotion(&gltf);
+        if (status != BL_OK)
+        {
+            gltf.reason = status == BL_UNSUPPORTED
+                              ? "Unsupported skin/animation domain or extension"
+                          : status == BL_INVALID_ARGUMENT
+                              ? "Invalid skin/animation accessor, influence or hierarchy"
+                              : "Unable to construct skin/animation storage";
+        }
     }
     if (status == BL_OK)
     {

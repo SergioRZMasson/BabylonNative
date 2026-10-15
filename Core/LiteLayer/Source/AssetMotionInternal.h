@@ -86,7 +86,10 @@ void l_commitAssetDeformation(L_Asset* asset);
 void l_freeAssetDeformation(bl_Runtime* runtime, L_AssetDeformation* deformation);
 void l_composeAssetPose(const bl_TransformNodeOptions* pose, bl_Mat4* result);
 bl_Status l_normalizeAssetQuaternion(bl_Quat* quaternion);
-unsigned l_assetAnimationPath(bl_String path);
-unsigned l_assetInterpolation(const bl_AssetAnimationSampler* sampler);
+bl_Status l_createAssetMotion(L_Asset* asset, size_t nodes, size_t skins, size_t groups);
+bl_Status l_createAssetAnimation(L_Asset* asset, size_t index, bl_String name, size_t samplers,
+                                 size_t channels, L_AssetAnimation** out);
+bl_Status l_createAssetDeformation(L_Asset* asset, size_t skinIndex, size_t influences,
+                                   L_Mesh* mesh);
 
 #endif

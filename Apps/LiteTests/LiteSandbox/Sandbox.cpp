@@ -232,12 +232,15 @@ struct Host
     HWND loop = nullptr;
     HWND animationState = nullptr;
     std::wstring animationCaption;
+    bool exerciseClips = false;
+    std::vector<std::string> clipEvents;
 };
 
 static constexpr int ClipSelectorId = 5701;
 static constexpr int PlayPauseId = 5702;
 static constexpr int RestartId = 5703;
 static constexpr int LoopId = 5704;
+static std::string jsonString(const std::string& text);
 
 static bl_Status parseForHost(void* user, bl_Bytes bytes, bl_String base, bl_ParsedGltf* out)
 {
@@ -494,6 +497,11 @@ static void animationControls(Host& host, bool populate)
 
 static void animationCommand(Host& host, int id, int notification)
 {
+    if ((id == ClipSelectorId && notification != CBN_SELCHANGE) ||
+        (id != ClipSelectorId && notification != BN_CLICKED))
+    {
+        return;
+    }
     if (!host.model.clips.count)
     {
         return;
@@ -533,6 +541,101 @@ static void animationCommand(Host& host, int id, int notification)
     {
         title(host, "Animation control failed: " + lastError(host, status));
     }
+    animationControls(host, false);
+}
+
+static void recordClip(Host& host, size_t index, const char* operation)
+{
+    bl_AnimationGroupInfo info = {};
+    checked(bl_getAnimationGroupInfo(host.model.clips.data[index], &info), "Record native clip");
+    std::ostringstream event;
+    event << std::setprecision(17) << "{\"index\":" << index
+          << ",\"operation\":" << jsonString(operation)
+          << ",\"name\":" << jsonString(std::string(info.name.data, info.name.length))
+          << ",\"currentTime\":" << info.currentTime << ",\"duration\":" << info.duration
+          << ",\"isPlaying\":" << (info.isPlaying ? "true" : "false")
+          << ",\"isStopped\":" << (info.isStopped ? "true" : "false")
+          << ",\"loop\":" << (info.loopAnimation ? "true" : "false") << "}";
+    host.clipEvents.push_back(event.str());
+}
+
+static void exerciseClipControls(Host& host)
+{
+    if (!host.model.clips.count)
+    {
+        return;
+    }
+    SetActiveWindow(host.window);
+    recordClip(host, 0, "autoplay");
+    for (size_t index = 0; index < host.model.clips.count; ++index)
+    {
+        SendMessageW(host.clipSelector, CB_SETCURSEL, index, 0);
+        SendMessageW(host.window, WM_COMMAND, MAKEWPARAM(ClipSelectorId, CBN_SELCHANGE),
+                      reinterpret_cast<LPARAM>(host.clipSelector));
+        bl_AnimationGroup group = host.model.clips.data[index];
+        bl_AnimationGroupInfo info = {};
+        checked(bl_getAnimationGroupInfo(group, &info), "Selected native clip");
+        if (host.model.selectedClip != index || !info.isPlaying || info.isStopped ||
+            info.currentTime != 0)
+        {
+            throw std::runtime_error("Native clip selector failed to start selected time0");
+        }
+        recordClip(host, index, "selected");
+        SendMessageW(host.playPause, BM_CLICK, 0, 0);
+        checked(bl_getAnimationGroupInfo(group, &info), "Paused first frame");
+        if (info.isPlaying || info.isStopped || info.currentTime != 0)
+        {
+            std::fprintf(stderr, "Paused-at-zero flags: playing=%d stopped=%d time=%.17g enabled=%d\n",
+                         info.isPlaying, info.isStopped, info.currentTime,
+                         IsWindowEnabled(host.playPause));
+            throw std::runtime_error("Native paused-at-zero state was guessed as stopped");
+        }
+        recordClip(host, index, "paused-at-zero");
+        SendMessageW(host.playPause, BM_CLICK, 0, 0);
+        checked(bl_frame(host.engine, 1000.0 / 60), "Selected clip actual frame");
+        bgfx::frame();
+        SendMessageW(host.playPause, BM_CLICK, 0, 0);
+        checked(bl_getAnimationGroupInfo(group, &info), "Paused native clip");
+        double held = info.currentTime;
+        checked(bl_frame(host.engine, 250), "Paused actual frame");
+        bgfx::frame();
+        checked(bl_getAnimationGroupInfo(group, &info), "Held native clip");
+        if (info.isPlaying || info.isStopped || info.currentTime != held)
+        {
+            throw std::runtime_error("Native play/pause control did not hold the clock");
+        }
+        recordClip(host, index, "paused");
+        SendMessageW(host.playPause, BM_CLICK, 0, 0);
+        SendMessageW(host.restart, BM_CLICK, 0, 0);
+        checked(bl_getAnimationGroupInfo(group, &info), "Restarted native clip");
+        if (!info.isPlaying || info.isStopped || info.currentTime != 0)
+        {
+            throw std::runtime_error("Native restart control did not reset selected clip");
+        }
+        recordClip(host, index, "restarted");
+        checked(bl_stopAnimation(group), "Stop native clip");
+        animationControls(host, false);
+        recordClip(host, index, "stopped-at-zero");
+        SendMessageW(host.playPause, BM_CLICK, 0, 0);
+        if (info.loopAnimation)
+        {
+            SendMessageW(host.loop, BM_CLICK, 0, 0);
+        }
+        checked(bl_goToFrame(group, info.duration * info.frameRate), "Seek native endpoint");
+        checked(bl_playAnimation(group), "Play native endpoint");
+        checked(bl_frame(host.engine, 250), "Actual clamped endpoint frame");
+        bgfx::frame();
+        checked(bl_getAnimationGroupInfo(group, &info), "Clamped native clip");
+        if (info.loopAnimation || !info.isPlaying || info.currentTime != info.duration)
+        {
+            throw std::runtime_error("Native non-loop control did not clamp endpoint");
+        }
+        recordClip(host, index, "nonloop-end-clamped");
+        SendMessageW(host.loop, BM_CLICK, 0, 0);
+    }
+    SendMessageW(host.clipSelector, CB_SETCURSEL, 0, 0);
+    SendMessageW(host.window, WM_COMMAND, MAKEWPARAM(ClipSelectorId, CBN_SELCHANGE),
+                  reinterpret_cast<LPARAM>(host.clipSelector));
     animationControls(host, false);
 }
 
@@ -646,7 +749,7 @@ static void loadModel(Host& host, const std::wstring& path)
     }
     if (status == BL_OK)
     {
-        status = bl_frame(host.engine, 1000.0 / 60);
+        status = bl_frame(host.engine, 0);
         bgfx::frame();
     }
     bl_EngineStats stats = {};
@@ -691,6 +794,7 @@ static void loadModel(Host& host, const std::wstring& path)
     candidate.selectedNodes = host.parsedCounts.selectedNodes;
     candidate.selectedScene = host.parsedCounts.selectedScene;
     host.model = std::move(candidate);
+    host.clipEvents.clear();
     animationControls(host, true);
     ++host.successfulDrops;
     title(host, "Loaded " + utf8(std::filesystem::path(path).filename().wstring()) + " | " +
@@ -705,6 +809,10 @@ static void loadModel(Host& host, const std::wstring& path)
                     std::to_string(host.model.selectedPrimitives) + " selected primitives / " +
                     std::to_string(stats.drawCallCount) +
                     " actual draws | left-drag orbit, wheel zoom | drop another GLB");
+    if (host.exerciseClips)
+    {
+        exerciseClipControls(host);
+    }
 }
 
 static void pointer(Host& host, UINT message, WPARAM wparam, LPARAM lparam)
@@ -765,13 +873,13 @@ static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam
                 path.resize(length);
                 host->pending.push_back(std::move(path));
             }
-            if (message == WM_COMMAND)
-            {
-                animationCommand(*host, LOWORD(wparam), HIWORD(wparam));
-                return 0;
-            }
             DragFinish(drop);
             dropped = nullptr;
+            return 0;
+        }
+        if (message == WM_COMMAND)
+        {
+            animationCommand(*host, LOWORD(wparam), HIWORD(wparam));
             return 0;
         }
         if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP ||
@@ -874,6 +982,10 @@ int wmain(int argc, wchar_t** argv)
         else if (arg == L"--memory")
         {
             host.memorySource = true;
+        }
+        else if (arg == L"--exercise-clips")
+        {
+            host.exerciseClips = true;
         }
         else
         {
@@ -1011,6 +1123,7 @@ int wmain(int argc, wchar_t** argv)
         size_t sinceDrop = 0;
         size_t item = 0;
         bool capturing = false;
+        auto lastFrame = std::chrono::steady_clock::now();
         while (!host.quit)
         {
             MSG message = {};
@@ -1031,11 +1144,17 @@ int wmain(int argc, wchar_t** argv)
                 std::wstring path = std::move(host.pending.front());
                 host.pending.pop_front();
                 loadModel(host, path);
+                lastFrame = std::chrono::steady_clock::now();
                 sinceDrop = 0;
             }
             if (host.model.scene._id)
             {
-                checked(bl_frame(host.engine, 1000.0 / 60), "Native frame");
+                auto now = std::chrono::steady_clock::now();
+                double delta = smoke.empty()
+                                   ? std::chrono::duration<double, std::milli>(now - lastFrame).count()
+                                   : 1000.0 / 60;
+                lastFrame = now;
+                checked(bl_frame(host.engine, delta), "Native frame");
                 animationControls(host, false);
             }
             else
@@ -1086,6 +1205,14 @@ int wmain(int argc, wchar_t** argv)
                        << ",\"selectedSpecularGlossinessPrimitives\":"
                        << host.model.selectedSpecularGlossinessPrimitives
                        << ",\"emptySceneCamera\":" << (host.model.emptyCamera ? "true" : "false")
+                       << ",\"clipCount\":" << host.model.clips.count
+                       << ",\"selectedClip\":" << host.model.selectedClip
+                       << ",\"clipControlEvents\":[";
+                for (size_t i = 0; i < host.clipEvents.size(); ++i)
+                {
+                    report << (i ? "," : "") << host.clipEvents[i];
+                }
+                report << "]"
                        << ",\"visible\":" << (IsWindowVisible(host.window) ? "true" : "false")
                        << ",\"allocatorLiveBytes\":" << host.memory.bytes << "}\n";
                 report.flush();

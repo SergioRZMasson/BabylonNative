@@ -47,13 +47,12 @@ void l_detachAssetSkin(L_Mesh* mesh)
     }
 }
 
-bl_Status l_bindAssetSkin(L_Asset* asset, const bl_ParsedGltf6* full, uint32_t node,
-                          const bl_AssetPrimitive* primitive, L_Mesh* mesh)
+bl_Status l_createAssetDeformation(L_Asset* asset, size_t skinIndex, size_t influences,
+                                   L_Mesh* mesh)
 {
-    const bl_ParsedGltf* data = &full->document5.document4.document3.document;
-    if (!data->nodes[node].skin.present)
+    if (skinIndex >= asset->motion->skinCount || !influences)
     {
-        return BL_OK;
+        return BL_INVALID_ARGUMENT;
     }
     bl_Runtime* runtime = asset->engine->runtime;
     L_AssetDeformation* d = (L_AssetDeformation*)l_alloc(runtime, sizeof(*d));
@@ -64,25 +63,17 @@ bl_Status l_bindAssetSkin(L_Asset* asset, const bl_ParsedGltf6* full, uint32_t n
     d->bitangentTexture.idx = BL_INVALID_BGFX_HANDLE;
     d->asset = asset;
     d->mesh = mesh;
-    d->skin = asset->motion->skins + data->nodes[node].skin.value;
+    d->skin = asset->motion->skins + skinIndex;
+    d->influences = influences;
     d->next = asset->motion->deformations;
     asset->motion->deformations = d;
     mesh->skin = d;
     d->gpuDirty = true;
     L_Geometry* g = &mesh->geometry;
-    size_t sets = 0;
-    for (size_t i = 0; i < primitive->attributeCount; ++i)
-    {
-        bool joint = false;
-        if (l_assetInfluence(primitive->attributes[i].semantic, &joint) >= 0 && joint)
-        {
-            ++sets;
-        }
-    }
-    size_t influences;
+    size_t count;
     size_t bytes;
-    if (!l_size(sets, 4, &d->influences) || !l_size(g->vertices, d->influences, &influences) ||
-        !l_size(influences, sizeof(float), &bytes) || bytes > UINT32_MAX)
+    if (!l_size(g->vertices, influences, &count) || !l_size(count, sizeof(float), &bytes) ||
+        bytes > UINT32_MAX)
     {
         return BL_INVALID_ARGUMENT;
     }
@@ -92,49 +83,6 @@ bl_Status l_bindAssetSkin(L_Asset* asset, const bl_ParsedGltf6* full, uint32_t n
     if (!d->joints || !d->weights || !d->packed)
     {
         return BL_OUT_OF_MEMORY;
-    }
-    for (size_t i = 0; i < primitive->attributeCount; ++i)
-    {
-        const bl_AssetAttribute* attribute = primitive->attributes + i;
-        bool joint = false;
-        int set = l_assetInfluence(attribute->semantic, &joint);
-        if (set < 0)
-        {
-            continue;
-        }
-        L_AssetAccessorReader reader;
-        L_TRY(
-            l_assetAccessorReader(data, attribute->accessor, &full->document5.document4, &reader));
-        for (size_t v = 0; v < g->vertices; ++v)
-        {
-            double values[4];
-            L_TRY(l_assetAccessorElement(&reader, v, values, !joint));
-            for (size_t lane = 0; lane < 4; ++lane)
-            {
-                size_t index = v * d->influences + (size_t)set * 4 + lane;
-                if (joint)
-                {
-                    d->joints[index] = (uint32_t)values[lane];
-                }
-                else
-                {
-                    d->weights[index] = (float)values[lane];
-                }
-            }
-        }
-    }
-    for (size_t v = 0; v < g->vertices; ++v)
-    {
-        double total = 0;
-        for (size_t i = 0; i < d->influences; ++i)
-        {
-            total += d->weights[v * d->influences + i];
-        }
-        for (size_t i = 0; i < d->influences; ++i)
-        {
-            size_t index = v * d->influences + i;
-            d->weights[index] = (float)(d->weights[index] / total);
-        }
     }
     const unsigned streams[3] = {0, 1, 4};
     for (size_t i = 0; i < 3; ++i)
@@ -203,6 +151,20 @@ bl_Status l_bindAssetSkin(L_Asset* asset, const bl_ParsedGltf6* full, uint32_t n
 bl_Status l_prepareAssetDeformation(L_Asset* asset)
 {
     L_AssetMotion* motion = asset->motion;
+    for (L_AssetDeformation* d = motion->deformations; d; d = d->next)
+    {
+        if (d->mesh && (!bgfx::isValid(d->mesh->geometry.vertexBuffer) ||
+                        !bgfx::isValid(d->mesh->geometry.indexBuffer) ||
+                        (d->bitangents && (!bgfx::isValid(d->bitangentTexture) ||
+                                           !d->textureWidth || !d->textureHeight))))
+        {
+            for (L_AssetDeformation* dirty = motion->deformations; dirty; dirty = dirty->next)
+            {
+                dirty->gpuDirty = true;
+            }
+            return BL_NOT_READY;
+        }
+    }
     for (size_t i = 0; i < motion->skinCount; ++i)
     {
         L_AssetSkinData* skin = motion->skins + i;

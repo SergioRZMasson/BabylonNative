@@ -307,7 +307,10 @@ void l_sceneCleanup(bl_Runtime* r, L_Record* record)
             {
                 --n->sceneCount;
             }
-            l_parent(n, NULL);
+            if (!n->assetChildrenLocked)
+            {
+                l_parent(n, NULL);
+            }
             if (!n->sceneCount && n->record.kind == L_MESH && !n->record.disposed)
             {
                 n->record.cleanup(r, &n->record);
@@ -1023,7 +1026,10 @@ bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n)
         L_Node* c = (L_Node*)l_peek(r, n->children[i]._id);
         L_TRY(l_removeSceneNode(r, s, c));
     }
-    l_parent(n, NULL);
+    if (!n->assetChildrenLocked)
+    {
+        l_parent(n, NULL);
+    }
     if (s->properties.camera._id == n->record.id)
     {
         s->properties.camera = {};

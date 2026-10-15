@@ -53,10 +53,57 @@ parser projection; file-level source counts are unavailable on that route and
 smoke receipts mark `sourceCountsAvailable=false` and
 `sourceSceneIndexAvailable=false`; legacy-only source fields are placeholders,
 not inferred parser metadata. Empty-scene detection still
-uses the actual imported hierarchy. Skin/animation loading fails explicitly
-until native construction and full deformation/UI qualification are complete.
-Existing paused motion work and historical evidence are preserved, not claimed
-as finished animation support.
+uses the actual imported hierarchy. The native route also loads skeletal skins
+and core node-TRS clips directly into retained Core-owned workspaces, without a
+raw-v6 parser protocol. Historical static and paused-motion evidence is preserved.
+
+### Animation controls and deformation
+
+Every source clip is retained in its original order. On successful load the first
+clip is selected, evaluated at0 and automatically plays with looping enabled.
+The persistent native toolbar displays clip ordinal/count/name, Play/Pause,
+Restart, Loop and time/duration. Its Paused versus Stopped label uses Core's
+`isStopped`, not a host guess based on time0. Selecting a clip (or Restart)
+exclusively resets/evaluates that clip at0; no clips are discarded. Interactive
+elapsed time is supplied to C99; clocks, interpolation and pose math live in Core.
+Synchronous replacement time is not charged to a retained model's clock.
+
+Core supports STEP, LINEAR and CUBICSPLINE translation/rotation/scale channels,
+including normalized integer rotation outputs and shortest-path quaternion LINEAR.
+Each sampler clamps to its own range; clip time starts0 and duration is the largest
+last input time. Non-loop playback holds the endpoint while still marked playing;
+Restart starts again. Pause holds time/pose. The C99 stop operation resets the
+clock but holds the last published pose until play/evaluation or explicit seek.
+Zero-duration clips remain0. Selection restores clip-targeted rest properties
+before applying the new clip, while non-animated properties remain unchanged.
+
+Skinning is genuine native CPU deformation of position/normal/tangent streams
+and actual dynamic GPU buffers. All legal paired influence sets participate;
+there is no small joint-UBO cap or half-float bone matrix path. Skin without any
+clip is evaluated too. The joint-root/IBM palette excludes the synthetic root,
+whose reflection/world transform is applied once when drawing. The source mesh
+node and ordinary/joint/camera children remain; its transform is ignored only as
+an extra transform on its own skinned geometry. Deformed bounds frame/cull/order
+the actual drawable, not a bind-pose proxy.
+
+Normal mapping retains original Lite's linear N/T/independent-B convention,
+not inverse-transpose normal parity. Mapped authored tangents use a private
+mutable RGBA32F bitangent texture and real vertex-index fetch; transformed T is
+not renormalized or B reconstructed by a cross product. Flat/cotangent fallback,
+MR/SG, vertex colors, all common maps and alpha remain supported.
+
+Imported motion topology/child arrays are protected against public reparent/list
+edits; moving/parenting the synthetic import root is allowed. Shared scenes have
+one Core clock using the earliest registered owning scene. Last-owner removal
+still retires mesh identities; re-adding disposed geometry is not resurrection.
+Public geometry writes on skinned drawables fail before mutation. These are
+explicit native ownership adaptations, not a full skeleton/bone-override manager.
+
+`--exercise-clips` is an optional deterministic qualification mode: it uses the
+actual Win32 controls for every loaded clip, checks pause/restart/loop/end states
+through Core, and records `clipCount`, `selectedClip` and `clipControlEvents` in
+smoke receipts. Normal interactive runs remain open until closed. Smoke frames
+retain their fixed delta; this mode is not a performance benchmark.
 
 The legacy service executable loads raw self-contained GLB2 files through `bl_loadGltf`, with
 arbitrary file paths and names. `--memory` exercises the same loader's raw byte-source
@@ -172,24 +219,39 @@ membership; no authored camera is instantiated or selected. The sandbox continue
 to use its native auto-framed orbit camera. Raw camera counts and attachment indices
 are retained, and malformed camera references or unsafe schema values still fail.
 
-This is an expanding common-static-model subset, **not full glTF support**.
+This is an expanding geometry/material/skin/TRS subset, **not full glTF support**.
 Broader valid-GLB compatibility remains the current priority; unsupported domains
 below are pending feature batches, not silently ignored or considered complete.
 The completion target is core glTF 2.0 plus Babylon.js 9.30.0 loader extension
-coverage, pinned at `b248b370267f13bfaf5b2a0f8fd525bad7c99b52`. Future animation
-support must retain all clips, autoplay the first and allow selection; the
-current executable does not yet implement animations.
+coverage, pinned at `b248b370267f13bfaf5b2a0f8fd525bad7c99b52`. Native clips retain
+all entries, autoplay the first and allow selection as described above.
 
-Skins, animation playback, morph targets, compressed geometry/images, external/data
-buffer or image URIs, unsupported vertex semantics, point/line
+Morph targets and weights animation, KHR_animation_pointer, LOD, skinned EXT
+instancing, compressed geometry/images, unsupported vertex semantics, point/line
 modes, quantization, other unsupported material extensions, and mirrored instancing scales
 produce explicit errors rather than dropping parts or substituting models.
 
 The existing runtime shader compiler and PBR/environment path are provisional.
-Pixel-perfect scene35 comparison, full camera features, and parser/compiler strategy
-selection are separate work, not claims made by this application.
+Pixel-perfect scene35 comparison and full camera features remain separate work.
+Shader-compiler strategy/performance work remains paused, not a claim made by
+this application. RenderDoc is optional test-only tooling, not a runtime dependency.
 
 ## Executed model checks
+
+Parent acceptance of the direct-cgltf skin/TRS batch ran every model in the
+supplied local acceptance folder through both URI and memory loading. Each route
+loads **19 of 35 models**, up from 16; the other 16 fail explicitly. All previous
+successes remain successful, and all 41 original model/sidecar files remain
+byte-identical. Per-model receipts and assets stay local, not in this repository.
+This is progress toward full loading coverage, not a claim that every valid GLB
+or Babylon.js extension is supported.
+
+The same acceptance independently exercised 18 actual animated GPU draws with
+draw-bound vertex/texture and post-VS readback, all four synthetic clips through
+the persistent native controls, and 107 existing static native GPU cases.
+Allocator failure/churn, legacy and feature-OFF routing, frozen ABI and mandatory
+Core style checks also pass. UI image receipts explicitly identify their own-window
+logical-composite capture method; they do not claim physical foreground capture.
 
 The same executable has displayed unchanged BoxTextured and
 BoxTexturedNonPowerOfTwo GLBs (embedded PNG, including non-power-of-two dimensions),

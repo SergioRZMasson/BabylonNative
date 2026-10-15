@@ -12,6 +12,14 @@ endif()
 target_compile_features(LiteSandbox PRIVATE cxx_std_20)
 target_compile_definitions(LiteSandbox PRIVATE UNICODE _UNICODE)
 if(BABYLON_LITE_ENABLE_GLTF)
+    add_executable(LiteAssetSkinAnimationTests ../AssetTests/SkinAnimation.cpp)
+    target_compile_features(LiteAssetSkinAnimationTests PRIVATE cxx_std_20)
+    target_include_directories(LiteAssetSkinAnimationTests PRIVATE
+        "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
+    target_link_libraries(LiteAssetSkinAnimationTests PRIVATE LiteLayer Babylon::LiteAssetJson bgfx)
+    warnings_as_errors(LiteAssetSkinAnimationTests)
+    add_test(NAME LiteAssetSkinAnimationTests COMMAND LiteAssetSkinAnimationTests
+        "${CMAKE_CURRENT_BINARY_DIR}/skin-animation-cpu.json")
     target_compile_definitions(LiteSandbox PRIVATE LITE_SANDBOX_NATIVE_GLTF=1)
 endif()
 target_link_libraries(LiteSandbox PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder bgfx
@@ -42,8 +50,19 @@ target_include_directories(LiteAssetDecoder4Tests PRIVATE "${PROJECT_SOURCE_DIR}
 target_compile_features(LiteAssetDecoder4Tests PRIVATE cxx_std_17)
 warnings_as_errors(LiteAssetDecoder4Tests)
 add_test(NAME LiteAssetDecoder4Tests COMMAND LiteAssetDecoder4Tests)
-# Paused raw-v6 skin fixtures are preserved, but are not an advertised service.
-# Native motion construction will qualify them against the private importer.
+if(BABYLON_LITE_ENABLE_GLTF)
+    find_path(LITE_TEST_RENDERDOC_INCLUDE renderdoc_app.h
+        HINTS "C:/Program Files/RenderDoc")
+    if(LITE_TEST_RENDERDOC_INCLUDE)
+        add_executable(LiteAssetSkinAnimationGpuTests ../AssetTests/GpuSkinAnimation.cpp AssetIO.cpp)
+        target_compile_features(LiteAssetSkinAnimationGpuTests PRIVATE cxx_std_20)
+        target_include_directories(LiteAssetSkinAnimationGpuTests PRIVATE
+            "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source" "${LITE_TEST_RENDERDOC_INCLUDE}")
+        target_link_libraries(LiteAssetSkinAnimationGpuTests PRIVATE LiteLayer LiteShaderCompiler
+            LiteAssetDecoder Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+        warnings_as_errors(LiteAssetSkinAnimationGpuTests)
+    endif()
+endif()
 add_executable(LiteAssetEmptyTests ../AssetTests/Empty.cpp)
 target_compile_features(LiteAssetEmptyTests PRIVATE cxx_std_20)
 target_include_directories(LiteAssetEmptyTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")

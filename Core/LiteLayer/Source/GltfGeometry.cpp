@@ -242,6 +242,11 @@ bl_Status l_gltfMesh(L_Gltf* gltf, L_Asset* asset, const cgltf_node* node,
             output = attribute->index ? &geometry.uvs2 : &geometry.uvs;
             components = 2;
         }
+        else if (attribute->type == cgltf_attribute_type_joints ||
+                 attribute->type == cgltf_attribute_type_weights)
+        {
+            continue;
+        }
         else
         {
             status = BL_UNSUPPORTED;
@@ -329,6 +334,11 @@ bl_Status l_gltfMesh(L_Gltf* gltf, L_Asset* asset, const cgltf_node* node,
     L_TRY(l_gltfMaterial(gltf, asset, primitive->material, &material));
     bl_MeshProperties2 properties = {material, {}, false};
     L_TRY(bl_setMeshProperties2(mesh, &properties));
+    L_TRY(l_gltfBindSkin(gltf, asset, node, primitive, (L_Mesh*)l_peek(runtime, mesh._id)));
+    if (node->skin)
+    {
+        parent = asset->root;
+    }
     L_TRY(instances(gltf, node, mesh));
     L_TRY(bl_appendNodeChild(parent, {runtime, mesh._id}));
     return bl_setNodeParent({runtime, mesh._id}, parent);

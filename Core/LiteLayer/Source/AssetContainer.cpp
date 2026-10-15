@@ -412,7 +412,7 @@ bl_Status l_generateAssetNormals(bl_Runtime* runtime, bl_MeshGeometry* geometry)
 static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t nodeIndex,
                            const bl_AssetPrimitive* primitive, bl_TransformNode parent,
                            const bl_ParsedGltf3* extended, const bl_ParsedGltf4* full,
-                           const bl_ParsedGltf5* materials, const bl_ParsedGltf6* motion)
+                           const bl_ParsedGltf5* materials)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     bl_MeshGeometry geometry = {};
@@ -422,11 +422,6 @@ static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t n
     for (size_t i = 0; i < primitive->attributeCount && status == BL_OK; ++i)
     {
         const bl_AssetAttribute* input = primitive->attributes + i;
-        bool joints = false;
-        if (motion && l_assetInfluence(input->semantic, &joints) >= 0)
-        {
-            continue;
-        }
         const bl_AssetAccessor* descriptor = data->accessors + input->accessor;
         authoredNormal |= l_name(input->semantic, "NORMAL");
         bl_F32Span* stream = l_name(input->semantic, "POSITION")     ? &geometry.positions
@@ -509,14 +504,6 @@ static bl_Status buildMesh(L_Asset* asset, const bl_ParsedGltf* data, uint32_t n
     bl_MeshProperties2 properties = {asset->materials[materialIndex], {}, false};
     L_TRY(bl_setMeshProperties2(mesh, &properties));
     L_TRY(setInstances(mesh, data, data->nodes + nodeIndex, full));
-    if (motion)
-    {
-        L_TRY(l_bindAssetSkin(asset, motion, nodeIndex, primitive, nativeMesh));
-        if (data->nodes[nodeIndex].skin.present)
-        {
-            parent = asset->root;
-        }
-    }
     L_TRY(bl_appendNodeChild(parent, {runtime, mesh._id}));
     return bl_setNodeParent({runtime, mesh._id}, parent);
 }
@@ -559,8 +546,7 @@ struct L_AssetBuildFrame
 
 static bl_Status buildNode(L_Asset* asset, const bl_ParsedGltf* data, uint32_t index,
                            bl_TransformNode parent, const bl_ParsedGltf3* extended,
-                           const bl_ParsedGltf4* full, const bl_ParsedGltf5* materials,
-                           const bl_ParsedGltf6* motion)
+                           const bl_ParsedGltf4* full, const bl_ParsedGltf5* materials)
 {
     bl_Runtime* runtime = asset->engine->runtime;
     size_t bytes;
@@ -595,7 +581,7 @@ static bl_Status buildNode(L_Asset* asset, const bl_ParsedGltf* data, uint32_t i
             for (size_t i = 0; i < mesh->primitiveCount && status == BL_OK; ++i)
             {
                 status = buildMesh(asset, data, frame->index, mesh->primitives + i, frame->node,
-                                   extended, full, materials, motion);
+                                   extended, full, materials);
             }
         }
         --depth;
@@ -648,23 +634,18 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
     bl_ParsedGltf3 extended = {};
     bl_ParsedGltf4 full = {};
     bl_ParsedGltf5 materialData = {};
-    bl_ParsedGltf6 motionData = {};
     bool version3 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_3;
     bool version4 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_4;
     bool version5 = runtime->assets.version == BL_ASSET_SERVICE_VERSION_5;
-    // Preserved paused motion WIP, not an advertised or functional legacy version6 route.
-    bool version6 = false;
-    bl_ParsedGltf5* workflows = version6 ? &motionData.document5 : version5 ? &materialData : NULL;
+    bl_ParsedGltf5* workflows = version5 ? &materialData : NULL;
     bl_ParsedGltf4* accessors = workflows ? &workflows->document4 : version4 ? &full : NULL;
     bl_ParsedGltf3* textures = accessors ? &accessors->document3 : version3 ? &extended : NULL;
     bl_ParsedGltf& parsed = textures ? textures->document : legacy;
-    parsed.structSize = version6   ? sizeof(motionData)
-                        : version5 ? sizeof(materialData)
+    parsed.structSize = version5   ? sizeof(materialData)
                         : version4 ? sizeof(full)
                         : version3 ? sizeof(extended)
                                    : sizeof(legacy);
-    parsed.version = version6   ? BL_ASSET_DOCUMENT_VERSION_6
-                     : version5 ? BL_ASSET_DOCUMENT_VERSION_5
+    parsed.version = version5   ? BL_ASSET_DOCUMENT_VERSION_5
                      : version4 ? BL_ASSET_DOCUMENT_VERSION_4
                      : version3 ? BL_ASSET_DOCUMENT_VERSION_3
                                 : BL_ASSET_DOCUMENT_VERSION;
@@ -682,8 +663,7 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
     }
     if (status == BL_OK)
     {
-        status = l_validateAsset(&parsed, &validationReason, textures, accessors, workflows,
-                                 version6 ? &motionData : NULL);
+        status = l_validateAsset(&parsed, &validationReason, textures, accessors, workflows);
     }
     if (status == BL_OK)
     {
@@ -762,16 +742,12 @@ bl_Status bl_loadGltf(bl_EngineContext handle, const bl_AssetSource* source, bl_
             }
         }
         uint32_t scene = parsed.defaultScene.present ? parsed.defaultScene.value : 0;
-        if (status == BL_OK && version6)
-        {
-            status = l_initAssetMotion(asset, &motionData);
-        }
         if (status == BL_OK && scene < parsed.sceneCount)
         {
             for (size_t i = 0; i < parsed.scenes[scene].rootCount && status == BL_OK; ++i)
             {
                 status = buildNode(asset, &parsed, parsed.scenes[scene].roots[i], asset->root,
-                                   textures, accessors, workflows, version6 ? &motionData : NULL);
+                                   textures, accessors, workflows);
             }
         }
         if (status == BL_OK)
