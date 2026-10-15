@@ -18,6 +18,16 @@ application-specialized compiler output or a smaller NativeEngine wrapper.
 - Current authority is Babylon Lite 1.32.0, source
   `2e064d88ec7422af946f8ec7f089ac6519f99295`. An intentional version upgrade
   must update the contract, provenance and parity tests together.
+- Before designing an implementation, trace the reached Babylon Lite TypeScript
+  bodies, shaders and callers at that pin. Preserve the original algorithms,
+  CPU/GPU execution placement, data formats, precision stages, update triggers
+  and resource lifecycle, not just the public API or a similar rendered image.
+  In particular, implement source GPU skinning on the GPU; a per-vertex CPU
+  substitute is not an equivalent implementation or an acceptable shortcut.
+- Native embedding adaptations and intentional source deviations require explicit
+  review and corresponding tests. Do not silently select a different algorithm
+  or execution path because it is easier to implement. Carry the original source
+  paths/functions and the reason for each necessary adaptation into the handoff.
 - Use bblitec declarations/API inventories as comparison evidence, not its
   generated or previously migrated engine bodies. Transpilation is permitted
   for **test/demo user code**, never the LiteLayer engine implementation.
@@ -29,7 +39,8 @@ application-specialized compiler output or a smaller NativeEngine wrapper.
   `bghgary/BabylonLiteNativePort` glTF loader may be reused/adapted as an
   investigation implementation base, with source provenance retained. This is
   not permission to copy an unrelated engine architecture or relax the Core
-  C-style, ownership and error rules.
+  C-style, ownership and error rules. It does not replace Babylon Lite as the
+  authority for skeleton, shader, animation or rendering behavior.
 - Preserve upstream license/provenance. Distinguish source-equivalent behavior
   from a necessary native embedding adaptation and an unsupported capability.
 
@@ -112,6 +123,9 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
 - Prefer the simplest correct helpers and explicit storage. No generic
   extensibility framework, unnecessary templates, hidden global service locator
   or speculative configuration surface.
+- Source fidelity does not relax these C++ restrictions: translate the original
+  algorithms into the approved free-function/POD form, rather than copying a
+  TypeScript class hierarchy into native engine classes.
 
 The CMake target's direct dependency guard accepts bgfx/bx, the explicit
 RmlUI feature targets when UI is enabled, and only the declared private cgltf

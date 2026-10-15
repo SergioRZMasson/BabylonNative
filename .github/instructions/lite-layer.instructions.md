@@ -14,6 +14,12 @@ The approved optional RmlUI feature may implement required private C++ interface
 under the narrow exception documented in the canonical policy. Preserve
 original TypeScript behavior, ownership, error handling
 and API compatibility. Follow local clang-format/semantic style checks.
+Trace the pinned Babylon Lite bodies and shaders before design; preserve its
+CPU/GPU execution placement as well as its algorithms. GPU skinning must remain
+GPU skinning. bblitec and prototypes are comparison/reuse evidence under the
+canonical exceptions, not replacement behavior authorities. Necessary native
+adaptations require explicit review and tests; source fidelity never relaxes
+the C-style C++ restrictions.
 
 Keep NAPI, native platform/input, user-language runtime/GC and runtime WGSL compiler
 dependencies outside LiteLayer. Implement only measured, parity-tested
