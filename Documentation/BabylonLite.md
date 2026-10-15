@@ -22,6 +22,16 @@ are carried by the static target.
 
 ### Current priority: broad native GLB compatibility
 
+User integration decision, 2026-10-14: reuse/adapt Gary's
+`bghgary/BabylonLiteNativePort` cgltf loader to save implementation work.
+cgltf is allowed as a private Core loader dependency. The importer may read the
+glTF/glb data and create native objects/GPU resources directly; repeated raw
+descriptor-protocol expansion is not an architectural requirement. Existing
+raw services/API compatibility, native resource ownership, strict Core coding
+and host IO/codecs remain intact. Preserve ongoing skinning/animation work and
+qualify the integration against the same complete local corpus without copying,
+mutating or uploading its assets. Shader investigation remains paused.
+
 User decision, 2026-10-14: focus **100% on GLB loading implementation** and do
 not resume shader-compilation investigation until broad valid-GLB loading is
 complete. The implemented static-model subset below is a starting milestone,

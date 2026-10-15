@@ -9,6 +9,9 @@ engine conventions: one C99 `babylon_lite.h`, handwritten C-style C++ free
 functions/POD, no STL or engine classes, bgfx/bx plus the explicitly approved
 optional RmlUI feature and narrow mandatory-interface adapter exception,
 explicit ownership/errors, and the local enforced Allman/braced style.
+The user-approved private cgltf importer/Gary glTF-loader reuse exception is
+defined in the canonical policy. It allows parsing-to-native-resource loading,
+not parser types in the public API or a general Core architecture rewrite.
 
 Preserve the reviewed API and original TypeScript semantics. Do not copy
 NativeEngine or generated bblitec engine implementations. Keep shader-compiler dependencies, native platform/input, NAPI and user-language

@@ -25,6 +25,11 @@ application-specialized compiler output or a smaller NativeEngine wrapper.
   classes, the rejected first attempt, or a teammate's prototype internals.
   Project organization and formatting follow BabylonNative; engine design
   follows Babylon Lite's functional/data-oriented principles.
+- User-approved loader exception (2026-10-14): Gary's
+  `bghgary/BabylonLiteNativePort` glTF loader may be reused/adapted as an
+  investigation implementation base, with source provenance retained. This is
+  not permission to copy an unrelated engine architecture or relax the Core
+  C-style, ownership and error rules.
 - Preserve upstream license/provenance. Distinguish source-equivalent behavior
   from a necessary native embedding adaptation and an unsupported capability.
 
@@ -47,12 +52,20 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
   Private use of bgfx/bx's own API types and necessary stack temporaries is
   allowed; do not memset an unconstructed nontrivial C++ object.
 - **bgfx and bx**, plus optional **RmlUI for UI support**, are the approved
-  direct third-party dependencies. Standard C headers,
+  direct third-party dependencies. User-approved **private cgltf for the glTF
+  loader** is a narrow additional exception, not a public parser API.
+  Standard C headers,
   libc and basic C++ language facilities are allowed. The pinned bx headers
   require C++20; that does not justify a modern C++ framework.
 - No NAPI/JS VM, SDL, WebGPU/Dawn renderer, Windows platform calls, image/audio
-  codec library, cgltf, Tint, glslang or SPIRV-Cross inside LiteLayer.
+  codec library, Tint, glslang or SPIRV-Cross inside LiteLayer.
   bgfx's own transitive dependencies do not permit direct Core use of them.
+- The private cgltf exception permits direct glTF/glb parsing and native
+  object/GPU-resource construction in the importer, using the engine's existing
+  resource APIs and lifecycle. Keep cgltf types out of `babylon_lite.h`, declare
+  and pin the dependency, preserve its MIT notice, and keep platform IO/image
+  decoding behind existing host services. Do not silently adopt Gary's geometry
+  flattening, first-material-only, recenter/rescale or missing-image fallbacks.
 - User-approved JSON storage (2026-10-09): unmodified nlohmann_json 3.12.0 and
   its MIT license are vendored at `json/json.hpp` and `json/LICENSE`, using the
   pinned glTF-SDK reference recorded in `json/README.md`. This is a storage
@@ -63,6 +76,8 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
 - Runtime shader compilation, native windows/input/files/image decoding,
   audio output and user-language containers/GC stay in **separate** components.
   Host services cross a narrow C-compatible callback/data boundary.
+  The private cgltf importer above is the explicit parsing exception; old raw
+  services remain compatible but are not a required new protocol per feature.
 - User-approved change (2026-10-07): RmlUI and its bgfx backend live **inside
   LiteLayer**, rather than a separate UI target. Keep UI as an explicit,
   optional feature with isolated implementation files. A data-only consumer
@@ -98,8 +113,9 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
   extensibility framework, unnecessary templates, hidden global service locator
   or speculative configuration surface.
 
-The CMake target's direct dependency guard accepts bgfx/bx and only the explicit
-RmlUI feature targets when UI is enabled. The separate shader compiler must not
+The CMake target's direct dependency guard accepts bgfx/bx, the explicit
+RmlUI feature targets when UI is enabled, and only the declared private cgltf
+target when the native importer is enabled. The separate shader compiler must not
 become a transitive LiteLayer link requirement. Native UI rendering may invoke
 the existing injected runtime shader service without linking that compiler.
 
@@ -303,6 +319,14 @@ cache/direct-Tint adoption, compiler-closure optimization or shader benchmarking
 Use the current working production shader service provisionally. Material WGSL
 and interface changes strictly necessary to implement a GLB feature are loader
 implementation, not permission to restart compiler research.
+
+Current loader integration direction (user decision, 2026-10-14): adapt Gary's
+cgltf-based end-to-end loader to save implementation work, with cgltf allowed
+directly in the private Core importer. Stop growing raw DTO protocols merely
+to translate a parser's data into another representation. Preserve already
+working features, native animation/skinning math, public API compatibility and
+all historical artifacts while qualifying this path on the complete local
+acceptance corpus. Private user assets stay local and unchanged.
 
 Load raw files/bytes at runtime without asset-name/hash/count specialization or
 regeneration, and use the native sandbox for varied-model testing. Record exact

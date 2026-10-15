@@ -20,5 +20,9 @@ dependencies outside LiteLayer. Implement only measured, parity-tested
 performance improvements; do not copy NativeEngine/generated engine bodies or
 remove required work to improve a benchmark. Read the canonical policy for the
 complete test, lifecycle, shader, performance and handoff requirements.
+The canonical policy also permits the user-approved private cgltf importer and
+adaptation of Gary's glTF loader for this investigation. Preserve C-style Core,
+public API/lifetime behavior and host IO/codec boundaries; a new raw DTO version
+per loader feature is not required.
 RmlUI layout and its bgfx rendering backend are inside the isolated UI feature;
 bgfx remains the single GPU renderer and presenter.
