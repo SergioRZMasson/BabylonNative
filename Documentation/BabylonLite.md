@@ -21,7 +21,16 @@ are carried by the static target.
 
 ## Components
 
-### Current priority: broad native GLB compatibility
+### Current priority: API scene coverage (2026-11-02)
+
+The current priority is the API surface exercised by the bblitec corpus, with
+native and JS hosts, registry-threshold pixel tests and paired performance
+evidence. The opt-in [LiteScenes M0 harness](../Apps/LiteTests/LiteScenes/README.md)
+hosts fourteen additional workloads without engine JavaScript or private Core
+headers. M0 remains incomplete: failed golden gates and missing native
+projection contracts are reported explicitly, not counted as coverage.
+
+### Native GLB compatibility (previous priority)
 
 User integration decision, 2026-10-14: reuse/adapt Gary's
 `bghgary/BabylonLiteNativePort` cgltf loader to save implementation work.

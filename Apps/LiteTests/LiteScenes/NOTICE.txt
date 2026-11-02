@@ -1,0 +1,8 @@
+Scene-user-code ports and WGSL derive from Babylon Lite (Apache-2.0).
+Workload source: BabylonJS/Babylon-Lite
+286525f8041dd9adc72b2c9962e8bff4d9aeb764, lab/lite/src/lite/scene*.ts
+and lab/lite/src/_shared/hpm-jitter-scene.ts.
+Behavioral authority: 2e064d88ec7422af946f8ec7f089ac6519f99295 (Lite 1.32.0).
+The Apache-2.0 license is retained at Core/LiteLayer/LICENSE.txt.
+Original scripts are verified/copied only into the ignored build directory.
+Model assets are not included in this source directory.

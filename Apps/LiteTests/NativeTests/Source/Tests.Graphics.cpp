@@ -257,6 +257,20 @@ namespace
     };
 }
 
+TEST_F(LiteNativeGraphics, ClearColorUsesGpuUnormNearestEven)
+{
+    bl_SceneProperties properties{};
+    ASSERT_EQ(bl_getSceneProperties(scene, &properties), BL_OK);
+    properties.camera = {};
+    properties.clearColor = {0.3, 0.7, 0.1, 0.5};
+    ASSERT_EQ(bl_setSceneProperties(scene, &properties), BL_OK);
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 0), BL_OK);
+    ASSERT_TRUE(Readback());
+    const std::array<uint8_t, 4> expected{76, 178, 26, 128};
+    EXPECT_EQ(Center(), expected);
+}
+
 TEST_F(LiteNativeGraphics, OriginalArcHemisphericStandardUsesRuntimeWGSLAndRealPixels)
 {
     bl_ArcRotateCamera camera{};

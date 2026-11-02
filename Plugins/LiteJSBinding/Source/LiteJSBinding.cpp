@@ -41,7 +41,8 @@ namespace Babylon::Plugins::LiteJSBinding
             AssetContainer,
             PbrMaterial,
             Environment,
-            TextureCube
+            TextureCube,
+            AnimationGroup
         };
 
         struct Token
@@ -2232,6 +2233,67 @@ namespace Babylon::Plugins::LiteJSBinding
                     result.Set(n, s.WrapNode(i.Env(), entities.data[n]));
                 return result;
             });
+            Bind(api, state, "getAssetContainerAnimationGroups",
+                 [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                     bl_AnimationGroups groups{};
+                     s.Check(i.Env(), bl_getAssetContainerAnimationGroups(
+                                          s.HandleOf<bl_AssetContainer>(i[0], Kind::AssetContainer),
+                                          &groups));
+                     auto result = Napi::Array::New(i.Env(), groups.count);
+                     for (uint32_t n = 0; n < groups.count; ++n)
+                     {
+                         result.Set(n, s.Wrap(i.Env(), groups.data[n], Kind::AnimationGroup));
+                     }
+                     return result;
+                 });
+            Bind(api, state, "getAnimationGroupInfo",
+                 [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                     bl_AnimationGroupInfo info{};
+                     s.Check(i.Env(),
+                             bl_getAnimationGroupInfo(
+                                 s.HandleOf<bl_AnimationGroup>(i[0], Kind::AnimationGroup), &info));
+                     auto result = Napi::Object::New(i.Env());
+                     result.Set("name",
+                                Napi::String::New(i.Env(), info.name.data, info.name.length));
+                     result.Set("duration", info.duration);
+                     result.Set("frameRate", info.frameRate);
+                     result.Set("currentTime", info.currentTime);
+                     result.Set("speedRatio", info.speedRatio);
+                     result.Set("isPlaying", info.isPlaying);
+                     result.Set("loopAnimation", info.loopAnimation);
+                     result.Set("isStopped", info.isStopped);
+                     result.Set("targetedAnimationCount",
+                                static_cast<double>(info.targetedAnimationCount));
+                     return result;
+                 });
+            Bind(api, state, "playAnimation", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_playAnimation(
+                                     s.HandleOf<bl_AnimationGroup>(i[0], Kind::AnimationGroup)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "pauseAnimation", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_pauseAnimation(
+                                     s.HandleOf<bl_AnimationGroup>(i[0], Kind::AnimationGroup)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "stopAnimation", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_stopAnimation(
+                                     s.HandleOf<bl_AnimationGroup>(i[0], Kind::AnimationGroup)));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "goToFrame", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(),
+                        bl_goToFrame(s.HandleOf<bl_AnimationGroup>(i[0], Kind::AnimationGroup),
+                                     i[1].As<Napi::Number>().DoubleValue()));
+                return i.Env().Undefined();
+            });
+            Bind(api, state, "setAnimationPlayback", [](State& s, const Napi::CallbackInfo& i) {
+                s.Check(i.Env(), bl_setAnimationPlayback(
+                                     s.HandleOf<bl_AnimationGroup>(i[0], Kind::AnimationGroup),
+                                     i[1].As<Napi::Number>().DoubleValue(),
+                                     i[2].As<Napi::Boolean>().Value()));
+                return i.Env().Undefined();
+            });
             Bind(api, state, "disposeAssetContainer", [](State& s, const Napi::CallbackInfo& i) {
                 s.Check(i.Env(), bl_disposeAssetContainer(s.HandleOf<bl_AssetContainer>(i[0], Kind::AssetContainer)));
                 return i.Env().Undefined();
@@ -2693,6 +2755,27 @@ namespace Babylon::Plugins::LiteJSBinding
             const auto source = Options(i[1]);
             const bl_EngineOptions options{OptionalBool(source, "useHighPrecisionMatrix")};
             auto native = s.options.nativeEngine;
+            if (source.Has("msaaSamples") && !source.Get("msaaSamples").IsUndefined() &&
+                source.Get("msaaSamples").As<Napi::Number>().DoubleValue() !=
+                    native.target.sampleCount)
+            {
+                s.Check(i.Env(), BL_UNSUPPORTED);
+            }
+            if (source.Has("requiredLimits") && !source.Get("requiredLimits").IsUndefined() &&
+                source.Get("requiredLimits").As<Napi::Object>().GetPropertyNames().Length() != 0)
+            {
+                s.Check(i.Env(), BL_UNSUPPORTED);
+            }
+            if (source.Has("maxDevicePixelRatio") &&
+                !source.Get("maxDevicePixelRatio").IsUndefined())
+            {
+                s.Check(i.Env(), BL_UNSUPPORTED);
+            }
+            if (source.Has("useFloatingOrigin") && !source.Get("useFloatingOrigin").IsUndefined() &&
+                source.Get("useFloatingOrigin").As<Napi::Boolean>().Value())
+            {
+                s.Check(i.Env(), BL_UNSUPPORTED);
+            }
             if (i[0].IsObject())
             {
                 const auto canvas = i[0].As<Napi::Object>();

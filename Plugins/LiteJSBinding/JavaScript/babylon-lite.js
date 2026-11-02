@@ -180,13 +180,22 @@ function camera(handle) {
 }
 
 export async function createEngine(canvas, options) {
+    if (options?.useFloatingOrigin) {
+        throw new Error("Floating origin is outside the current native contract.");
+    }
     const engine = native.createEngine(canvas, options);
     globalThis._platformAttachUi?.(engine);
     return identity(engine, (object, handle) => {
         for (const name of ["drawCallCount", "gpuFrameTimeMs"]) {
             field(object, name, () => native.getEngineStats(handle)[name]);
         }
-
+        // Creation-time C99 options have no mutation operation in the reviewed ABI.
+        const precision = options?.useHighPrecisionMatrix ?? false;
+        field(object, "useHighPrecisionMatrix", () => precision, value => {
+            if (value !== precision) {
+                throw new Error("Changing native matrix precision after creation is unsupported.");
+            }
+        });
     });
 }
 
@@ -255,8 +264,37 @@ export async function loadGltf(engine, source) {
     return identity(native.loadGltf(token(engine), source), (object, handle) => {
         const entities = native.getAssetContainerEntities(handle).map(node);
         field(object, "entities", () => entities);
+        const groups = native.getAssetContainerAnimationGroups(handle)
+            .map(value => animationGroup(value, object));
+        field(object, "animationGroups", () => groups.length ? groups : undefined);
     });
 }
+
+const animationOwners = new WeakMap();
+function animationGroup(handle, container) {
+    return identity(handle, (object, value) => {
+        animationOwners.set(object, container);
+        for (const name of ["name", "duration", "frameRate", "currentTime", "isPlaying", "_stopped"]) {
+            field(object, name, () => native.getAnimationGroupInfo(value)[
+                name === "_stopped" ? "isStopped" : name],
+                name === "currentTime" || name === "isPlaying" ? () => {
+                    throw new Error(`Direct animation ${name} writes are outside the current native contract.`);
+                } : undefined);
+        }
+        for (const name of ["speedRatio", "loopAnimation"]) {
+            field(object, name, () => native.getAnimationGroupInfo(value)[name], next => {
+                const state = native.getAnimationGroupInfo(value);
+                native.setAnimationPlayback(value, name === "speedRatio" ? next : state.speedRatio,
+                    name === "loopAnimation" ? next : state.loopAnimation);
+            });
+        }
+    });
+}
+
+export const playAnimation = group => native.playAnimation(token(group));
+export const pauseAnimation = group => native.pauseAnimation(token(group));
+export const stopAnimation = group => native.stopAnimation(token(group));
+export const goToFrame = (group, frame, _engine) => native.goToFrame(token(group), frame);
 
 export async function loadEnvironment(scene, url, options) {
     const result = identity(native.loadEnvironment(token(scene), url, options));
@@ -521,6 +559,7 @@ export function removeFromScene(scene, entity) {
     sceneEntities.set(scene, sceneEntities.get(scene).filter(value => value !== entity));
 }
 export const setSubtreeVisible = (entity, visible) => native.setSubtreeVisible(token(entity), visible);
+export const setMeshVisible = setSubtreeVisible;
 export const onBeforeRender = (scene, callback) => native.onBeforeRender(token(scene), callback);
 export const onSceneDispose = (scene, callback) => native.onSceneDispose(token(scene), callback);
 export const removeSceneCallback = (scene, callback) => native.removeSceneCallback(token(scene), callback);

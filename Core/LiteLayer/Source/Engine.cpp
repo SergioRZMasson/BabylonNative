@@ -1272,7 +1272,15 @@ static uint8_t colorByte(double d)
     {
         d = 1;
     }
-    return (uint8_t)(d * 255 + .5);
+    // The packed bgfx clear path must retain the source GPU's UNORM tie-to-even conversion.
+    double scaled = d * 255;
+    uint32_t lower = (uint32_t)scaled;
+    double fraction = scaled - lower;
+    if (fraction > .5 || (fraction == .5 && (lower & 1)))
+    {
+        ++lower;
+    }
+    return (uint8_t)lower;
 }
 
 static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delta, uint16_t viewId,
