@@ -98,6 +98,25 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
   native Basis dependency needs a separate review. Codecs stay in host/decoder
   components outside Core, per the rule above. Re-sync with upstream master
   before adding codec work so the pins are current.
+- User approval (2026-11-02): milestone M12 third-party dependencies are
+  approved: a native Basis Universal transcoder, a physics engine and
+  Recast/Detour navigation (plus the shared Draco/meshopt/WebP above). They
+  must be **isolated and replaceable**, because other open-source libraries may
+  be chosen later:
+  - Each library sits behind one narrow C-compatible provider interface owned
+    by Lite (e.g. texture transcoder, physics, navigation), in its own optional
+    component/CMake target. No library types, headers or handles appear in
+    `babylon_lite.h`, Core, the JS projection or tests outside that provider.
+  - Core and JS call only the provider interface, which models the original
+    Babylon Lite API semantics (e.g. the Havok-based physics contract), not the
+    chosen library's API. A missing provider fails explicitly.
+  - Swapping a library means writing a new provider implementation against the
+    same interface and conformance tests; nothing else changes. Pin each
+    library in one place, keep its license/notice, and build it only when its
+    feature option is enabled.
+  - Physics: original Lite uses Havok. An open-source engine (bblitec uses
+    Bullet) will not reproduce Havok trajectories exactly; label such scenes as
+    solver comparisons, never weaken parity thresholds to hide it.
 - User-approved change (2026-10-07): RmlUI and its bgfx backend live **inside
   LiteLayer**, rather than a separate UI target. Keep UI as an explicit,
   optional feature with isolated implementation files. A data-only consumer
