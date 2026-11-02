@@ -230,6 +230,46 @@ Do not disable the checks or bypass them with formatting-off markers.
 
 ## 6. Runtime WGSL compiler boundary
 
+### 6.1 Shader compilation strategy (user decision, 2026-11-02)
+
+Decided after the shader-compilation investigation (full PBR variant study,
+BabylonJS/ThePirateCove#1979). These are product decisions, not open research:
+
+1. **Default: runtime WGSL compilation.** Babylon Lite Native compiles the
+   original WGSL at runtime, exactly as Babylon Lite composes it. The default
+   build links the shader service and supports arbitrary runtime WGSL
+   (materials, custom shaders, plugins, post-processes).
+2. **Default compiler route: Tint directly to the platform shader.** The
+   default build uses Tint's own backend writers to translate WGSL directly to
+   the platform shader language (HLSL for D3D, MSL for Metal, GLSL/ESSL for
+   OpenGL, SPIR-V for Vulkan); the platform toolchain then produces the bgfx
+   container. The current production service still uses the earlier
+   WGSL → Tint SPIR-V → SPIRV-Cross HLSL → FXC bridge and supports D3D11 only.
+   Migrate it to the direct Tint route as a reviewed change that keeps
+   reflection, uniform packing, stage linking, error and release behavior.
+   Prove equivalence with the existing shader-service tests and real GPU
+   readback before removing the bridge. Do not change dependency pins during
+   unrelated feature work.
+3. **Future work: offline compilation and compiler-free builds.** Users will be
+   able to precompile shaders offline and ship a Babylon Lite Native binary
+   without the shader compiler. Keep the public contract compatible with that:
+   compiled containers, reflection and link data stay behind the injected
+   service boundary, and Core never depends on a compiler being present.
+   A compiler-free build must fail explicitly on a cache miss, never substitute
+   a different shader. Not to be implemented now.
+4. **Future work: shader-cache capture.** Users will be able to run their
+   application with a recording shader cache that captures every requested
+   variant (key + exact WGSL + compile settings), so those variants can be
+   compiled offline for item 3. Not to be implemented now.
+
+Investigation evidence: the full PBR shader has at least 611,072 fragment
+variants (about 6.16 GiB on D3D11), so precompiling every variant is not
+practical. Precompiled banks are only viable for a declared, restricted
+application domain, which is why they are opt-in. Do not restart compiler
+strategy research without a new user decision.
+
+### 6.2 Runtime service rules
+
 - Keep arbitrary runtime WGSL support through the injected C99 shader service.
   Offline baking is future/optional work, not a replacement for this requirement.
 - Core manually constructs the original material prelude, declaration order,
@@ -246,9 +286,9 @@ Do not disable the checks or bypass them with formatting-off markers.
   including failures and partial/empty results.
 - Byte containers, service tables and userdata have explicit ownership.
   No compiler dependency or native shader format leaks into the public contract.
-- A direct Tint HLSL path is a separate compiler experiment needing equivalent
-  reflection/packing/link/error tests, not permission to copy a fragile text
-  bridge or change dependency pins during an engine rewrite.
+- The direct Tint route (6.1 item 2) needs equivalent reflection/packing/
+  link/error tests before it replaces the current bridge. It does not permit
+  copying a fragile text bridge or changing dependency pins during an engine rewrite.
 
 ## 7. Performance rules based on measurements
 
@@ -311,8 +351,22 @@ For measurements and interaction with host agents:
 
 ## 8. Test-driven implementation and rewrite workflow
 
-Current priority (user decision, 2026-10-14): **focus 100% on native GLB loading
-implementation until broad valid-GLB compatibility is complete**. The minimum
+Current priority (user decision, 2026-11-02): **cover the Babylon Lite API
+surface exercised by the bblitec test scenes**. For each missing API:
+
+- Implement it natively in LiteLayer, following this policy and the original
+  Babylon Lite 1.32.0 bodies/shaders.
+- Implement its JS projection.
+- Measure it against the bblitec implementation of the same scene. Native must
+  be equal or faster; record matched measurements (section 7 rules).
+- Document it and add tests. Test coverage should progressively match bblitec's
+  scene coverage, with the added requirement of equal or better performance.
+
+GLB loading remains supported and must not regress, but it is no longer the sole
+focus. The GLB notes below still apply to loader work.
+
+Previous priority (user decision, 2026-10-14): native GLB loading
+implementation until broad valid-GLB compatibility is complete. The minimum
 static-model loader and visible drag-and-drop sandbox are implemented, not the
 finish line. Expand real material, geometry/accessor, resource, deformation,
 animation, compression and extension coverage in separately reviewed feature
@@ -328,11 +382,9 @@ review additions/adaptations explicitly. The sandbox must load every animation
 clip, automatically play the first clip and provide clip selection; these are
 requirements to implement, not already-completed capabilities.
 
-All shader-compilation strategy investigation is paused: no compiler comparison,
-cache/direct-Tint adoption, compiler-closure optimization or shader benchmarking.
-Use the current working production shader service provisionally. Material WGSL
-and interface changes strictly necessary to implement a GLB feature are loader
-implementation, not permission to restart compiler research.
+The shader-compilation strategy is decided (section 6.1). Material WGSL and
+interface changes strictly necessary to implement a feature are feature work,
+not permission to restart compiler research.
 
 Current loader integration direction (user decision, 2026-10-14): adapt Gary's
 cgltf-based end-to-end loader to save implementation work, with cgltf allowed

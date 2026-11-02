@@ -22,7 +22,9 @@ adaptations require explicit review and tests; source fidelity never relaxes
 the C-style C++ restrictions.
 
 Keep NAPI, native platform/input, user-language runtime/GC and runtime WGSL compiler
-dependencies outside LiteLayer. Implement only measured, parity-tested
+dependencies outside LiteLayer. Runtime WGSL compilation is the default, using
+Tint directly to the platform shader; offline compilation and shader-cache
+capture are future work (canonical policy section 6.1). Implement only measured, parity-tested
 performance improvements; do not copy NativeEngine/generated engine bodies or
 remove required work to improve a benchmark. Read the canonical policy for the
 complete test, lifecycle, shader, performance and handoff requirements.

@@ -23,6 +23,12 @@ runtime services outside Core. RmlUI layout and its bgfx backend are the
 user-approved isolated UI feature inside LiteLayer.
 
 Use test-driven changes and the measured performance priorities in the policy.
+Shader compilation strategy is decided (policy section 6.1): runtime WGSL
+compilation by default, with Tint translating directly to the platform shader;
+offline compilation/compiler-free builds and shader-cache capture are future
+work. Current priority (policy section 8): cover the API surface exercised by
+the bblitec test scenes with native + JS projection implementations, tests,
+and measured performance equal to or better than bblitec.
 Do not infer speedup from a shorter Core-only timer, skip required work, weaken
 checks or treat stale/empty evidence as passing. Public API/architecture changes
 require review. Follow this policy in any same-task handoff to another agent.
