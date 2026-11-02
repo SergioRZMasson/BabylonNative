@@ -10,9 +10,19 @@ endif()
 
 file(STRINGS "${BGFX_DIR}/tools/shaderc/shaderc.cpp" LITE_BGFX_SHADER_VERSION_LINE
     REGEX "^#define BGFX_SHADER_BIN_VERSION ")
-if(NOT LITE_BGFX_SHADER_VERSION_LINE MATCHES "BGFX_SHADER_BIN_VERSION 12$")
-    message(FATAL_ERROR "LiteShaderCompiler requires the declared bgfx shader container v12 dependency, not an older reused cache.")
+if(NOT LITE_BGFX_SHADER_VERSION_LINE MATCHES "BGFX_SHADER_BIN_VERSION 13$")
+    message(FATAL_ERROR "LiteShaderCompiler requires the declared bgfx pin (shaderc container v13), not an older reused cache.")
 endif()
+
+# The service emits container v12. bgfx v13 only changed how shaderc records HLSL
+# samplers; the D3D11 reader parses v12 and v13 identically. Fail if a reader
+# gains a version-13 branch so the emitted format is re-reviewed.
+foreach(LITE_BGFX_READER IN ITEMS "src/bgfx_p.h" "src/renderer_d3d11.cpp")
+    file(STRINGS "${BGFX_DIR}/${LITE_BGFX_READER}" LITE_BGFX_V13_BRANCH REGEX "isShaderVerLess\\([^,]+, *1[3-9]")
+    if(LITE_BGFX_V13_BRANCH)
+        message(FATAL_ERROR "bgfx ${LITE_BGFX_READER} parses shader containers differently from v13; review the emitted v12 format.")
+    endif()
+endforeach()
 
 # bgfx's trimmed Tint snapshot lacks the WGSL reader. Use the complete public
 # compiler at the same pin as the test application's independent Tint reference.

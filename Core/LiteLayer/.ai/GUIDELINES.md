@@ -89,6 +89,15 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
   Host services cross a narrow C-compatible callback/data boundary.
   The private cgltf importer above is the explicit parsing exception; old raw
   services remain compatible but are not a required new protocol per feature.
+- User decision (2026-11-02): compressed-asset codecs (Draco, meshopt, Basis,
+  WebP) must **share the dependencies Babylon Native already declares**
+  whenever possible: google/draco and meshoptimizer at the root
+  `CMakeLists.txt` pins (used by `NativeDraco`/`NativeMeshopt`) and WebP
+  through bimg's decoder. Do not add a second copy or different pin. Upstream
+  has no native Basis transcoder (it runs Babylon.js's transcoder in JS), so a
+  native Basis dependency needs a separate review. Codecs stay in host/decoder
+  components outside Core, per the rule above. Re-sync with upstream master
+  before adding codec work so the pins are current.
 - User-approved change (2026-10-07): RmlUI and its bgfx backend live **inside
   LiteLayer**, rather than a separate UI target. Keep UI as an explicit,
   optional feature with isolated implementation files. A data-only consumer

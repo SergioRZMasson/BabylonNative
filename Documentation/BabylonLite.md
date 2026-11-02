@@ -663,11 +663,13 @@ ctest --test-dir build\lite-c99\integration -C Release -R Lite --output-on-failu
 ```
 
 Use the Visual Studio developer environment in the same command process when
-using Ninja. Source-cache overrides must match the declared dependency pins:
-bgfx.cmake `b53236f4d6dede3252d32b9c11921d0007d705d1` (bgfx
-`cb0c6d0c6133d123989aaae10cbd35fa139cb648`) and SPIRV-Cross
-`7c8705749fc1e234119c20695f82179b30d90914`. Older bgfx caches use a different
-public API and v11 containers and cannot validate this integration.
+using Ninja. `NAPI_JAVASCRIPT_ENGINE=V8` is required for the JavaScript hosts;
+upstream's Win32 default is Chakra, which cannot parse the Lite scripts.
+bgfx.cmake is vendored under `Dependencies\bgfx.cmake` (bgfx
+`5a0a89260aa1affd336707bb935282249e7bf72f`, shaderc container v13). The
+LiteLayer shader service emits container v12, which this bgfx's D3D11 reader
+parses identically; the configure step fails if a reader gains a v13-specific
+branch. Source-cache overrides must match the declared dependency pins.
 `BABYLON_LITE_TINT_LIBRARY_DIR` optionally imports Release Tint compiler
 libraries, with `FETCHCONTENT_SOURCE_DIR_LITETINT` at the declared source pin.
 

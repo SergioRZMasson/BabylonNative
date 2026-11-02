@@ -2,6 +2,12 @@ if(NOT WIN32 OR WINDOWS_STORE)
     message(FATAL_ERROR "The initial LitePlayground host currently supports Win32.")
 endif()
 
+# Lite JavaScript and test scripts use modern syntax that Chakra rejects at parse
+# time. Upstream's Win32 default engine is Chakra, so require an explicit choice.
+if(NAPI_JAVASCRIPT_ENGINE STREQUAL "Chakra")
+    message(FATAL_ERROR "LitePlayground requires V8; configure with -DNAPI_JAVASCRIPT_ENGINE=V8.")
+endif()
+
 set(SOURCES
     "Source/App.cpp"
     "Source/NativePlatform.h"
