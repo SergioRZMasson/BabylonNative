@@ -257,7 +257,9 @@ Do not disable the checks or bypass them with formatting-off markers.
   (`BGFX_SAMPLER_*_ANISOTROPIC`) with the device-wide maximum set to the value
   the original requests (4 in the current scenes). Do not patch bgfx for
   per-sampler limits. Record requested versus effective anisotropy; a scene
-  needing different per-sampler maxima remains a documented gap.
+  needing different per-sampler maxima remains a documented gap. bgfx's switch
+  is global 1x/16x only, so 4x is not reachable; scenes 249/257 are a recorded
+  known gap (user decision, 2026-11-02), not a reason to patch bgfx.
 - Audio Core manages original routing/volume/ramp/retry semantics over actual
   host primitives. No host means explicit unavailability; offline output is
   not a claim of audibility.

@@ -28,13 +28,14 @@ unexpected pixel pass. Mean/P95 steady-state frame ratios alone determine
 performance acceptance under the approved M0 policy. Startup and unavailable
 GPU/latency remain separate reported observations.
 
-**Newly verified anisotropy blocker:** the pinned bgfx API has no numeric
-device-wide maximum setter. `BGFX_RESET_MAXANISOTROPY` chooses1 or16 on D3D11,
-not the requested4. A16x-only capture control still fails scene249's foreground
-gate(.11610 vs .05); the4x-only control passes(.00994). No SDK macro override,
-sampler interception, vendor edit or threshold relaxation is applied. Selecting
-exact4 requires a reviewed numeric global-cap extension to bgfx, not a fictional
-existing option. The default effective maximum therefore remains1.
+**Known anisotropy gap (scenes 249 and 257):** the pinned bgfx API has no numeric
+device-wide maximum setter. `BGFX_RESET_MAXANISOTROPY` chooses 1 or 16 on D3D11,
+not the requested 4. A 16x-only capture control still fails scene 249's foreground
+gate (.11610 vs .05); the 4x-only control passes (.00994). The user chose to record
+this as a known gap rather than patch bgfx (2026-11-02). Both parity tests keep
+their thresholds and are marked `WILL_FAIL` with the `known-gap` label, so they
+start failing once parity passes and the gap must be revisited. The default
+effective maximum remains 1.
 
 Final executed tables, paired Minecraft regression and commands are retained
 under `api-coverage-batch1-v1\approved-final-v4`. Earlier sections below remain

@@ -69,6 +69,13 @@ foreach(_language IN ITEMS Native Js)
                 ${_parity_expectation})
         set_tests_properties(LiteScenes${_language}-${_id} PROPERTIES
             RUN_SERIAL TRUE TIMEOUT 180 LABELS "LiteScenes;parity")
+        if(_id EQUAL 249 OR _id EQUAL 257)
+            # Known gap (user decision 2026-11-02): the original requests 4x anisotropy but
+            # bgfx only offers a global 1x/16x switch. Thresholds are unchanged; WILL_FAIL
+            # makes this test fail once parity starts passing so the gap is revisited.
+            set_tests_properties(LiteScenes${_language}-${_id} PROPERTIES
+                WILL_FAIL TRUE LABELS "LiteScenes;parity;known-gap")
+        endif()
     endforeach()
 endforeach()
 add_test(NAME LiteScenesProjectionForwarding COMMAND LiteScenesJs
