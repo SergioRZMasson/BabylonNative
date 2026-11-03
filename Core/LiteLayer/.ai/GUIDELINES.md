@@ -260,6 +260,20 @@ Do not disable the checks or bypass them with formatting-off markers.
   needing different per-sampler maxima remains a documented gap. bgfx's switch
   is global 1x/16x only, so 4x is not reachable; scenes 249/257 are a recorded
   known gap (user decision, 2026-11-02), not a reason to patch bgfx.
+- Decision (2026-11-03, user direction: reuse Babylon Native's existing approach
+  rather than change bgfx): bgfx binds one per-instance buffer per draw, so
+  original separate per-instance streams (thin-instance matrix + colour) are
+  packed into bgfx's instance-data layout of 16-byte slots (matrix = 4 slots,
+  colour = 1 slot), as NativeEngine does in `VertexBuffer::BuildInstanceDataBuffer`.
+  GPU-written instance data (e.g. the original compute culler's compacted
+  output) is written or repacked on the GPU into that slot layout, as
+  `InstanceRepacker` does. Keep the original algorithms and execution placement
+  (culling math, 64-thread dispatch, atomic count, indexed-indirect draw); only
+  the GPU instance addressing adapts. Compute shaders go through the runtime
+  shader service as bgfx compute containers with storage-buffer reflection,
+  following the Babylon Native ShaderCompiler's `CreateBgfxComputeShader`
+  conventions (raw UAV storage buffers). Do not patch bgfx for multiple
+  instance streams.
 - Audio Core manages original routing/volume/ramp/retry semantics over actual
   host primitives. No host means explicit unavailability; offline output is
   not a claim of audibility.
