@@ -248,10 +248,16 @@ Do not disable the checks or bypass them with formatting-off markers.
   proceed with effective 1 rather than requested 4 after sampling-equivalence
   checks; do not claim exact descriptor parity. Nonconstant textures require
   their own rendering/quality evidence, not inferred equivalence. Keep other
-  sampler, HDR, resource, ownership and workload checks intact. Do not enable
-  global maximum anisotropy, inject platform sampler overrides or modify bgfx
-  without a separately reviewed change. Discuss exact per-sampler support with
-  bgfx maintainers in future work; this deferral authorizes no outreach.
+  sampler, HDR, resource, ownership and workload checks intact. Do not
+  inject platform sampler overrides or modify bgfx without a separately
+  reviewed change. Discuss exact per-sampler support with bgfx maintainers in
+  future work; this deferral authorizes no outreach.
+- User decision (2026-11-02): textures whose original sampler requests
+  anisotropic filtering may use bgfx's existing anisotropic sampler flag
+  (`BGFX_SAMPLER_*_ANISOTROPIC`) with the device-wide maximum set to the value
+  the original requests (4 in the current scenes). Do not patch bgfx for
+  per-sampler limits. Record requested versus effective anisotropy; a scene
+  needing different per-sampler maxima remains a documented gap.
 - Audio Core manages original routing/volume/ramp/retry semantics over actual
   host primitives. No host means explicit unavailability; offline output is
   not a claim of audibility.
@@ -386,7 +392,15 @@ surface exercised by the bblitec test scenes**. For each missing API:
   Babylon Lite 1.32.0 bodies/shaders.
 - Implement its JS projection.
 - Measure it against the bblitec implementation of the same scene. Native must
-  be equal or faster; record matched measurements (section 7 rules).
+  be equal or faster in **steady-state frame time** (mean and P95); record
+  matched measurements (section 7 rules). Startup is measured and reported
+  separately but is not an acceptance gate (user decision, 2026-11-02),
+  because runtime shader compilation is the default and bblitec compiles
+  shaders offline.
+- A parity residual proven by a controlled experiment to come from backend
+  floating-point evaluation order (not a Lite version change or LiteLayer bug)
+  may be marked expected-to-fail with its evidence (user decision, 2026-11-02,
+  scene 200). Never raise thresholds to hide it.
 - Document it and add tests. Test coverage should progressively match bblitec's
   scene coverage, with the added requirement of equal or better performance.
 
