@@ -23,6 +23,8 @@ runtime services outside Core. RmlUI layout and its bgfx backend are the
 user-approved isolated UI feature inside LiteLayer.
 
 Use test-driven changes and the measured performance priorities in the policy.
+Before proposing any bgfx change, check how Babylon Native/Babylon.js already
+implement the feature and reuse that approach (policy section 2).
 Shader compilation strategy is decided (policy section 6.1): runtime WGSL
 compilation by default, with Tint translating directly to the platform shader;
 offline compilation/compiler-free builds and shader-cache capture are future

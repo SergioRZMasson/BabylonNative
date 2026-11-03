@@ -26,7 +26,9 @@ dependencies outside LiteLayer. Runtime WGSL compilation is the default, using
 Tint directly to the platform shader; offline compilation and shader-cache
 capture are future work (canonical policy section 6.1). Implement only measured, parity-tested
 performance improvements; do not copy NativeEngine/generated engine bodies or
-remove required work to improve a benchmark. Read the canonical policy for the
+remove required work to improve a benchmark. Before proposing any bgfx change,
+check how Babylon Native/Babylon.js implement the feature and reuse that approach.
+Read the canonical policy for the
 complete test, lifecycle, shader, performance and handoff requirements.
 The canonical policy also permits the user-approved private cgltf importer and
 adaptation of Gary's glTF loader for this investigation. Preserve C-style Core,

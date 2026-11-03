@@ -71,6 +71,13 @@ or semantic coverage. The Minecraft slice is not the entire Babylon Lite API.
 - No NAPI/JS VM, SDL, WebGPU/Dawn renderer, Windows platform calls, image/audio
   codec library, Tint, glslang or SPIRV-Cross inside LiteLayer.
   bgfx's own transitive dependencies do not permit direct Core use of them.
+- **Before proposing any bgfx change** (user direction, 2026-11-03): first check
+  how Babylon Native (`Plugins/NativeEngine`, `Plugins/ShaderCompiler`) and
+  Babylon.js implement the same feature. They have feature parity with Babylon
+  Lite most of the time, and Babylon Native already maps it onto the pinned bgfx.
+  Reuse that approach (reimplemented in LiteLayer style, not copied) and cite it.
+  Propose a bgfx change only when neither implementation covers the feature,
+  with that evidence attached.
 - The private cgltf exception permits direct glTF/glb parsing and native
   object/GPU-resource construction in the importer, using the engine's existing
   resource APIs and lifecycle. Keep cgltf types out of `babylon_lite.h`, declare
