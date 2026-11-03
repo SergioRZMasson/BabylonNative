@@ -308,6 +308,7 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--backend", choices=("sdl_gpu", "dawn"), default="sdl_gpu")
     parser.add_argument("--pairs", type=int, default=5)
+    parser.add_argument("--expect-backend-fp-difference", action="store_true")
     args = parser.parse_args()
     scenes = [int(x) for x in args.scene.split(",")]
     if args.action == "baseline-parity":
@@ -319,7 +320,17 @@ def main():
     if args.action == "parity":
         if len(scenes) != 1:
             parser.error("parity takes one scene")
-        return 0 if parity(args.host, args.data, scenes[0], args.output)["pass"] else 1
+        result = parity(args.host, args.data, scenes[0], args.output)
+        if args.expect_backend_fp_difference:
+            if scenes[0] != 200:
+                parser.error("Expected backend FP difference is approved only for scene200")
+            expected = (not result["pass"] and result["process"]["exitCode"] == 0
+                        and "fullMad" in result and "foregroundMad" in result)
+            result["expectedFailure"] = expected
+            result["expectedFailureReason"] = "Approved FXC/DXC matrix accumulation order; controlled replay0/0."
+            write(args.output / "parity.json", result)
+            return 0 if expected else 1
+        return 0 if result["pass"] else 1
     if args.pairs < 5:
         parser.error("benchmark requires at least five run pairs")
     return 0 if benchmark(args.host, args.data, scenes, args.backend, args.pairs, args.output) else 1

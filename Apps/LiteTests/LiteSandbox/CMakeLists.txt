@@ -29,7 +29,7 @@ warnings_as_errors(LiteSandbox)
 add_executable(LiteAssetTextureTests ../AssetTests/GpuTextures.cpp AssetIO.cpp)
 target_compile_features(LiteAssetTextureTests PRIVATE cxx_std_20)
 target_include_directories(LiteAssetTextureTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
-target_link_libraries(LiteAssetTextureTests PRIVATE LiteLayer LiteAssetDecoder bgfx
+target_link_libraries(LiteAssetTextureTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder bgfx
     user32 windowscodecs ole32 d3d11)
 warnings_as_errors(LiteAssetTextureTests)
 add_executable(LiteAssetAlphaTests ../AssetTests/GpuAlpha.cpp AssetIO.cpp)
@@ -78,7 +78,7 @@ add_executable(LiteAssetSpecularGlossinessGpuTests ../AssetTests/GpuSpecularGlos
 target_compile_features(LiteAssetSpecularGlossinessGpuTests PRIVATE cxx_std_20)
 target_include_directories(LiteAssetSpecularGlossinessGpuTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
 target_link_libraries(LiteAssetSpecularGlossinessGpuTests PRIVATE LiteLayer LiteShaderCompiler
-    LiteAssetDecoder Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+    LiteAssetDecoder Babylon::LiteAssetJson bgfx user32 windowscodecs ole32 d3d11)
 warnings_as_errors(LiteAssetSpecularGlossinessGpuTests)
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
@@ -117,7 +117,7 @@ if(BABYLON_LITE_ENABLE_GLTF)
     target_compile_features(LiteNativeGltfMaterialTests PRIVATE cxx_std_20)
     target_include_directories(LiteNativeGltfMaterialTests PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Source")
     target_link_libraries(LiteNativeGltfMaterialTests PRIVATE LiteLayer LiteShaderCompiler LiteAssetDecoder
-        Babylon::LiteAssetJson bgfx user32 windowscodecs ole32)
+        Babylon::LiteAssetJson bgfx user32 windowscodecs ole32 d3d11)
     warnings_as_errors(LiteNativeGltfMaterialTests)
 endif()
 add_executable(LiteAssetMaterialOracleTests Sandbox.cpp AssetIO.cpp)

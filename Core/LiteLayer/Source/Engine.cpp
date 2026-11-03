@@ -414,6 +414,7 @@ static void engineCleanup(bl_Runtime* r, L_Record* record)
     {
         return;
     }
+    l_freeTextureMipPipeline(r, e);
     while (!lockEngines())
     {
         bx::yield();
@@ -1412,11 +1413,17 @@ static bl_Status render(L_Engine* e, double delta, bool driven)
     l_enterFrame(r);
     e->stats.drawCallCount = 0;
     ++e->frameSerial;
+    e->mipViewCursor = e->assetViewCount;
     bl_Status status = BL_OK;
+    size_t sceneCount = 0;
+    for (L_Scene* scene = e->scenes; scene; scene = scene->next)
+    {
+        ++sceneCount;
+    }
     unsigned view = 0;
     for (L_Scene* s = e->scenes; s; s = s->next, ++view)
     {
-        uint16_t offset = e->assetViewCount;
+        uint16_t offset = (uint16_t)(e->native.target.viewCount - sceneCount);
         status = renderScene(r, e, s, delta,
                              (uint16_t)(e->native.target.firstViewId + offset + view), view == 0);
         if (status != BL_OK)

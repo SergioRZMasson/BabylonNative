@@ -155,14 +155,55 @@ function mesh(handle) {
         field(object, name, () => {
             const value = native.getMeshProperties2(handle)[name];
             if (name !== "material") return value;
-            materialReference = identity(value);
+            materialReference = material(value);
             return materialReference;
         }, value => {
             native.setMeshProperty2(handle, name, name === "material" ? token(value) : value);
             if (name === "material") materialReference = value;
         });
     }
+    field(object, "boundMin", () => native.getMeshBounds(handle).minimum);
+    field(object, "boundMax", () => native.getMeshBounds(handle).maximum);
     return object;
+}
+
+const materialHandles = new WeakSet();
+function material(handle) {
+    if (handle === null) return null;
+    const object = identity(handle);
+    if (!materialHandles.has(handle)) {
+        materialHandles.add(handle);
+        field(object, "name", () => native.getMaterialName(handle));
+    }
+    return object;
+}
+
+function inspectionList(read) {
+    return new Proxy([], {
+        has(target, property) { return property in read(); },
+        ownKeys() { return Reflect.ownKeys(read()); },
+        getOwnPropertyDescriptor(target, property) {
+            const values = read();
+            if (property === "length") {
+                return {...Reflect.getOwnPropertyDescriptor(target, property), value: values.length};
+            }
+            const descriptor = Reflect.getOwnPropertyDescriptor(values, property);
+            return descriptor && {...descriptor, writable: false};
+        },
+        get(target, property) {
+            const values = read();
+            if (["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin"].includes(property)) {
+                throw new Error("Change scene membership through addToScene/removeFromScene.");
+            }
+            const value = values[property];
+            return typeof value === "function" ? value.bind(values) : value;
+        },
+        set() { throw new Error("Scene inspection collections are native-owned."); },
+        defineProperty() { throw new Error("Scene inspection collections are native-owned."); },
+        deleteProperty() { throw new Error("Scene inspection collections are native-owned."); },
+        setPrototypeOf() { throw new Error("Scene inspection collections are native-owned."); },
+        preventExtensions() { throw new Error("Scene inspection collections are native-owned."); },
+    });
 }
 
 function camera(handle) {
@@ -189,13 +230,8 @@ export async function createEngine(canvas, options) {
         for (const name of ["drawCallCount", "gpuFrameTimeMs"]) {
             field(object, name, () => native.getEngineStats(handle)[name]);
         }
-        // Creation-time C99 options have no mutation operation in the reviewed ABI.
-        const precision = options?.useHighPrecisionMatrix ?? false;
-        field(object, "useHighPrecisionMatrix", () => precision, value => {
-            if (value !== precision) {
-                throw new Error("Changing native matrix precision after creation is unsupported.");
-            }
-        });
+        // Original engine.ts only consumes this option at creation; the public field is plain data.
+        object.useHighPrecisionMatrix = options?.useHighPrecisionMatrix ?? false;
     });
 }
 
@@ -228,6 +264,10 @@ export function createSceneContext(engine) {
         });
         field(object, "fixedDeltaMs", () => native.getSceneProperties2(handle).fixedDeltaMs,
             value => native.setSceneProperty2(handle, "fixedDeltaMs", value));
+        const meshes = inspectionList(() => native.getSceneMeshes(handle).map(mesh));
+        const lights = inspectionList(() => native.getSceneLights(handle).map(value => identity(value)));
+        field(object, "meshes", () => meshes);
+        field(object, "lights", () => lights);
     });
 }
 
@@ -267,6 +307,15 @@ export async function loadGltf(engine, source) {
         const groups = native.getAssetContainerAnimationGroups(handle)
             .map(value => animationGroup(value, object));
         field(object, "animationGroups", () => groups.length ? groups : undefined);
+    });
+}
+
+const meshOwners = new WeakMap();
+export function getContainerMeshes(container) {
+    return native.getContainerMeshes(token(container)).map(handle => {
+        const object = mesh(handle);
+        meshOwners.set(object, container);
+        return object;
     });
 }
 
@@ -460,7 +509,7 @@ export function createDirectionalLight(direction, intensity) {
 
 export function createStandardMaterial() {
     const handle = native.createStandardMaterial();
-    const object = identity(handle);
+    const object = material(handle);
     tupleFields(object, handle, native.getStandardMaterialProperties(handle),
         ["diffuseColor", "specularColor", "emissiveColor", "ambientColor"],
         (value, name, data) => native.setStandardMaterialProperty(value, name, data));
@@ -523,7 +572,7 @@ export const createExtrudeShape = (engine, options) => mesh(native.createExtrude
 export const createGround = (engine, options) => mesh(native.createGround(token(engine), options));
 export const createBox = (engine, options) => mesh(native.createBox(token(engine), options));
 export const createMeshFromData = (engine, name, ...streams) => mesh(native.createMeshFromData(token(engine), name, ...streams));
-export const createShaderMaterial = options => identity(native.createShaderMaterial(options));
+export const createShaderMaterial = options => material(native.createShaderMaterial(options));
 export const createSphere = (engine, options) => mesh(native.createSphere(token(engine), options));
 export const createTexture2DFromPixels = (engine, ...args) => identity(native.createTexture2DFromPixels(token(engine), ...args));
 export const setShaderFloat = (material, ...args) => native.setShaderFloat(token(material), ...args);

@@ -5,6 +5,8 @@
 #include <wrl/client.h>
 #include "AssetInternal.h"
 #include <babylon_lite_asset_decoder.h>
+#include <babylon_lite_shader_compiler.h>
+#include "GpuMipReference.h"
 #include "../LiteSandbox/AssetIO.h"
 #include <filesystem>
 #include <fstream>
@@ -176,8 +178,9 @@ static void setup(Context& context)
     io.userData = &context;
     io.decodeImage = image;
     io.releaseImage = releaseImage;
+    const auto compiler = bl_shaderCompilerService2();
     bl_RuntimeOptions2 options = {sizeof(options), 2, {allocator, nullptr, nullptr, nullptr,
-                                                      nullptr, &io}, &provider, nullptr};
+                                                      nullptr, &io}, &provider, &compiler};
     require(bl_createRuntime2(&options, &context.runtime) == BL_OK, "native texture runtime");
     bl_NativeEngineOptions native = {};
     native.ownership = BL_BGFX_BORROWED;
@@ -312,13 +315,13 @@ int main(int argc, char** argv)
                                 decoded.rgba8 + size_t(y) * decoded.rowStrideBytes,
                                 size_t(decoded.width) * 4), "authored base-level GPU pixels byte exact");
             }
-            size_t offset = 0;
+            const auto expected = referenceMips(gpu.data(), record->info.width,
+                record->info.height, record->info.srgb);
             for (uint8_t mip = 0; mip < record->mipCount; ++mip)
             {
                 auto physical = readGpu(record, mip);
-                require(!memcmp(physical.data(), record->mipPixels + offset, physical.size()),
-                        "every native physical mip matches supplied complete chain");
-                offset += physical.size();
+                require(physical == expected[mip],
+                        "every physical mip matches independent hardware-generated chain");
             }
             context.base.releaseImage(context.base.userData, &decoded);
             ++resourceProofs;
@@ -362,13 +365,13 @@ int main(int argc, char** argv)
         auto* updated = reinterpret_cast<L_Texture*>(l_peek(context.runtime, handles[0]._id));
         auto updatedBase = readGpu(updated, 0);
         require(!memcmp(updatedBase.data(), changed, 4), "actual base pixel update");
-        size_t updatedOffset = 0;
+        const auto expectedUpdated = referenceMips(updatedBase.data(), updated->info.width,
+            updated->info.height, updated->info.srgb);
         for (uint8_t mip = 0; mip < updated->mipCount; ++mip)
         {
             auto physical = readGpu(updated, mip);
-            require(!memcmp(physical.data(), updated->mipPixels + updatedOffset, physical.size()),
+            require(physical == expectedUpdated[mip],
                     "all physical mip levels refreshed by pixel update");
-            updatedOffset += physical.size();
         }
         require(readGpu(linear, 0) == linearBeforeSrgbUpdate,
                 "sRGB pixel update does not mutate another color-space's owned resource");
@@ -393,18 +396,19 @@ int main(int argc, char** argv)
                                                  0, 0, 1, 1) == BL_OK,
                     "existing update API writes actual normal/occlusion/emissive/MR resources");
             auto* role = reinterpret_cast<L_Texture*>(l_peek(context.runtime, handles[i]._id));
-            size_t offset = 0;
+            const auto roleBase = readGpu(role, 0);
+            const auto expectedRole = referenceMips(roleBase.data(), role->info.width,
+                role->info.height, role->info.srgb);
             for (uint8_t mip = 0; mip < role->mipCount; ++mip)
             {
                 auto physical = readGpu(role, mip);
-                require(!memcmp(physical.data(), role->mipPixels + offset, physical.size()),
+                require(physical == expectedRole[mip],
                         "role update refreshes all physical native mips");
                 if (!mip)
                 {
                     require(!memcmp(physical.data(), roleUpdate, 4),
                             "role update including linear alpha is actual GPU data");
                 }
-                offset += physical.size();
             }
         }
         context.provider.releaseGltf(context.provider.userData, &parsed.document);

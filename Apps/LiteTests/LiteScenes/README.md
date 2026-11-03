@@ -11,6 +11,35 @@ outside Core. Existing scene2/35/38 hosts are unchanged.
 **M0 is not complete.** Golden failures and missing native contracts are not
 silently treated as implemented APIs or performance passes.
 
+## Approved-policy continuation after7412ea7b
+
+The five reviewed C99 inspection functions are implemented with native negative,
+stale/capacity/OOM tests, strict header-consumption checks and JS forwarding tests.
+Collections retain native membership/order/identity, including duplicate entries;
+JS mutation through inspection arrays fails explicitly. Generic node wrappers
+are promoted without replacing their identity when a container query reveals a
+mesh. Returned mesh wrappers retain their container's ownership.
+
+LiteLayer now enables bgfx's existing D3D11 staging configuration by default.
+The full scene and Minecraft suites are tested against the fresh
+`build\lite-scenes-m0-v4` build. Scene200 uses a controlled-evidence expected
+failure wrapper; it still fails on process errors, absent metrics or an
+unexpected pixel pass. Mean/P95 steady-state frame ratios alone determine
+performance acceptance under the approved M0 policy. Startup and unavailable
+GPU/latency remain separate reported observations.
+
+**Newly verified anisotropy blocker:** the pinned bgfx API has no numeric
+device-wide maximum setter. `BGFX_RESET_MAXANISOTROPY` chooses1 or16 on D3D11,
+not the requested4. A16x-only capture control still fails scene249's foreground
+gate(.11610 vs .05); the4x-only control passes(.00994). No SDK macro override,
+sampler interception, vendor edit or threshold relaxation is applied. Selecting
+exact4 requires a reviewed numeric global-cap extension to bgfx, not a fictional
+existing option. The default effective maximum therefore remains1.
+
+Final executed tables, paired Minecraft regression and commands are retained
+under `api-coverage-batch1-v1\approved-final-v4`. Earlier sections below remain
+historical v2/v3 evidence.
+
 ## Source and assets
 
 The workload is bblitec's frozen Lite **1.25.0** corpus, pin
@@ -72,7 +101,7 @@ diffs, process logs and numeric receipts are retained even on failure. Separate
 tests cover the statistics/mask/capture parser and real NAPI animation,
 visibility, invalid-option, wrong-kind and disposed-handle forwarding.
 
-## Measurement protocol and limits
+## Measurement protocol and limits (initial v2 evidence)
 
 ```powershell
 $hostDir = 'build\lite-scenes-m0-v2\build\Apps\LiteTests\LiteScenes'
@@ -115,7 +144,7 @@ unchanged. Current JS pairs also record the exact scene-bundle hash.
   Tint/SPIRV-Cross/FXC bridge remains unchanged by this batch.
 * Source-requested anisotropy can be 4; actual captured native samplers are 1.
   Exact per-sampler anisotropy remains explicitly deferred by policy. Core also
-  currently generates asset mips on the CPU, whereas the original source uses
+  initially generated asset mips on the CPU, whereas the original source uses
   GPU render-pass mip generation. This pre-existing source-placement difference
   is not hidden by a passing screenshot.
 
@@ -125,7 +154,7 @@ failed golden gates or mismatched workload are never rounded into a pass.
 Use `--minimal-timing` for a separate phase-timer-overhead control; it does not
 disable bgfx's own GPU queries.
 
-## Projection scope and remaining failures
+## Projection scope and remaining failures (initial v2 evidence)
 
 No `babylon_lite.h` additions were made. M0's 57 audit entries include 13
 TypeScript-only types, nine existing scoped forwarders, one added visibility
@@ -165,7 +194,7 @@ Executed per-scene values and all four timing lanes are published in the
 batch evidence's `summary.json` and `SUMMARY.md`; this milestone must remain
 open until its failed gates and native-contract blockers are resolved.
 
-## Executed coverage (post-sync)
+## Executed coverage (initial post-sync v2 evidence)
 
 MAD is full/foreground in 0..255 units; P/F is the actual golden gate. Ratios
 below are **diagnostic native / SDL_GPU** mean and P95, with paired 95% CIs.
@@ -198,9 +227,158 @@ GPU duration is 5.563 ms; these overlapping spans must not be summed. No
 justified parity-preserving Core optimization was identified for that
 GPU/handoff-bound result.
 
+## Continuation after parent commit 5680aaed
+
+The fresh `build\lite-scenes-m0-v3\build` Release/V8 build corrects scene256's
+owned mip-generation defect. Both original pins use GPU fullscreen-triangle
+linear blits; the earlier CPU averaging changed lower-mip texels despite
+byte-identical base levels. Core now uses the original WGSL algorithm, mip-only
+texture views, hardware sRGB conversions and regenerated mips on partial updates.
+It retains no CPU mip chain. A focused GPU test checks hardware rounding,
+partial updates, callback updates and view-budget rejection before mutation.
+Related asset tests compare every physical mip to an independent D3D11 driver's
+`GenerateMips`, not to Lite's own CPU/GPU implementation.
+
+Necessary private embedding adaptation for review: scenes occupy the high end
+of each engine's existing granted view range, leaving lower views for ordered
+mip prelude jobs. Already-reserved environment decode views remain disjoint.
+Outside frames, existing submitted-work retirement drains setup before reusing
+these views. An insufficient view budget fails explicitly; no host-reserved view
+is used. No public ABI changed.
+
+The remaining failures have controlled replay evidence, not merely suspected
+sampler/compiler differences:
+
+* **200:** uploaded Float32 camera matrices match. Changing only captured VS
+  arithmetic from FXC's Y-first accumulation to DXC's X-first fused accumulation
+  gives exact **0/0** MAD. This is a backend arithmetic-order difference, not
+  a documented 1.25→1.32 workload change. No scene-specific shader substitution
+  or global IEEE flag is shipped.
+* **249/257:** changing only authored all-linear 2D samplers from effective
+  anisotropy1 to source-requested4 passes the original gates. IBL samplers are
+  deliberately unchanged. Exact per-sampler integration requires separate
+  policy review; no platform sampler override, global anisotropy or bgfx edit
+  is shipped.
+* **256:** replacing only the captured lower mips with baseline GPU-generated
+  texels passes; the production GPU fix now passes native and JS CTest gates.
+
+Scene247's balanced replay counters confirm identical teapot primitive and
+pixel work, U32 indices, 64-byte/four-float4 instance strides and instance
+counts958/941. Native vertex records are32 bytes versus baseline96. Native's
+plane-first order matches both original source pins; baseline draws it last.
+The plane has316,087 versus219,688 passing samples, but teapot pixel work is
+equal. Counter timings are **replay-only**, never live benchmark samples.
+There is no justification to reorder the native hierarchy to mimic baked
+baseline ordering.
+
+`map_projection_milestones.py` maps all34 previously unresolved entries.
+Later features retain M1/M2/M3/M4/M5/M6/M13 ownership rather than fake JS fields.
+Writable `useHighPrecisionMatrix` metadata now matches the original: matrix
+storage is chosen at engine creation and is not changed by later metadata
+writes. Its JS test covers subsequently created Float32 transforms.
+Six genuinely M0 inspection entries need five reviewed C99 queries:
+container/scene meshes, scene lights, mesh bounds and material name. These
+remain explicitly blocked on contract approval; the public header is unchanged.
+
+### Actual Present and event-inclusive baseline overlays
+
+`PresentProbe` is a private outside-Core observer of the process's actual DXGI
+`Present`/`Present1` calls. Process creation FILETIME is calibrated to QPC with
+recorded uncertainty. Receipts distinguish any setup Present from the first
+Present after CPU source-frame readiness. That tag does not establish exact
+GPU source-frame/Present association across bgfx's queued rendering. This is
+a hidden-window API-call completion measurement,
+**not** display/photon time. Events use preallocated memory; output occurs only
+after measured loops. Factory/swapchain callback failures are contained and
+invalidate the receipt.
+
+`prepare_baseline_probe.py` copies only PAL host files into ignored storage,
+compiles those copies and relinks untouched original engine/main objects. It
+never builds or edits the bblitec checkout. Absolute read-only asset/shader
+directories preserve its baked workload. Both copied PALs bracket events
+through submission/frame cleanup and write full-precision samples afterward.
+All28 instrumented SDL_GPU/Dawn golden preflights pass.
+
+```powershell
+$v3 = 'build\lite-scenes-m0-v3'
+$hosts = "$v3\build\Apps\LiteTests\LiteScenes"
+python Apps\LiteTests\LiteScenes\prepare_baseline_probe.py --corpus E:\Github\bblitec --output "$v3\baseline-probe-final" --scenes 159,161,163,168,200,247,248,249,256,257,258,259,260,266
+# Run each generated scene<id>\build.cmd in the same cmd.exe as vcvars64.bat.
+python Apps\LiteTests\LiteScenes\formal_benchmark.py preflight --hosts "$hosts" --data "$hosts\data" --manifest "$v3\baseline-probe-final\manifest.json" --output "$v3\baseline-probe-preflight"
+python Apps\LiteTests\LiteScenes\formal_benchmark.py benchmark --hosts "$hosts" --data "$hosts\data" --manifest "$v3\baseline-probe-final\manifest.json" --output "$v3\formal-perf-v2"
+```
+
+The new runner uses15 balanced pairs in every scene/language/backend lane,
+120 warmup and2,000 measured frames. Each receipt records host, original
+baseline, overlay, probe and JS-script hashes. Do not mix the original370
+pairs, invalid-marker smoke or GPU replay counters with these measurements.
+Native shader-service time is separate; baseline runtime PSO creation remains
+included in startup but not separately instrumented. PresentMon was attempted
+without elevation and failed ETW access checks. Live baseline GPU/latency and
+exact first-correct-frame association remain missing; the runner never promotes
+a numerical throughput win to complete qualification.
+
+`observer_overhead.py` measures fifteen on/off pairs for native, JS, SDL_GPU and
+Dawn in the short-frame scene159. All four complete-host mean/P95 CIs include1;
+the Core/callback brackets are also reported. This characterizes overhead, not
+proof that it is zero.
+
+`prepare_memory_probe.py` supplies a reproducible **isolated** experiment with
+bgfx's existing `BGFX_CONFIG_RENDERER_DIRECT3D11_USE_STAGING_BUFFER=1` option.
+No vendor source or default build is changed. Changing only captured vertex/
+index buffer usage from DYNAMIC/CPU-write to DEFAULT/no-CPU-access preserves
+exact pixels and improves replay GPU time to0.9236 [0.9058,0.9403]; physical heap
+residency was not measured. The supported-option build then passes all24
+graphics tests and retains the same22/28 native/JS golden gates. Sixty matched
+Native/SDL pairs turn all four default-build timing failures (200/247/256/258)
+into numerical mean/P95 passes. This global backend option requires parent
+review and complete-batch/Minecraft qualification before becoming the default.
+
+See the evidence's `continuation-v3` section and per-scene JSON for executed
+values. Historical v2 measurements above remain historical, not current passes.
+
 JS SDL timing-only results are slower for scenes200/247/266 and inconclusive
 for 259/260. All native/JS Dawn timing-only CIs meet the numerical gate.
 The complete four-lane tables, actual per-run samples, profiling and unresolved
 qualification blockers remain in the evidence, not hidden by these summaries.
 Phase-timer overhead controls were also run: their short-scene CIs are noisy
 and do not establish an isolated uninstrumented-Core result.
+
+
+## Continuation v3 executed coverage
+
+Startup tags are not exact GPU correct-frame association. All full acceptance remains unqualified; the staging option is isolated, not the default.
+
+|Scene|Native MAD|JS MAD|Native/SDL startup ms|Native startup ratio [CI]|Native mean ratio [CI]|Native P95 ratio [CI]|Native verdict|JS/SDL startup ms|JS startup ratio [CI]|JS mean ratio [CI]|JS P95 ratio [CI]|JS verdict|
+|---|---|---|---:|---|---|---|---|---:|---|---|---|---|
+|159|P 0/0|P 0/0|305.0/637.8|0.4800 [0.4506,0.5089]|0.7627 [0.7478,0.7767]|0.2502 [0.2199,0.3099]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|306.6/600.5|0.5123 [0.4904,0.5316]|0.7337 [0.7243,0.7448]|0.2075 [0.2004,0.2154]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|161|P 0/0|P 0/0|290.9/586.4|0.4968 [0.4768,0.5132]|0.7449 [0.7355,0.7540]|0.2214 [0.2153,0.2276]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|308.9/597.0|0.5188 [0.4998,0.5354]|0.7141 [0.7014,0.7268]|0.1975 [0.1883,0.2058]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|163|P 0/0|P 0/0|290.0/609.1|0.4778 [0.4565,0.4995]|0.7585 [0.7475,0.7708]|0.2240 [0.2170,0.2329]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|306.8/572.8|0.5360 [0.5242,0.5452]|0.7633 [0.7539,0.7723]|0.2156 [0.2082,0.2237]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|168|P 0/0|P 0/0|447.5/639.6|0.7005 [0.6876,0.7138]|0.7230 [0.7121,0.7331]|0.2271 [0.2189,0.2358]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|497.6/671.7|0.7301 [0.6615,0.8185]|0.7657 [0.7200,0.8368]|0.3355 [0.2345,0.5089]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|200|F 0.3114847/0.4538918|F 0.3114923/0.4539029|2813.6/789.1|3.5718 [3.4470,3.7088]|1.1166 [1.0996,1.1335]|0.9701 [0.9532,0.9886]|slower; reject-parity|2802.3/745.5|3.7592 [3.7226,3.7974]|1.1386 [1.1273,1.1472]|1.0067 [0.9939,1.0162]|slower; reject-parity|
+|247|P 0/0|P 0/0|519.4/700.1|0.7435 [0.7066,0.7787]|1.0483 [1.0371,1.0599]|1.0325 [1.0190,1.0462]|slower; slower|536.6/675.9|0.7947 [0.7700,0.8149]|1.0354 [1.0340,1.0370]|1.0164 [1.0105,1.0229]|slower; slower|
+|248|P 0.002094184/0.01176431|P 0.002086227/0.01171844|940.6/733.8|1.2842 [1.2404,1.3173]|0.7573 [0.7462,0.7671]|0.2661 [0.2553,0.2783]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|963.7/729.7|1.3217 [1.2845,1.3596]|0.7339 [0.7277,0.7404]|0.2389 [0.2309,0.2472]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|249|F 0.01669018/0.7224153|F 0.01638527/0.7092179|1134.9/718.0|1.5845 [1.5290,1.6317]|0.7629 [0.7531,0.7730]|0.2724 [0.2650,0.2808]|equal-or-faster; reject-parity|1154.9/701.3|1.6482 [1.6108,1.6749]|0.7247 [0.7172,0.7318]|0.2350 [0.2287,0.2419]|equal-or-faster; reject-parity|
+|256|P 0.0001584201/0.001260933|P 0.0001616753/0.001292369|525.1/821.8|0.6401 [0.6209,0.6546]|0.8894 [0.8796,0.8997]|1.1586 [1.1457,1.1714]|slower; slower|541.8/800.6|0.6768 [0.6708,0.6824]|0.8966 [0.8871,0.9051]|1.1813 [1.1689,1.1940]|slower; slower|
+|257|F 0.007727865/0.06149744|F 0.007727865/0.06149744|499.2/712.5|0.7028 [0.6754,0.7270]|0.8067 [0.7947,0.8171]|0.2651 [0.2585,0.2728]|equal-or-faster; reject-parity|520.3/694.0|0.7508 [0.7267,0.7702]|0.7692 [0.7140,0.8098]|0.2811 [0.2407,0.3487]|equal-or-faster; reject-parity|
+|258|P 2.170139e-06/2.931253e-06|P 2.170139e-06/2.931253e-06|391.4/647.5|0.6058 [0.5842,0.6247]|0.9457 [0.9395,0.9516]|1.0476 [1.0385,1.0572]|slower; slower|480.3/691.9|0.6795 [0.6165,0.7632]|0.9576 [0.8344,1.0804]|1.0572 [0.9161,1.1777]|inconclusive; inconclusive|
+|259|P 0/0|P 0/0|397.1/650.5|0.6078 [0.5761,0.6546]|0.7576 [0.7227,0.7912]|0.6276 [0.6025,0.6602]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|433.0/650.9|0.6635 [0.6335,0.6995]|0.7601 [0.7303,0.7855]|0.6638 [0.6467,0.6836]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|260|P 0/0|P 0/0|378.7/643.4|0.5905 [0.5670,0.6116]|0.7659 [0.7546,0.7762]|0.6114 [0.5959,0.6283]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|405.9/623.2|0.6512 [0.6251,0.6796]|0.7846 [0.7723,0.8031]|0.6470 [0.6260,0.6768]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+|266|P 0.0005342159/0.0009069778|P 0.000521195/0.0008848732|965.9/694.2|1.3947 [1.3421,1.4380]|0.7934 [0.7878,0.7995]|0.6236 [0.6110,0.6369]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|993.4/671.0|1.4806 [1.4674,1.4940]|0.7909 [0.7808,0.7983]|0.6278 [0.6175,0.6372]|equal-or-faster; unqualified-gpu-latency-first-correct-frame|
+
+### Isolated supported-option performance fix (not the default build)
+
+Changing only captured vertex/index buffer usage from DYNAMIC/CPU-write to DEFAULT/no-CPU-access preserves0/0 pixels and gives GPU replay ratio0.9236 [0.9058,0.9403]. Physical heap residency was not measured. No vendor source was edited.
+
+The existing bgfx staging option was then compiled in isolation. All28 native/JS gates retain the same22 passes, and all24 graphics tests pass. Sixty additional matched Native/SDL pairs:
+
+|Scene|Mean ratio [CI]|P95 ratio [CI]|Timing verdict|
+|---|---|---|---|
+|200|0.9320 [0.9257,0.9386]|0.6321 [0.6193,0.6449]|equal-or-faster|
+|247|0.9134 [0.9016,0.9237]|0.9021 [0.8922,0.9121]|equal-or-faster|
+|256|0.7156 [0.7011,0.7313]|0.1958 [0.1763,0.2347]|equal-or-faster|
+|258|0.7838 [0.7772,0.7910]|0.6109 [0.5953,0.6290]|equal-or-faster|
+
+This global backend build option needs parent review and complete-batch/Minecraft qualification; it is not silently enabled or substituted for the default840 pairs.
+
+All native/JS Dawn values, raw samples, startup/shader spans and identities are in `summary.json`/`formal-perf-v2`.

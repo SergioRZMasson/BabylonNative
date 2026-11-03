@@ -14,6 +14,7 @@ set(SOURCES
     "Source/Tests.Audio.cpp"
     "Source/Tests.RenderOrder.cpp"
     "Source/Tests.Runtime.cpp")
+list(APPEND SOURCES "Source/Tests.Inspection.cpp")
 
 add_library(LiteHeaderC99 OBJECT "Source/ContractC99.c")
 set_property(TARGET LiteHeaderC99 PROPERTY C_STANDARD 99)
@@ -21,6 +22,11 @@ set_property(TARGET LiteHeaderC99 PROPERTY C_STANDARD_REQUIRED ON)
 set_property(TARGET LiteHeaderC99 PROPERTY C_EXTENSIONS OFF)
 target_include_directories(LiteHeaderC99 PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Include")
 warnings_as_errors(LiteHeaderC99)
+add_library(LiteHeaderCpp17 OBJECT "Source/ContractCpp17.cpp")
+set_target_properties(LiteHeaderCpp17 PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(LiteHeaderCpp17 PRIVATE "${PROJECT_SOURCE_DIR}/Core/LiteLayer/Include")
+warnings_as_errors(LiteHeaderCpp17)
 
 add_executable(LiteNativeTests ${SOURCES})
 warnings_as_errors(LiteNativeTests)

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 option(BABYLON_LITE_ENABLE_UI "Build the optional retained RmlUI/bgfx LiteLayer feature." OFF)
 option(BABYLON_LITE_ENABLE_GLTF "Build the private cgltf native importer." OFF)
 option(BABYLON_NATIVE_BUILD_LITE_UI_TESTS "Build the retained UI GPU and lifecycle tests." OFF)
+option(BABYLON_LITE_D3D11_STAGING_BUFFERS
+    "Use bgfx staging uploads and DEFAULT D3D11 buffers for LiteLayer builds." ON)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     project(BabylonLite LANGUAGES C CXX)
@@ -43,6 +45,11 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
             target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
         endif()
     endfunction()
+endif()
+
+if(TARGET bgfx)
+    target_compile_definitions(bgfx PRIVATE
+        BGFX_CONFIG_RENDERER_DIRECT3D11_USE_STAGING_BUFFER=$<BOOL:${BABYLON_LITE_D3D11_STAGING_BUFFERS}>)
 endif()
 
 option(BABYLON_LITE_ENABLE_STYLE_CHECKS "Enforce LiteLayer formatting, declarations and control-flow braces." OFF)

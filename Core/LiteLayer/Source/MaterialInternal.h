@@ -104,8 +104,8 @@ struct L_Texture
     size_t references;
     bl_TextureDataFormat2 format;
     uint8_t mipCount;
-    uint8_t* mipPixels;
     uint8_t samplerMaxLod;
+    uint16_t* mipFrames;
 };
 
 struct L_Text
@@ -133,6 +133,10 @@ bool l_appendText(bl_Runtime* r, L_Text* t, bl_String s);
 bl_Status l_createAssetPixelTexture(bl_EngineContext engine, bl_Bytes pixels, uint32_t width,
                                     uint32_t height, const bl_PixelsTexture2DOptions* options,
                                     bool mips, bl_Texture2D* texture);
+bl_Status l_prepareTextureMips(L_Engine* engine, L_Texture* texture);
+bl_Status l_validateTextureMipViews(L_Engine* engine, uint8_t mipCount);
+bl_Status l_generateTextureMips(L_Engine* engine, L_Texture* texture);
+void l_freeTextureMipPipeline(bl_Runtime* runtime, L_Engine* engine);
 void l_materialCleanup(bl_Runtime* r, L_Record* record);
 bl_Status l_materialFamily(bl_Material handle, L_Material** material);
 bl_Status l_standardSources(bl_Runtime* runtime, L_Material* pipeline, bool disableLighting);

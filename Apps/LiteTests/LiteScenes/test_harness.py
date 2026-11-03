@@ -1,4 +1,6 @@
 import unittest
+import json
+from pathlib import Path
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
@@ -7,6 +9,9 @@ import numpy as np
 from harness import benchmark, bootstrap_ratios, compare_rgb, summarize
 from inspect_capture import inspect
 from collect_evidence import ctest_summary
+from formal_benchmark import present_metrics, baseline_metrics
+from prepare_memory_probe import relink
+from harness import main as harness_main
 
 
 class ParityTests(unittest.TestCase):
@@ -70,6 +75,52 @@ class CaptureTests(unittest.TestCase):
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_expected_fp_failure_cannot_mask_process_failure_or_unexpected_pass(self):
+        argv = ["harness.py", "parity", "--host", "host", "--data", "data",
+                "--scene", "200", "--output", "output", "--expect-backend-fp-difference"]
+        cases = [
+            ({"pass": False, "process": {"exitCode": 0}, "fullMad": .3, "foregroundMad": .4}, 0),
+            ({"pass": False, "process": {"exitCode": 2}}, 1),
+            ({"pass": True, "process": {"exitCode": 0}, "fullMad": 0, "foregroundMad": 0}, 1),
+        ]
+        for result, expected in cases:
+            with patch("sys.argv", argv), patch("harness.parity", return_value=result), \
+                    patch("harness.write"):
+                self.assertEqual(harness_main(), expected)
+
+    def test_isolated_relink_redirects_outputs_without_overwriting_original_build(self):
+        output = Path("isolated") / "probe.exe"
+        original = ["link.exe", "/OUT:original.exe", "/IMPLIB:original.lib",
+                    "/PDB:original.pdb", "Core/LiteLayer/LiteLayer.lib"]
+        with patch("prepare_memory_probe.subprocess.run") as run:
+            command = relink(original, Path("build"), output,
+                             {"core\\litelayer\\litelayer.lib": Path("old") / "LiteLayer.lib"})
+        self.assertIn("/out:" + str(output), command)
+        self.assertIn("/implib:" + str(output.with_suffix(".lib")), command)
+        self.assertIn("/pdb:" + str(output.with_suffix(".pdb")), command)
+        self.assertIn(str(Path("old") / "LiteLayer.lib"), command)
+        self.assertNotIn("/OUT:original.exe", command)
+        run.assert_called_once()
+
+    def test_setup_presents_are_not_reported_as_first_correct_source_frame(self):
+        events = [
+            {"sourceFrame": False, "result": 0, "syncInterval": 0, "endQpc": 20},
+            {"sourceFrame": True, "result": -1, "syncInterval": 0, "endQpc": 30},
+            {"sourceFrame": True, "result": 0, "syncInterval": 0, "endQpc": 50},
+        ]
+        value = {"presents": events, "processStartQpc": 10, "qpcFrequency": 1000,
+                 "firstPresentMs": 10, "calibrationUncertaintyTicks": 1}
+        with patch("pathlib.Path.read_text", return_value=json.dumps(value)):
+            result = present_metrics(Path("unused"))
+        self.assertEqual(result["firstAnyPresentMs"], 10)
+        self.assertEqual(result["firstSourcePresentMs"], 40)
+
+    def test_incomplete_baseline_samples_cannot_qualify(self):
+        value = {"samplesMs": [1.0] * 1999, "warmup": 120, "measure": 2000}
+        with patch("pathlib.Path.read_text", return_value=json.dumps(value)):
+            with self.assertRaises(ValueError):
+                baseline_metrics(Path("unused"))
+
     def test_ctest_summary_handles_both_success_formats_and_missing_evidence(self):
         self.assertEqual(ctest_summary("100% tests passed out of 20"), {"total": 20, "failed": 0})
         self.assertEqual(ctest_summary("73% tests passed, 8 tests failed out of 30"),

@@ -31,10 +31,19 @@ struct TestRuntime
 #endif
     }
 
-    explicit TestRuntime(const bl_AudioService* audio = nullptr, const bl_ShaderCompilerService* compiler = nullptr)
+    explicit TestRuntime(const bl_AudioService* audio = nullptr, const bl_ShaderCompilerService* compiler = nullptr,
+        const bl_ShaderCompilerService2* compiler2 = nullptr)
     {
         const bl_RuntimeOptions options{{nullptr, Allocate, Deallocate}, nullptr, nullptr, compiler, audio, nullptr};
-        status = bl_createRuntime(&options, &runtime);
+        if (compiler2)
+        {
+            const bl_RuntimeOptions2 extended{sizeof(extended), 2, options, nullptr, compiler2};
+            status = bl_createRuntime2(&extended, &runtime);
+        }
+        else
+        {
+            status = bl_createRuntime(&options, &runtime);
+        }
     }
 
     ~TestRuntime()

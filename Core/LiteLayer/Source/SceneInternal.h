@@ -99,6 +99,8 @@ struct L_Engine
     bl_EngineStats stats;
     struct L_ViewReservation* reservedViews;
     uint16_t assetViewCount;
+    uint16_t mipViewCursor;
+    struct L_MipPipeline* mipPipeline;
     uint64_t frameSerial;
 };
 

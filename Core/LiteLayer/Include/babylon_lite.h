@@ -2788,6 +2788,28 @@ bl_Status bl_createDefaultCamera(bl_SceneContext scene, bl_ArcRotateCamera* came
 bl_Status bl_addAssetContainerToScene(bl_SceneContext scene, bl_AssetContainer container);
 bl_Status bl_removeAssetContainerFromScene(bl_SceneContext scene, bl_AssetContainer container);
 bl_Status bl_getAssetContainerEntities(bl_AssetContainer container, bl_AssetEntities* entities);
+
+/*
+ * Inspection queries (Lite 1.32.0 asset-container.ts/scene-core.ts).
+ * NULL destination with capacity0 queries the required count. Lists copy typed
+ * identities into caller storage; insufficient capacity returns BL_INVALID_ARGUMENT
+ * without writing the destination OR count. Other failures also leave outputs
+ * unchanged. Capacity is in elements; destination must be suitably aligned.
+ * Container traversal is depth-first, first-visit deduplicated. Scene lists
+ * preserve insertion order and duplicates, including hidden/empty live meshes.
+ * Handles remain runtime-owned; copying a handle does not acquire ownership.
+ */
+bl_Status bl_getContainerMeshes(bl_AssetContainer container, bl_Mesh* destination, size_t capacity,
+                                size_t* count);
+bl_Status bl_getSceneMeshes(bl_SceneContext scene, bl_Mesh* destination, size_t capacity,
+                            size_t* count);
+bl_Status bl_getSceneLights(bl_SceneContext scene, bl_Light* destination, size_t capacity,
+                            size_t* count);
+/* Object-local geometry bounds, not transformed or instance-expanded bounds.
+ * A mesh without active geometry has zero bounds. Both outputs are required. */
+bl_Status bl_getMeshBounds(bl_Mesh mesh, bl_Vec3* minimum, bl_Vec3* maximum);
+/* Borrows the immutable copied name until material/runtime disposal. */
+bl_Status bl_getMaterialName(bl_Material material, bl_String* name);
 bl_Status bl_disposeAssetContainer(bl_AssetContainer container);
 bl_Status bl_setThinInstances(bl_Mesh mesh, bl_F32Span matrices, size_t count);
 bl_Status bl_getThinInstances(bl_Mesh mesh, bl_ThinInstanceView* instances);

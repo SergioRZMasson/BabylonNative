@@ -146,7 +146,8 @@ namespace
             target = bgfx::createFrameBuffer(2, attachments, false);
             ASSERT_TRUE(bgfx::isValid(color) && bgfx::isValid(depth) && bgfx::isValid(staging) && bgfx::isValid(target));
 
-            runtime = std::make_unique<TestRuntime>(nullptr, &compiler);
+            const auto compiler2 = bl_shaderCompilerService2();
+            runtime = std::make_unique<TestRuntime>(nullptr, &compiler, &compiler2);
             ASSERT_EQ(runtime->status, BL_OK);
             bl_NativeEngineOptions native{};
             native.ownership = BL_BGFX_BORROWED;
@@ -269,6 +270,97 @@ TEST_F(LiteNativeGraphics, ClearColorUsesGpuUnormNearestEven)
     ASSERT_TRUE(Readback());
     const std::array<uint8_t, 4> expected{76, 178, 26, 128};
     EXPECT_EQ(Center(), expected);
+}
+
+TEST_F(LiteNativeGraphics, OriginalGpuMipsUseHardwareRoundingAndRegenerateAfterPartialUpdates)
+{
+    ASSERT_EQ(bl_registerScene(scene), BL_OK);
+    uint8_t input[4 * 4 * 4]{};
+    for (size_t i = 0; i < 16; ++i)
+    {
+        input[i * 4] = i % 2 ? 1 : 0;
+        input[i * 4 + 3] = 255;
+    }
+    bl_Texture2D texture{};
+    ASSERT_EQ(l_createAssetPixelTexture(engine, {input, sizeof(input)}, 4, 4, nullptr, true,
+        &texture), BL_OK);
+    auto* record = reinterpret_cast<L_Texture*>(l_peek(runtime->runtime, texture._id));
+    ASSERT_NE(record, nullptr);
+    auto readMip = [&](uint8_t mip = 1)
+    {
+        std::array<uint8_t, 64> actual{};
+        const auto width = static_cast<uint16_t>((std::max)(1u, record->info.width >> mip));
+        const auto height = static_cast<uint16_t>((std::max)(1u, record->info.height >> mip));
+        const auto output = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA8,
+            BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK);
+        bgfx::TextureRegion source{};
+        source.handle = {record->handleIndex};
+        source.mip = mip;
+        bgfx::TextureRegion destination{};
+        destination.handle = output;
+        bgfx::blit(readbackView, destination, source);
+        const uint32_t ready = bgfx::read(destination, actual.data());
+        while (bgfx::frame() < ready)
+        {
+        }
+        bgfx::destroy(output);
+        return actual;
+    };
+    const auto first = readMip();
+    for (size_t i = 0; i < 4; ++i)
+    {
+        EXPECT_EQ(first[i * 4], 0);
+        EXPECT_EQ(first[i * 4 + 3], 255);
+    }
+    const uint8_t update[4] = {8, 0, 0, 255};
+    ASSERT_EQ(bl_updateTexture2DFromPixels(engine, texture, {update, sizeof(update)}, 0, 0, 1, 1),
+        BL_OK);
+    const auto second = readMip();
+    EXPECT_EQ(second[0], 2);
+    EXPECT_EQ(second[4], 0);
+    EXPECT_EQ(second[8], 0);
+    EXPECT_EQ(second[12], 0);
+    struct Update
+    {
+        bl_EngineContext engine;
+        bl_Texture2D texture;
+    } state{engine, texture};
+    bl_CallbackToken callback{};
+    ASSERT_EQ(bl_onBeforeRender(scene, [](void* user, double)
+    {
+        const auto& value = *static_cast<Update*>(user);
+        const uint8_t values[] = {12, 16, 22, 255};
+        for (uint8_t red : values)
+        {
+            const uint8_t bytes[4] = {red, 0, 0, 255};
+            const auto expected = red == 255 ? BL_UNSUPPORTED : BL_OK;
+            EXPECT_EQ(bl_updateTexture2DFromPixels(value.engine, value.texture,
+                {bytes, sizeof(bytes)}, 0, 0, 1, 1), expected);
+        }
+    }, &state, &callback), BL_OK);
+    ASSERT_EQ(bl_renderFrame(engine, 16), BL_OK);
+    EXPECT_EQ(readMip()[0], 6);
+    EXPECT_EQ(readMip(0)[0], 22);
+    ASSERT_TRUE(Readback());
+    EXPECT_EQ(Center()[0], 13);
+    ASSERT_EQ(bl_removeSceneCallback(scene, callback), BL_OK);
+    uint8_t oddPixels[5 * 3 * 4]{};
+    for (size_t y = 0; y < 3; ++y)
+    {
+        for (size_t x = 0; x < 5; ++x)
+        {
+            oddPixels[(y * 5 + x) * 4] = static_cast<uint8_t>(x * 24 + y * 12);
+            oddPixels[(y * 5 + x) * 4 + 3] = 255;
+        }
+    }
+    bl_Texture2D odd{};
+    ASSERT_EQ(l_createAssetPixelTexture(engine, {oddPixels, sizeof(oddPixels)}, 5, 3,
+        nullptr, true, &odd), BL_OK);
+    record = reinterpret_cast<L_Texture*>(l_peek(runtime->runtime, odd._id));
+    const auto oddMip = readMip();
+    EXPECT_EQ(oddMip[0], 30);
+    EXPECT_EQ(oddMip[4], 90);
+    EXPECT_EQ(readMip(2)[0], 60);
 }
 
 TEST_F(LiteNativeGraphics, OriginalArcHemisphericStandardUsesRuntimeWGSLAndRealPixels)

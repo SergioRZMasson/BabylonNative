@@ -1,5 +1,6 @@
 #include "AssetIO.h"
 #include "Scene.h"
+#include "PresentProbe.h"
 
 #include <babylon_lite_asset_decoder.h>
 #include <babylon_lite_shader_compiler.h>
@@ -196,6 +197,7 @@ namespace
         uint32_t measure{};
         bool screenshot{};
         bool minimalTiming{};
+        bool presentProbe{};
         bl_Runtime* runtime{};
         bl_AssetDecoder* decoder{};
         bl_NativeEngineOptions native{};
@@ -211,6 +213,7 @@ namespace
         std::filesystem::path output;
         std::filesystem::path script;
         std::filesystem::path renderdocPath;
+        std::filesystem::path shaderDump;
 #ifdef LITE_SCENES_RENDERDOC
         HMODULE renderdocDll{};
         RENDERDOC_API_1_6_0* renderdoc{};
@@ -314,6 +317,25 @@ namespace
                                        bl_ShaderCompileResult* result) {
                 auto& host = *static_cast<Host*>(user);
                 const auto begin = Clock::now();
+                if (!host.shaderDump.empty())
+                {
+                    try
+                    {
+                        const auto prefix = host.shaderDump / std::to_string(host.shaderCalls);
+                        std::ofstream vertex(prefix.string() + "-vertex.wgsl");
+                        vertex.write(request->vertex.wgsl.data, request->vertex.wgsl.length);
+                        std::ofstream fragment(prefix.string() + "-fragment.wgsl");
+                        fragment.write(request->fragment.wgsl.data, request->fragment.wgsl.length);
+                        if (!vertex || !fragment)
+                        {
+                            return BL_HOST_ERROR;
+                        }
+                    }
+                    catch (...)
+                    {
+                        return BL_HOST_ERROR;
+                    }
+                }
                 const auto status = host.compiler.compile(host.compiler.userData, request, result);
                 host.shaderMs += Ms(Clock::now() - begin);
                 ++host.shaderCalls;
@@ -329,6 +351,27 @@ namespace
                                         bl_ShaderCompileResult2* result) {
                 auto& host = *static_cast<Host*>(user);
                 const auto begin = Clock::now();
+                if (!host.shaderDump.empty())
+                {
+                    try
+                    {
+                        const auto prefix = host.shaderDump / std::to_string(host.shaderCalls);
+                        std::ofstream vertex(prefix.string() + "-vertex.wgsl");
+                        vertex.write(request->base.vertex.wgsl.data,
+                                     request->base.vertex.wgsl.length);
+                        std::ofstream fragment(prefix.string() + "-fragment.wgsl");
+                        fragment.write(request->base.fragment.wgsl.data,
+                                       request->base.fragment.wgsl.length);
+                        if (!vertex || !fragment)
+                        {
+                            return BL_HOST_ERROR;
+                        }
+                    }
+                    catch (...)
+                    {
+                        return BL_HOST_ERROR;
+                    }
+                }
                 const auto status =
                     host.compiler2.compile(host.compiler2.userData, request, result);
                 host.shaderMs += Ms(Clock::now() - begin);
@@ -450,6 +493,10 @@ namespace
 
         void Receipt()
         {
+            if (presentProbe)
+            {
+                LiteScenesProbe::Write(output / "present.json");
+            }
             PROCESS_MEMORY_COUNTERS_EX memory{};
             memory.cb = sizeof(memory);
             if (!GetProcessMemoryInfo(GetCurrentProcess(),
@@ -641,6 +688,14 @@ int main(int argc, char** argv)
             {
                 host.minimalTiming = true;
             }
+            else if (arg == "--probe-present")
+            {
+                host.presentProbe = true;
+            }
+            else if (arg.starts_with("--dump-shaders="))
+            {
+                host.shaderDump = arg.substr(15);
+            }
             else
             {
                 throw std::runtime_error("Unknown host option: " + arg);
@@ -652,6 +707,18 @@ int main(int argc, char** argv)
             throw std::runtime_error("--scene and --out required; capture and timing are separate");
         }
         std::filesystem::create_directories(host.output);
+        if (!host.shaderDump.empty())
+        {
+            std::filesystem::create_directories(host.shaderDump);
+        }
+        if (host.measure && !host.shaderDump.empty())
+        {
+            throw std::runtime_error("Diagnostics cannot run in measured frames");
+        }
+        if (host.presentProbe)
+        {
+            LiteScenesProbe::Install(LiteScenesProbe::None);
+        }
 #ifdef LITE_SCENES_JS
         std::string error;
         Babylon::AppRuntime::Options vmOptions{};
@@ -728,6 +795,7 @@ globalThis.document={getElementById:()=>_canvas,querySelector:()=>_canvas};
             dispatch([&](Napi::Env env) {
                 if (!firstFrame && env.Global().Get("_sceneHostStarted").ToBoolean().Value())
                 {
+                    LiteScenesProbe::MarkSourceFrame();
                     Babylon::Plugins::LiteJSBinding::Frame(env, 1000.0 / 60);
                     bgfx::frame();
                     firstFrame = true;
@@ -785,6 +853,7 @@ globalThis.document={getElementById:()=>_canvas,querySelector:()=>_canvas};
         LiteScenes::CreateScene(host.id, host.runtime, host.engine);
         LiteScenes::Check(bl_startEngine(host.engine, nullptr, nullptr));
         host.setupMs = Ms(Clock::now() - host.created);
+        LiteScenesProbe::MarkSourceFrame();
         LiteScenes::Check(bl_frame(host.engine, 1000.0 / 60));
         bgfx::frame();
         LiteScenes::Check(host.Wait());

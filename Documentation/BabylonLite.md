@@ -1,5 +1,42 @@
 # Babylon Lite native component
 
+## M0 embedding notes (approved November 2026)
+
+LiteLayer defaults `BABYLON_LITE_D3D11_STAGING_BUFFERS=ON`, configuring the
+existing bgfx `BGFX_CONFIG_RENDERER_DIRECT3D11_USE_STAGING_BUFFER` switch.
+This is a build-wide D3D11 renderer choice: it affects other users of that bgfx
+target too. No vendor source is patched. `OFF` is retained for matched regression
+measurements, not a different public API.
+
+Asset RGBA8 mip chains use the original Lite1.32 fullscreen-triangle GPU blit,
+including hardware linear filtering and sRGB read/write conversions. Each level
+needs a view within the engine's granted `bl_RenderTarget.viewCount` range.
+Scene views occupy the high end of that range, in registration order. Low views
+are reserved first for environment decode, then same-frame mip prelude jobs;
+they never consume host/UI view reservations outside the granted range.
+Insufficient view capacity fails with `BL_UNSUPPORTED` before a pixel update.
+Outside a frame, setup drains through the existing submitted-work callback
+before reusing views. A borrowed host must implement that callback by progressing
+and retiring real submitted GPU work; returning success without doing so is
+invalid. Runtime mip compilation uses the injected shader service.
+
+Five additive C99 inspection functions expose existing native data:
+`bl_getContainerMeshes`, `bl_getSceneMeshes`, `bl_getSceneLights`,
+`bl_getMeshBounds` and `bl_getMaterialName`. List calls accept NULL/capacity0
+for a count query, otherwise copy handles into caller-owned aligned storage.
+Insufficient capacity and all failures leave the destination and count untouched.
+Container traversal is depth-first with first-visit deduplication; scene lists
+retain insertion order, duplicates and invisible/empty live meshes. Bounds are
+object-local, not world- or instance-expanded. Material names borrow immutable
+runtime-owned strings until disposal. JS inspection collections are live,
+read-only views; mutate membership through `addToScene`/`removeFromScene`.
+
+Scene200's unchanged registry thresholds remain enforced. Its CTest wrapper
+recognizes only the approved calculated pixel failure from FXC/DXC floating-point
+evaluation order; process failures, missing captures and unexpected passes still
+fail. Controlled VS-only replay gives exact0/0 MAD; see
+`api-coverage-batch1-v1\continuation-v3\summary.json` (`controlledReplay`). native component
+
 `LiteLayer` is a handwritten C-style implementation of the Babylon Lite 1.32.0 API
 reached by Minecraft, original scene2/scene38 and auxiliary native-cube/primitives,
 based on original TypeScript at

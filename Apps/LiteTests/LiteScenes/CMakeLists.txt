@@ -33,12 +33,12 @@ add_custom_command(OUTPUT "${LITE_SCENES_DATA}/bundles.json"
 add_custom_target(LiteScenesBundles DEPENDS "${LITE_SCENES_DATA}/bundles.json")
 
 foreach(_language IN ITEMS Native Js)
-    add_executable(LiteScenes${_language} Host.cpp AssetIO.cpp)
+    add_executable(LiteScenes${_language} Host.cpp AssetIO.cpp PresentProbe.cpp)
     target_compile_features(LiteScenes${_language} PRIVATE cxx_std_20)
     target_compile_definitions(LiteScenes${_language} PRIVATE
         LITE_SCENES_DATA="${LITE_SCENES_DATA}" WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(LiteScenes${_language} PRIVATE LiteLayer LiteShaderCompiler
-        LiteAssetDecoder bgfx user32 psapi windowscodecs ole32)
+        LiteAssetDecoder bgfx user32 psapi windowscodecs ole32 dxgi d3d11)
     warnings_as_errors(LiteScenes${_language})
     if(LITE_SCENES_RENDERDOC_INCLUDE)
         target_include_directories(LiteScenes${_language} SYSTEM PRIVATE "${LITE_SCENES_RENDERDOC_INCLUDE}")
@@ -56,10 +56,17 @@ foreach(_language IN ITEMS Native Js)
             $<TARGET_RUNTIME_DLLS:LiteScenes${_language}> $<TARGET_FILE_DIR:LiteScenes${_language}>
         COMMAND_EXPAND_LISTS)
     foreach(_id IN ITEMS 159 161 163 168 200 247 248 249 256 257 258 259 260 266)
+        set(_parity_expectation)
+        if(_id EQUAL 200)
+            # Approved backend FP-order residual: continuation-v3/summary.json controlledReplay.
+            # X-first VS replay is exact0/0; thresholds and production shaders are unchanged.
+            set(_parity_expectation --expect-backend-fp-difference)
+        endif()
         add_test(NAME LiteScenes${_language}-${_id}
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/harness.py" parity
                 --host "$<TARGET_FILE:LiteScenes${_language}>" --data "${LITE_SCENES_DATA}"
-                --scene "${_id}" --output "${CMAKE_CURRENT_BINARY_DIR}/parity/${_language}/${_id}")
+                --scene "${_id}" --output "${CMAKE_CURRENT_BINARY_DIR}/parity/${_language}/${_id}"
+                ${_parity_expectation})
         set_tests_properties(LiteScenes${_language}-${_id} PROPERTIES
             RUN_SERIAL TRUE TIMEOUT 180 LABELS "LiteScenes;parity")
     endforeach()
@@ -77,11 +84,13 @@ if(BABYLON_LITE_ENABLE_STYLE_CHECKS)
     set(_style_sources
         "${CMAKE_CURRENT_SOURCE_DIR}/Host.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scenes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/AssetIO.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssetIO.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PresentProbe.cpp")
     add_custom_target(LiteScenesStyleCheck
         COMMAND "${LITE_CLANG_FORMAT}" --dry-run --Werror
             "--style=file:${PROJECT_SOURCE_DIR}/Core/LiteLayer/.clang-format"
             ${_style_sources} "${CMAKE_CURRENT_SOURCE_DIR}/Scene.h" "${CMAKE_CURRENT_SOURCE_DIR}/AssetIO.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/PresentProbe.h"
         COMMAND "${LITE_SCENES_CLANG_TIDY}"
             "--config-file=${PROJECT_SOURCE_DIR}/Core/LiteLayer/.clang-tidy"
             "--header-filter=.*[\\\\/]Apps[\\\\/]LiteTests[\\\\/]LiteScenes[\\\\/].*"

@@ -6,6 +6,7 @@
 #include "PbrInternal.h"
 #include <babylon_lite_asset_decoder.h>
 #include <babylon_lite_shader_compiler.h>
+#include "GpuMipReference.h"
 #include "../LiteSandbox/AssetIO.h"
 #include <json.hpp>
 #include <filesystem>
@@ -395,7 +396,11 @@ static void resources(Context& context, bl_AssetContainer asset)
             auto* texture = reinterpret_cast<L_Texture*>(l_peek(context.runtime, handles[role]._id));
             require(texture->info.srgb == (role < 2 || role == 4),
                     "physical role-specific sRGB RGB/linear alpha resource");
-            size_t offset = 0;
+            const auto base = readGpu({texture->handleIndex},
+                static_cast<uint16_t>(texture->info.width),
+                static_cast<uint16_t>(texture->info.height));
+            const auto expected = referenceMips(base.data(), texture->info.width,
+                texture->info.height, texture->info.srgb);
             for (uint8_t mip = 0; mip < texture->mipCount; ++mip)
             {
                 uint16_t width = static_cast<uint16_t>(texture->info.width >> mip);
@@ -403,12 +408,8 @@ static void resources(Context& context, bl_AssetContainer asset)
                 width = width ? width : 1;
                 height = height ? height : 1;
                 auto bytes = readGpu({texture->handleIndex}, width, height, mip);
-                if (texture->mipPixels)
-                {
-                    require(!memcmp(bytes.data(), texture->mipPixels + offset, bytes.size()),
-                            "all actual native mip bytes match complete linear-light chain");
-                }
-                offset += bytes.size();
+                require(bytes == expected[mip],
+                        "all physical mips match independent hardware filtering");
             }
         }
     }

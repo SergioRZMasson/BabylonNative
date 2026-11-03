@@ -455,6 +455,21 @@ namespace Babylon::Plugins::LiteJSBinding
                 return result;
             }
 
+            Napi::Value WrapMesh(Napi::Env env, bl_Mesh mesh)
+            {
+                auto value = WrapNode(env, {mesh._runtime, mesh._id});
+                auto& token = Get(value);
+                if (token.kind == Kind::Node)
+                {
+                    objects.erase({Kind::Node, mesh._id});
+                    token.kind = Kind::Mesh;
+                    auto reference = Napi::Persistent(value.As<Napi::Object>());
+                    reference.Unref();
+                    objects.emplace(std::pair{Kind::Mesh, mesh._id}, std::move(reference));
+                }
+                return value;
+            }
+
             bl_Material MaterialFamily(Napi::Value value)
             {
                 if (value.IsNull()) return {};
@@ -2232,6 +2247,64 @@ namespace Babylon::Plugins::LiteJSBinding
                 for (uint32_t n = 0; n < entities.count; ++n)
                     result.Set(n, s.WrapNode(i.Env(), entities.data[n]));
                 return result;
+            });
+            Bind(api, state, "getContainerMeshes", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto container = s.HandleOf<bl_AssetContainer>(i[0], Kind::AssetContainer);
+                size_t count{};
+                s.Check(i.Env(), bl_getContainerMeshes(container, nullptr, 0, &count));
+                std::vector<bl_Mesh> meshes(count);
+                s.Check(i.Env(), bl_getContainerMeshes(container, meshes.data(), meshes.size(), &count));
+                auto result = Napi::Array::New(i.Env(), count);
+                for (uint32_t n = 0; n < count; ++n)
+                {
+                    result.Set(n, s.WrapMesh(i.Env(), meshes[n]));
+                }
+                return result;
+            });
+            Bind(api, state, "getSceneMeshes", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                size_t count{};
+                s.Check(i.Env(), bl_getSceneMeshes(scene, nullptr, 0, &count));
+                std::vector<bl_Mesh> meshes(count);
+                s.Check(i.Env(), bl_getSceneMeshes(scene, meshes.data(), meshes.size(), &count));
+                auto result = Napi::Array::New(i.Env(), count);
+                for (uint32_t n = 0; n < count; ++n)
+                {
+                    result.Set(n, s.WrapMesh(i.Env(), meshes[n]));
+                }
+                return result;
+            });
+            Bind(api, state, "getSceneLights", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto scene = s.HandleOf<bl_SceneContext>(i[0], Kind::Scene);
+                size_t count{};
+                s.Check(i.Env(), bl_getSceneLights(scene, nullptr, 0, &count));
+                std::vector<bl_Light> lights(count);
+                s.Check(i.Env(), bl_getSceneLights(scene, lights.data(), lights.size(), &count));
+                auto result = Napi::Array::New(i.Env(), count);
+                for (uint32_t n = 0; n < count; ++n)
+                {
+                    const auto kind = s.familyKinds.find(lights[n]._id);
+                    if (kind == s.familyKinds.end())
+                    {
+                        throw std::invalid_argument("Native light has no projected family identity.");
+                    }
+                    result.Set(n, s.Wrap(i.Env(), lights[n], kind->second));
+                }
+                return result;
+            });
+            Bind(api, state, "getMeshBounds", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_Vec3 minimum{};
+                bl_Vec3 maximum{};
+                s.Check(i.Env(), bl_getMeshBounds(s.HandleOf<bl_Mesh>(i[0], Kind::Mesh), &minimum, &maximum));
+                auto result = Napi::Object::New(i.Env());
+                result.Set("minimum", ColorArray(i.Env(), minimum));
+                result.Set("maximum", ColorArray(i.Env(), maximum));
+                return result;
+            });
+            Bind(api, state, "getMaterialName", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                bl_String name{};
+                s.Check(i.Env(), bl_getMaterialName(s.MaterialFamily(i[0]), &name));
+                return Napi::String::New(i.Env(), name.data ? name.data : "", name.length);
             });
             Bind(api, state, "getAssetContainerAnimationGroups",
                  [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
