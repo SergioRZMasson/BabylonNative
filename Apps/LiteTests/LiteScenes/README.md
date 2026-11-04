@@ -27,19 +27,20 @@ palette clear approach is enabled by an explicit host slot lease; no authored
 clear color or parity threshold is altered. See `babylon_lite.h` for ownership,
 atomic-error, sharing and native-host configuration contracts.
 
-MAD values below are **full/foreground RGB 0..255**, not normalized:
+MAD values below are **full/foreground RGB 0..255**, not normalized, from the
+fresh `perf-v1` gates on the exact frozen measured executables:
 
 | M1 scene | Native batches exercised | Native parity MAD | JS parity MAD |
 |---|---|---|---|
 | 16 | colored instances | PASS .00003979/.00011677 | PASS .00003979/.00011677 |
-| 43 | colored instances, native callbacks | PASS .00012080/.00035791 | PASS .00012297/.00036239 |
+| 43 | colored instances, native callbacks | PASS .00012153/.00036127 | PASS .00010959/.00032873 |
 | 162 | torus geometry | PASS 0/0 | PASS 0/0 |
 | 165 | shader instance colors | PASS .00000723/.00003982 | PASS .00000723/.00003982 |
-| 201 | high-precision floating origin | PASS .00027633/.00039786 | PASS .00028176/.00040567 |
-| 204 | instances and floating origin | PASS .00034975/.00042827 | PASS .00035409/.00043358 |
-| 213 | grid material | PASS .00013636/.00295270 | PASS .00015408/.00324797 |
-| 268 | live orthographic projection | PASS .00012731/.00057836 | PASS .00012731/.00057836 |
-| 270 | mirrored parenting/transforms | PASS .00009946/.00078914 | PASS .00009838/.00078053 |
+| 201 | high-precision floating origin | PASS .00028176/.00040567 | PASS .00028176/.00040567 |
+| 204 | instances and floating origin | PASS .00035409/.00043358 | PASS .00034975/.00042827 |
+| 213 | grid material | PASS .00015082/.00306007 | PASS .00014395/.00310034 |
+| 268 | live orthographic projection | PASS .00012731/.00057836 | PASS .00012334/.00056028 |
+| 270 | mirrored parenting/transforms | PASS .00010091/.00080062 | PASS .00009983/.00079201 |
 | 274 | alpha-to-coverage and sample metadata | PASS 0/0 | PASS 0/0 |
 | 278 | colored line topology | PASS 0/0 | PASS 0/0 |
 | 279 | line updates and colored instances | PASS 0/0 | PASS 0/0 |
@@ -68,12 +69,45 @@ P95-tail envelope in submit/backpressure; exact backend attribution remains open
 No threshold, source workload, compiler route or bgfx implementation was changed
 to hide these failures. **M1 is not performance-qualified.**
 
-**Scope still requiring parent review:** the original bake API is Gaussian-
-splatting-only (M10), not an ordinary-mesh bake. Bound CPU-skin clones and
+**Approved scope:** the original bake API is deferred to M10; it is Gaussian-
+splatting-only, not an ordinary-mesh bake. Bound CPU-skin clones and
 protected imported-topology reparenting remain explicit unsupported cases.
 Source 1.25/1.32 capacity-draw padding is recorded separately rather than silently
 adapting the corpus. Clone-shared geometry rejects ordinary in-place updates;
 resize detaches, while thin data remains shared.
+
+### M1 performance follow-up
+
+The fresh `api-m1-v1\perf-v1` batch executes another **360 balanced pairs /
+720 processes**, with the same 120/2000 frames and unchanged mean/P95 CI gates.
+It reports **19 timing passes, 5 inconclusive, 0 conclusively slower**.
+Native/JS16 and JS204 lack a mean pass; Native/JS213 lack a P95 pass.
+The original 6-pass/15-slower/3-inconclusive batch above remains historical evidence.
+No rendering optimization was retained, so the changed verdicts must not be
+credited to a code speedup. **The all-lane target remains unmet.**
+
+Thirty-six final GPU replay ledgers separate actual draws, clears and MSAA
+resolves for all three lanes. Unchanged instance streams use persistent DEFAULT
+64/80-byte buffers with **zero frame writes**; no transient repacking occurs.
+All default scenes have zero compute dispatch. A separate original `?culling`
+scene16 profile measures reset/compaction at 0.0057/0.1992 ms and the indexed-
+indirect draw. GPU timings are replay diagnostics, not throughput/latency gates.
+Frame API counts exclude capture-initialization records.
+
+Shader lowering/control-flow experiments reduced lit GPU time but regressed
+P95 and were reverted. Submission/flush/queue controls also failed qualification;
+struct-interface pruning failed its focused test and was removed. All 24 final
+native/JS shader-disassembly sets match the approved implementation.
+No bgfx or ABI changes, workload shortcuts or threshold changes were retained.
+The restored build again passes 79/79 root and 10/10 fresh Minecraft suites;
+the frozen measured binaries pass 24/24 M1 pixel gates.
+
+See `perf-v1\SUMMARY.md` for the full per-language parity, mean/P95 confidence
+interval and separate startup table, GPU/pass/draw data, experiments, commands
+and attribution limits. Driver causality and general latency parity remain
+unproven. Optional startup-only HLSL dumps are available with
+`BABYLON_LITE_SHADER_COMPILER_DIAGNOSTICS=ON` and
+`LITE_SHADER_DIAG_HLSL_DIRECTORY`; diagnostics default OFF and were OFF for timing.
 
 The older feasibility-stop artifacts and historical M0 sections below remain
 immutable evidence, not the current M1 implementation status.

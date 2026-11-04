@@ -125,9 +125,9 @@ counts but a slower D3D11 GPU draw than D3D12; exact driver/compiler/layout
 attribution is unresolved. Diagnostic storage/finite-math experiments were
 discarded, not silently adopted. **M1 remains open; no timing threshold is waived.**
 
-**Remaining scope requiring review:** `bakeCurrentTransformIntoVertices` belongs
+**Approved deferral:** `bakeCurrentTransformIntoVertices` moves to M10. It belongs
 to the original Gaussian-splatting mesh family, not ordinary triangle meshes;
-that M10 family has not been invented or substituted here. Bound CPU-skin clones
+that family has not been invented or substituted here. Bound CPU-skin clones
 and reparenting protected imported topology still fail explicitly. Original
 ordinary geometry/attribute updates reject clone-shared GPU geometry; resizing
 detaches, while thin-instance data remains shared. Source-delta evidence also
@@ -136,6 +136,49 @@ records the 1.25/1.32 capacity-draw padding difference for separate review.
 Current commands, ABI inventory, body/scene source deltas, raw parity/performance
 and startup receipts are under `api-m1-v1\implementation-v1` in the investigation
 artifacts. Earlier feasibility-stop receipts are preserved, not current status.
+
+##### M1 steady-state follow-up (`perf-v1`)
+
+The fresh 360-pair/720-process Release/V8 batch reports **19/24 timing passes,
+5 inconclusive and none conclusively slower**. The unqualified lanes are
+Native/JS16, JS204 and Native/JS213. Both required confidence-interval gates remain
+unchanged. This is **not a demonstrated optimization** over the earlier batch:
+no rendering optimization survived qualification, and all 24 native/JS compiled
+shader-disassembly sets match the approved implementation. Material timing drift
+between batches remains visible in the raw results. **The all-24-lane performance
+goal is still unmet.**
+
+All twelve scenes have separate native, JS and SDL_GPU GPU replay ledgers
+(36 before and 36 final captures), with five-repeat per-action timestamps, work
+counters, shader disassembly, depth/raster state and buffer descriptors. Frame-only
+API ledgers explicitly exclude RenderDoc's resource-initialization records.
+Static 64/80-byte instance storage is D3D11 DEFAULT storage, not transient data
+re-uploaded each frame; captured unchanged instance streams have zero frame writes.
+Default workloads do not dispatch the optional GPU culler. A separate scene16
+capture measures its count reset at 0.0057 ms and 64,000-invocation compaction at
+0.1992 ms, followed by the real indexed-indirect draw.
+
+Finite-math lowering plus equivalent lighting control flow reduced lit pixel
+instructions from 158 to 129 and controlled live GPU time by about 20%, but
+scene204 P95 regressed by 11.4% in 15 balanced pairs. Those changes were reverted.
+Single-thread submission, flush/flip timing and reduced queue-latency controls
+also failed joint qualification. A vertex-output pruning experiment failed its
+focused struct-interface test and was removed. No bgfx, original workload,
+threshold, execution-placement or public ABI change was retained. Backend/driver
+causality is not proven merely by the D3D11/D3D12 difference.
+
+The restored source passes 79/79 root CTests and 10/10 fresh Minecraft suites;
+the exact frozen measured executables separately pass all 24 M1 pixel gates.
+The earlier scene200 FP and 249/257 anisotropy wrappers remain inherited gaps.
+Per-lane MAD, mean/P95 ratios and confidence intervals, separate startup,
+per-draw GPU breakdowns, rejected controls, commands and limitations are in
+`api-m1-v1\perf-v1\SUMMARY.md` and `summary.json`.
+
+The only compiler addition is optional diagnostic HLSL output:
+`BABYLON_LITE_SHADER_COMPILER_DIAGNOSTICS=ON` enables startup-only dumps when
+`LITE_SHADER_DIAG_HLSL_DIRECTORY` names a local output directory. It defaults
+OFF and was OFF for the final batch. It is not a shader cache, AOT feature or
+replacement compiler route; do not enable dumps in a formal timing run.
 
 ### Native GLB compatibility (previous priority)
 

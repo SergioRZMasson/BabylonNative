@@ -28,6 +28,12 @@
 #include <set>
 #include <stdexcept>
 #include <utility>
+#ifdef BL_SHADER_COMPILER_DIAGNOSTICS
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#endif
 
 namespace bgfx
 {
@@ -50,6 +56,49 @@ namespace Babylon::LiteShaderCompiler
         uint32_t Align16(uint32_t size)
         {
             return (size + 15u) & ~15u;
+        }
+
+#ifdef BL_SHADER_COMPILER_DIAGNOSTICS
+        std::string DiagnosticVariable(const char* name)
+        {
+            size_t size = 0;
+            if (getenv_s(&size, nullptr, 0, name) != 0)
+            {
+                throw std::runtime_error("Diagnostic environment lookup failed.");
+            }
+            if (!size)
+            {
+                return {};
+            }
+            std::string value(size, '\0');
+            if (getenv_s(&size, value.data(), value.size(), name) != 0)
+            {
+                throw std::runtime_error("Diagnostic environment changed during lookup.");
+            }
+            value.resize(size ? size - 1 : 0);
+            return value;
+        }
+#endif
+
+        void DumpHlsl(std::string_view hlsl)
+        {
+#ifdef BL_SHADER_COMPILER_DIAGNOSTICS
+            const auto directory = DiagnosticVariable("LITE_SHADER_DIAG_HLSL_DIRECTORY");
+            if (!directory.empty())
+            {
+                std::filesystem::create_directories(directory);
+                const auto path = std::filesystem::path(directory) /
+                                  (std::to_string(std::hash<std::string_view>{}(hlsl)) + ".hlsl");
+                std::ofstream output(path, std::ios::binary);
+                output.write(hlsl.data(), static_cast<std::streamsize>(hlsl.size()));
+                if (!output)
+                {
+                    throw std::runtime_error("Requested diagnostic HLSL dump failed.");
+                }
+            }
+#else
+            (void)hlsl;
+#endif
         }
 
         Binding BindingOf(const spirv_cross::Compiler& compiler, uint32_t id)
@@ -778,6 +827,7 @@ namespace Babylon::LiteShaderCompiler
 
                 phase = "SPIRV-Cross HLSL generation";
                 const std::string hlsl = compiler.compile();
+                DumpHlsl(hlsl);
                 const std::string nativeEntry = compiler.get_cleansed_entry_point_name(entry,
                     vertex ? spv::ExecutionModelVertex : spv::ExecutionModelFragment);
                 Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
@@ -969,6 +1019,7 @@ namespace Babylon::LiteShaderCompiler
             compiler.set_decoration(buffer.id, spv::DecorationBinding, stage);
         }
         const std::string hlsl = compiler.compile();
+        DumpHlsl(hlsl);
         const auto nativeEntry = compiler.get_cleansed_entry_point_name(entry, spv::ExecutionModelGLCompute);
         Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
         Microsoft::WRL::ComPtr<ID3DBlob> diagnostics;

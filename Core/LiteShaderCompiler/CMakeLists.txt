@@ -96,6 +96,11 @@ target_compile_definitions(LiteSpirvCross PUBLIC spirv_cross=lite_spirv_cross)
 set_property(TARGET LiteSpirvCross PROPERTY FOLDER Dependencies/LiteShaderCompiler)
 
 add_library(LiteShaderCompilerBackend STATIC ${SOURCES})
+option(BABYLON_LITE_SHADER_COMPILER_DIAGNOSTICS
+    "Enable explicit startup-only generated HLSL dumps." OFF)
+if(BABYLON_LITE_SHADER_COMPILER_DIAGNOSTICS)
+    target_compile_definitions(LiteShaderCompilerBackend PRIVATE BL_SHADER_COMPILER_DIAGNOSTICS=1)
+endif()
 warnings_as_errors(LiteShaderCompilerBackend)
 target_link_libraries(LiteShaderCompilerBackend PRIVATE LiteTintCompiler LiteSpirvCross bgfx bx d3dcompiler)
 if(MSVC)
