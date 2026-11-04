@@ -27,7 +27,7 @@ file(GLOB_RECURSE _scene_sources CONFIGURE_DEPENDS "${LITE_SCENES_DATA}/source/*
 add_custom_command(OUTPUT "${LITE_SCENES_DATA}/bundles.json"
     COMMAND "${LITE_SCENES_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/bundle.mjs"
         "${LITE_SCENES_DATA}"
-    DEPENDS bundle.mjs platform.js projection-tests.js ${_scene_sources}
+    DEPENDS bundle.mjs platform.js projection-tests.js projection-m1-tests.js ${_scene_sources}
         "${PROJECT_SOURCE_DIR}/Plugins/LiteJSBinding/JavaScript/babylon-lite.js"
     VERBATIM)
 add_custom_target(LiteScenesBundles DEPENDS "${LITE_SCENES_DATA}/bundles.json")
@@ -49,13 +49,14 @@ foreach(_language IN ITEMS Native Js)
         target_link_libraries(LiteScenesJs PRIVATE LiteJSBinding AppRuntime Console ScriptLoader)
         add_dependencies(LiteScenesJs LiteScenesBundles)
     else()
-        target_sources(LiteScenesNative PRIVATE Scenes.cpp)
+        target_sources(LiteScenesNative PRIVATE Scenes.cpp ScenesM1.cpp)
     endif()
     add_custom_command(TARGET LiteScenes${_language} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E $<IF:$<BOOL:$<TARGET_RUNTIME_DLLS:LiteScenes${_language}>>,copy,true>
             $<TARGET_RUNTIME_DLLS:LiteScenes${_language}> $<TARGET_FILE_DIR:LiteScenes${_language}>
         COMMAND_EXPAND_LISTS)
-    foreach(_id IN ITEMS 159 161 163 168 200 247 248 249 256 257 258 259 260 266)
+    foreach(_id IN ITEMS 159 161 163 168 200 247 248 249 256 257 258 259 260 266
+        16 43 162 165 201 204 213 268 270 274 278 279)
         set(_parity_expectation)
         if(_id EQUAL 200)
             # Approved backend FP-order residual: continuation-v3/summary.json controlledReplay.
@@ -83,6 +84,11 @@ add_test(NAME LiteScenesProjectionForwarding COMMAND LiteScenesJs
     "--script=${LITE_SCENES_DATA}/sceneprojection.js" --warmup=0
     "--out=${CMAKE_CURRENT_BINARY_DIR}/projection-tests")
 set_tests_properties(LiteScenesProjectionForwarding PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+add_test(NAME LiteScenesM1ProjectionForwarding COMMAND LiteScenesJs
+    --scene=162 "--data=${LITE_SCENES_DATA}"
+    "--script=${LITE_SCENES_DATA}/sceneprojectionm1.js" --warmup=0
+    "--out=${CMAKE_CURRENT_BINARY_DIR}/projection-m1-tests")
+set_tests_properties(LiteScenesM1ProjectionForwarding PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
 add_test(NAME LiteScenesHarnessTests COMMAND "${Python3_EXECUTABLE}" -m unittest
     discover -s "${CMAKE_CURRENT_SOURCE_DIR}" -p "test_*.py")
 
@@ -91,6 +97,7 @@ if(BABYLON_LITE_ENABLE_STYLE_CHECKS)
     set(_style_sources
         "${CMAKE_CURRENT_SOURCE_DIR}/Host.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scenes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScenesM1.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AssetIO.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PresentProbe.cpp")
     add_custom_target(LiteScenesStyleCheck

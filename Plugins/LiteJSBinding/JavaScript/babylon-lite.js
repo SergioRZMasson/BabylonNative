@@ -6,9 +6,12 @@ const wrappers = new WeakMap();
 const handles = new WeakMap();
 const meshHandles = new WeakSet();
 const cameraHandles = new WeakSet();
+const lightHandles = new WeakSet();
+const nodeKinds = new WeakMap();
 const sceneEntities = new WeakMap();
 const referenceValues = [];
 const flushReference = Symbol("native-reference-values");
+let highPrecisionMatrices = false;
 
 globalThis._liteFlushReferenceValues = () => {
     let live = 0;
@@ -99,7 +102,7 @@ function node(handle, readonlyPosition = false) {
         for (const name of ["position", "rotation", "scaling"]) {
             const proxy = vector(() => native.getNodeVector(value, name),
                 data => native.setNodeVector(value, name, data), ["x", "y", "z"],
-                readonlyPosition && name === "position");
+                name !== "rotation");
             field(object, name, () => proxy, readonlyPosition && name === "position"
                 ? undefined : data => native.setNodeVector(value, name, data));
         }
@@ -110,7 +113,7 @@ function node(handle, readonlyPosition = false) {
         field(object, "name", () => native.getNodeName(value), name => native.setNodeName(value, name));
         field(object, "visible", () => native.getNodeVisible(value), visible => native.setNodeVisible(value, visible));
         field(object, "parent", () => {
-            parentReference = node(native.getNodeParent(value));
+            parentReference = typedNode(native.getNodeParent(value));
             return parentReference;
         }, parent => {
             native.setNodeParent(value, token(parent));
@@ -118,7 +121,7 @@ function node(handle, readonlyPosition = false) {
         });
         const children = new Proxy([], {
             get(target, property) {
-                childReferences = native.getNodeChildren(value).map(node);
+                childReferences = native.getNodeChildren(value).map(typedNode);
                 const values = childReferences;
                 if (property === "push") return (...added) => {
                     for (const child of added) native.appendNodeChild(value, token(child));
@@ -138,12 +141,27 @@ function node(handle, readonlyPosition = false) {
             },
         });
         field(object, "children", () => children);
-        const worldMatrix = new Float32Array(16);
+        const worldMatrix = highPrecisionMatrices ? new Float64Array(16) : new Float32Array(16);
         field(object, "worldMatrix", () => {
             worldMatrix.set(native.getNodeWorldMatrix(value));
             return worldMatrix;
         });
     });
+}
+
+function typedNode(handle) {
+    if (handle === null) return null;
+    let kind = nodeKinds.get(handle);
+    if (kind === undefined) {
+        kind = native.getSceneNodeKind(handle);
+        nodeKinds.set(handle, kind);
+    }
+    if (kind === 1) return mesh(handle);
+    if (kind === 2) return camera(handle);
+    if (kind === 3) return arcRotateCamera(handle);
+    if (kind === 4) return hemisphericLight(handle);
+    if (kind === 5) return directionalLight(handle);
+    return node(handle);
 }
 
 function mesh(handle) {
@@ -164,6 +182,7 @@ function mesh(handle) {
     }
     field(object, "boundMin", () => native.getMeshBounds(handle).minimum);
     field(object, "boundMax", () => native.getMeshBounds(handle).maximum);
+    field(object, "thinInstances", () => getThinInstances(object));
     return object;
 }
 
@@ -221,10 +240,8 @@ function camera(handle) {
 }
 
 export async function createEngine(canvas, options) {
-    if (options?.useFloatingOrigin) {
-        throw new Error("Floating origin is outside the current native contract.");
-    }
     const engine = native.createEngine(canvas, options);
+    highPrecisionMatrices = options?.useHighPrecisionMatrix ?? false;
     globalThis._platformAttachUi?.(engine);
     return identity(engine, (object, handle) => {
         for (const name of ["drawCallCount", "gpuFrameTimeMs"]) {
@@ -232,6 +249,8 @@ export async function createEngine(canvas, options) {
         }
         // Original engine.ts only consumes this option at creation; the public field is plain data.
         object.useHighPrecisionMatrix = options?.useHighPrecisionMatrix ?? false;
+        object.useFloatingOrigin = options?.useFloatingOrigin ?? false;
+        field(object, "msaaSamples", () => native.getMsaaSamples(handle));
     });
 }
 
@@ -272,6 +291,31 @@ export function createSceneContext(engine) {
 }
 
 export const createFreeCamera = (position, target) => camera(native.createFreeCamera(position, target));
+export function attachFreeControl(object, canvas, scene) {
+    const control = native.attachFreeControl(token(object), token(scene));
+    const names = ["pointerdown", "pointermove", "pointerup", "contextmenu", "keydown", "keyup"];
+    const listeners = names.map((name, kind) => {
+        const callback = event => {
+            const input = {kind};
+            for (const field of ["code", "button", "pointerId", "clientX", "clientY"])
+                if (event[field] !== undefined) input[field] = event[field];
+            const effects = native.processFreeInput(control, input);
+            if (effects.preventDefault) event.preventDefault?.();
+            if (effects.capturePointer) canvas.setPointerCapture(effects.pointerId);
+            if (effects.releasePointer) canvas.releasePointerCapture(effects.pointerId);
+        };
+        canvas.addEventListener(name, callback);
+        return callback;
+    });
+    if (!canvas.hasAttribute("tabindex")) canvas.tabIndex = 0;
+    let active = true;
+    return () => {
+        if (!active) return;
+        native.detachFreeControl(control);
+        names.forEach((name, index) => canvas.removeEventListener(name, listeners[index]));
+        active = false;
+    };
+}
 export function createArcRotateCamera(alpha, beta, radius, target) {
     const handle = native.createArcRotateCamera(alpha, beta, radius, target);
     return arcRotateCamera(handle);
@@ -279,6 +323,7 @@ export function createArcRotateCamera(alpha, beta, radius, target) {
 
 function arcRotateCamera(handle) {
     const object = node(handle);
+    if (cameraHandles.has(handle)) return object;
     cameraHandles.add(handle);
     const targetView = vector(() => native.getArcRotateCameraProperties(handle).target,
         value => native.setArcRotateCameraProperty(handle, "target", value), ["x", "y", "z"]);
@@ -371,25 +416,102 @@ export const disposeEnvironmentTextures = object => native.disposeEnvironmentTex
 export const getTextureCubeInfo = object => native.getTextureCubeInfo(token(object));
 
 const thinReferences = new WeakMap();
+const thinStates = new WeakMap();
+function acknowledgeThin(data) {
+    const state = thinStates.get(data);
+    state.version = data._version;
+    state.colorVersion = data._colorVersion;
+    state.count = data.count;
+}
+function flushThinReference(data) {
+    const state = thinStates.get(data);
+    const matrices = state.version !== data._version || state.count !== data.count;
+    const colors = state.colorVersion !== data._colorVersion;
+    if (!matrices && !colors) return;
+    let live = 0;
+    for (const reference of state.owners) {
+        const object = reference.deref();
+        if (object && native.writeThinInstanceData(token(object), data, matrices, colors)) {
+            state.owners[live++] = reference;
+            acknowledgeThin(data);
+            return;
+        }
+    }
+    state.owners.length = live;
+}
+function retainThinReference(object, data) {
+    let state = thinStates.get(data);
+    if (!state) {
+        data._version ??= Number(data.version ?? 1);
+        data._colorVersion ??= 0;
+        data._capacity ??= data.capacity ?? data.count;
+        state = {owners: []};
+        thinStates.set(data, state);
+        acknowledgeThin(data);
+        Object.defineProperty(data, flushReference, {value: () => flushThinReference(data)});
+        referenceValues.push(new WeakRef(data));
+    }
+    state.owners.push(new WeakRef(object));
+    thinReferences.set(object, data);
+    return data;
+}
 export function setThinInstances(object, matrices, count) {
-    native.setThinInstances(token(object), matrices, count);
     const existing = thinReferences.get(object);
+    if (existing) flushThinReference(existing);
+    native.setThinInstances(token(object), matrices, count);
     if (existing) {
         existing.matrices = matrices;
         existing.count = count;
         existing._capacity = count;
         existing._version++;
+        acknowledgeThin(existing);
     } else {
-        thinReferences.set(object, { matrices, count, _capacity: count, _version: 1 });
+        retainThinReference(object, { matrices, count, _capacity: count, _version: 1 });
     }
 }
 export function getThinInstances(object) {
     const existing = thinReferences.get(object);
     if (existing) return existing;
     const result = native.getThinInstances(token(object));
-    thinReferences.set(object, result);
-    return result;
+    if (!result) return undefined;
+    return retainThinReference(object, result);
 }
+export function setThinInstanceColors(object, colors) {
+    const data = getThinInstances(object);
+    if (data) flushThinReference(data);
+    native.setThinInstanceColors(token(object), colors);
+    data.colors = colors;
+    data._version = (data._version ?? Number(data.version)) + 1;
+    data._colorVersion = (data._colorVersion ?? 0) + 1;
+    acknowledgeThin(data);
+}
+export function setThinInstanceMatrix(object, index, matrix) {
+    const data = getThinInstances(object);
+    if (data) flushThinReference(data);
+    native.setThinInstanceMatrix(token(object), index, matrix);
+    data.matrices.set(matrix, index * 16);
+    data._version = (data._version ?? Number(data.version)) + 1;
+    acknowledgeThin(data);
+}
+export function setThinInstanceCount(object, count) {
+    const data = getThinInstances(object);
+    if (!data) return;
+    const update = {...data, count};
+    native.writeThinInstanceData(token(object), update, true,
+        thinStates.get(data).colorVersion !== data._colorVersion);
+    data.count = count;
+    data._version++;
+    acknowledgeThin(data);
+}
+export function flushThinInstances(object) {
+    const data = getThinInstances(object);
+    native.writeThinInstanceData(token(object), data, true,
+        thinStates.get(data).colorVersion !== data._colorVersion);
+    data._version++;
+    acknowledgeThin(data);
+}
+export const enableThinInstanceGpuCulling = (object, enabled = true) =>
+    native.enableThinInstanceGpuCulling(token(object), enabled);
 export const enableThinInstanceWorldBounds = object => native.enableThinInstanceWorldBounds(token(object));
 
 export function setCameraLimits(object, limits, _unusedScene) {
@@ -473,9 +595,12 @@ export function attachControl(object, canvas, scene, options) {
     return detach;
 }
 
-export function createHemisphericLight(direction, intensity) {
-    const handle = native.createHemisphericLight(direction, intensity);
+export const createHemisphericLight = (direction, intensity) =>
+    hemisphericLight(native.createHemisphericLight(direction, intensity));
+function hemisphericLight(handle) {
     const object = node(handle);
+    if (lightHandles.has(handle)) return object;
+    lightHandles.add(handle);
     const directionView = vector(() => native.getHemisphericLightProperties(handle).direction,
         value => native.setHemisphericLightProperty(handle, "direction", value), ["x", "y", "z"]);
     field(object, "direction", () => directionView);
@@ -488,9 +613,12 @@ export function createHemisphericLight(direction, intensity) {
     return Object.seal(object);
 }
 
-export function createDirectionalLight(direction, intensity) {
-    const handle = native.createDirectionalLight(direction, intensity);
+export const createDirectionalLight = (direction, intensity) =>
+    directionalLight(native.createDirectionalLight(direction, intensity));
+function directionalLight(handle) {
     const object = node(handle, true);
+    if (lightHandles.has(handle)) return object;
+    lightHandles.add(handle);
     const directionView = vector(() => native.getDirectionalLightProperties(handle).direction,
         value => native.setDirectionalLightProperty(handle, "direction", value, true),
         ["x", "y", "z"], true);
@@ -549,10 +677,65 @@ export const rebuildMaterial = (scene, material, options) => {
     return native.rebuildMaterial(token(scene), token(material), options);
 };
 export const rebuildSceneRenderables = scene => native.rebuildSceneRenderables(token(scene));
-export const createTransformNode = name => node(native.createTransformNode(name));
+export const createTransformNode = (name, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0,
+    qw = 1, sx = 1, sy = 1, sz = 1) => node(native.createTransformNode(name, {
+        position: {x: px, y: py, z: pz}, rotationQuaternion: {x: qx, y: qy, z: qz, w: qw},
+        scaling: {x: sx, y: sy, z: sz},
+    }));
+export const createIdentityMat4 = () => native.createIdentityMat4();
+export const createTranslationMat4 = (...values) => native.createTranslationMat4(...values);
+export const composeMat4 = (...values) => native.composeMat4(...values);
+export const setParent = (child, parent) => native.setParent(token(child), token(parent));
+export function cloneTransformNode(object) {
+    const result = typedNode(native.cloneTransformNode(token(object)));
+    const pending = [[object, result]];
+    while (pending.length) {
+        const [source, copy] = pending.pop();
+        if (meshHandles.has(token(source))) {
+            const data = getThinInstances(source);
+            if (data) retainThinReference(copy, data);
+        }
+        const children = source.children;
+        const copies = copy.children;
+        for (let i = 0; i < children.length; i++) pending.push([children[i], copies[i]]);
+    }
+    return result;
+}
+export const setAlphaToCoverage = (object, enabled) => native.setAlphaToCoverage(token(object), enabled);
+export const getAlphaToCoverage = object => native.getAlphaToCoverage(token(object));
+export const enableMirroredMeshes = async scene => native.enableMirroredMeshes(token(scene));
+const orthoBounds = new WeakMap();
+export function enableOrthographicCamera(object, options) {
+    native.enableOrthographicCamera(token(object), options);
+    const snapshot = native.getOrthographicBounds(token(object));
+    const bounds = {};
+    for (const name of ["halfHeight", "left", "right", "bottom", "top"]) {
+        field(bounds, name, () => orthoBounds.get(object) === bounds
+            ? native.getOrthographicBounds(token(object))[name] : snapshot[name], value => {
+            if (orthoBounds.get(object) === bounds) {
+                const current = native.getOrthographicBounds(token(object));
+                current[name] = value;
+                native.setOrthographicBounds(token(object), current);
+            }
+            snapshot[name] = value;
+        });
+    }
+    orthoBounds.set(object, bounds);
+    object.ortho = bounds;
+    return bounds;
+}
+export function disableOrthographicCamera(object) {
+    native.disableOrthographicCamera(token(object));
+    orthoBounds.delete(object);
+    object.ortho = null;
+}
 export const createBoxData = options => native.createBoxData(options);
 export const createSphereData = options => native.createSphereData(options);
 export const createFlatGroundData = options => native.createFlatGroundData(options);
+export const createTorusData = options => native.createTorusData(options);
+export const createTorus = (engine, options) => mesh(native.createTorus(token(engine), options));
+export const createGroundFromHeightMap = async (engine, url, options) =>
+    mesh(native.createGroundFromHeightMap(token(engine), url, options));
 export const createCylinderData = options => native.createCylinderData(options);
 // Native helper exports: these six data functions are original module exports,
 // not exports of the original Babylon Lite package root.
@@ -573,6 +756,18 @@ export const createGround = (engine, options) => mesh(native.createGround(token(
 export const createBox = (engine, options) => mesh(native.createBox(token(engine), options));
 export const createMeshFromData = (engine, name, ...streams) => mesh(native.createMeshFromData(token(engine), name, ...streams));
 export const createShaderMaterial = options => material(native.createShaderMaterial(options));
+export const createGridMaterial = options => material(native.createGridMaterial(options));
+export function createLineMaterial(options) {
+    const object = material(native.createLineMaterial(options));
+    for (const name of ["useVertexColor", "useThinInstances", "useThinInstanceColors"])
+        Object.defineProperty(object, name, {value: options?.[name] ?? false, enumerable: true});
+    Object.defineProperty(object, "useVertexAlpha", {value: options?.useVertexAlpha ?? true, enumerable: true});
+    return object;
+}
+export const createLineSystem = (engine, options) => mesh(native.createLineSystem(token(engine),
+    {...options, material: options?.material == null ? undefined : token(options.material)}));
+export const updateLineSystem = (engine, object, options) =>
+    native.updateLineSystem(token(engine), token(object), options);
 export const createSphere = (engine, options) => mesh(native.createSphere(token(engine), options));
 export const createTexture2DFromPixels = (engine, ...args) => identity(native.createTexture2DFromPixels(token(engine), ...args));
 export const setShaderFloat = (material, ...args) => native.setShaderFloat(token(material), ...args);

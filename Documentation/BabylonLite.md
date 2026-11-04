@@ -62,10 +62,80 @@ are carried by the static target.
 
 The current priority is the API surface exercised by the bblitec corpus, with
 native and JS hosts, registry-threshold pixel tests and paired performance
-evidence. The opt-in [LiteScenes M0 harness](../Apps/LiteTests/LiteScenes/README.md)
-hosts fourteen additional workloads without engine JavaScript or private Core
+evidence. The opt-in [LiteScenes harness](../Apps/LiteTests/LiteScenes/README.md)
+hosts 26 M0/M1 workloads without engine JavaScript or private Core
 headers. M0 remains incomplete: failed golden gates and missing native
 projection contracts are reported explicitly, not counted as coverage.
+
+#### M1: scene graph, geometry and instancing
+
+The six feature batches now have native implementations and JS forwarding:
+
+| Batch | Implemented scope |
+|---|---|
+| Parenting/math | Original affine/shear-preserving `setParent`, detached deep clones, independent light clones, F32/F64 identity/translation/TRS helpers. |
+| Geometry | Original torus arrays, heightmap luminance/normals through host image decoding, sphere vertex-count projection. |
+| Lines/grid | Original grid and line WGSL/options, line-list topology, fixed-topology line updates and bounds. |
+| Instances | Shared F32/F64 matrix slabs, colors, dynamic writes/counts, mirrored meshes, GPU compaction and indexed-indirect draws. |
+| Alpha coverage | Native multisample state, original rebuild snapshots, actual target sample-count query. |
+| Large world | Double-precision floating-origin subtraction, live orthographic bounds, native free-control math with host-only input transport. |
+
+User-approved native adaptation (`275fb37f`): matrix and optional RGBA attributes
+occupy four/five 16-byte instance slots (64/80 bytes), following NativeEngine's
+`VertexBuffer`/`InstanceRepacker` approach, reimplemented as Lite POD/free functions.
+The culler preserves the original sphere/frustum math, 64-thread workgroups,
+atomic output count and GPU execution. It writes compacted interleaved records;
+there is no CPU visibility substitute and no bgfx modification. Floating-origin
+draw uniforms are relative, but culling retains the original absolute camera VP.
+Persistent storage uploads use ordered buffer copies, following NativeEngine's
+`StorageBuffer::Upload`; immutable upload sources avoid the pinned D3D11
+READ-only dynamic-buffer/STAGING incompatibility.
+
+The additive compute shader service produces real D3D11 CSH containers and
+raw-storage reflection. Existing graphics services, records and release rules
+are unchanged. The currently shipped Tint-SPIR-V/SPIRV-Cross/FXC bridge remains;
+the separately decided direct-Tint migration is not part of M1.
+
+Exact render-pass clear conversion uses an explicit host lease:
+`bl_setNativeClearPaletteIndex(engine, slot)` before registering scenes. The host
+reserves that bgfx palette slot until engine disposal. JS hosts opt in through
+the additive `LiteJSBinding::Initialize(env, options, slot)` overload, preserving
+the old `HostOptions` layout. Existing hosts retain their packed 8-bit mode.
+An existing engine may switch to an RGBA16F target only after leasing a slot;
+direct HDR creation without that ownership contract remains unsupported.
+This follows Native Graphics' floating-point palette approach; it does not
+change authored clear colors to pass scene268.
+
+All twelve M1 scenes have native and unchanged-user-script JS ports. Their 24
+registry-threshold pixel gates pass. The final Release/V8 root regression is
+79/79 CTests, with the existing M0 expected-failure/anisotropy wrappers retained;
+the fresh native Minecraft tree passes 10/10 suites. Focused additions include
+original byte goldens, clone allocation rollback, stale/lifetime churn, actual
+GPU compaction/reset/dirty writes, dedicated index updates, floating-origin
+culling and mutable JS forwarding. Performance remains subject to the executed
+per-scene mean/P95 confidence-interval gates, not these correctness results.
+
+The completed 360-pair SDL_GPU comparison accepts **6/24 language/scene lanes**
+(162, 278 and 279 in both languages); **15 are slower and 3 inconclusive**.
+All lanes used 120 warmup + 2000 measured frames and 15 balanced pairs. Startup
+is reported separately and is not a gate. Across the 18 nonaccepted lanes,
+97.2–99.9% of the observed P95-tail envelope is submit/backpressure, not the
+Core/callback bracket. Matched scene16 captures verify identical work/sample
+counts but a slower D3D11 GPU draw than D3D12; exact driver/compiler/layout
+attribution is unresolved. Diagnostic storage/finite-math experiments were
+discarded, not silently adopted. **M1 remains open; no timing threshold is waived.**
+
+**Remaining scope requiring review:** `bakeCurrentTransformIntoVertices` belongs
+to the original Gaussian-splatting mesh family, not ordinary triangle meshes;
+that M10 family has not been invented or substituted here. Bound CPU-skin clones
+and reparenting protected imported topology still fail explicitly. Original
+ordinary geometry/attribute updates reject clone-shared GPU geometry; resizing
+detaches, while thin-instance data remains shared. Source-delta evidence also
+records the 1.25/1.32 capacity-draw padding difference for separate review.
+
+Current commands, ABI inventory, body/scene source deltas, raw parity/performance
+and startup receipts are under `api-m1-v1\implementation-v1` in the investigation
+artifacts. Earlier feasibility-stop receipts are preserved, not current status.
 
 ### Native GLB compatibility (previous priority)
 
@@ -555,7 +625,8 @@ Blinn-Phong composition are handwritten C-style Core modules. Standard packets
 retain per-scene/per-mesh versions and ordering; plain material/light color writes
 still require original explicit dirty/rebuild operations. Frame-graph rebuild
 requests, Standard color geometry, textures/PBR/other lights/shadows, keyboard,
-viewport and orthographic features fail explicitly in this slice.
+and viewport features fail explicitly in that initial slice. Orthographic
+projection and free-control forwarding are now implemented by M1 above.
 
 The external runtime compiler reflects semantic struct/array leaves and integer
 vector components at actual offsets/strides. Standard uses the original logical

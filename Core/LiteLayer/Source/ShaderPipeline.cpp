@@ -1,7 +1,71 @@
 #include "LiteInternal.h"
 
+bl_Status l_snapshotAlpha(bl_Runtime* r, L_Scene* scene, const L_Material* material)
+{
+    if (material->record.kind != L_MATERIAL)
+    {
+        return BL_OK;
+    }
+    L_AlphaSnapshot** link = &scene->alphaSnapshots;
+    while (*link)
+    {
+        L_AlphaSnapshot* snapshot = *link;
+        if (snapshot->materialId == material->record.id)
+        {
+            snapshot->enabled = material->alphaToCoverage;
+            return BL_OK;
+        }
+        L_Record* owner = l_peek(r, snapshot->materialId);
+        if (!owner || owner->disposed)
+        {
+            *link = snapshot->next;
+            l_free(r, snapshot);
+        }
+        else
+        {
+            link = &snapshot->next;
+        }
+    }
+    if (material->alphaToCoverage)
+    {
+        L_AlphaSnapshot* snapshot = (L_AlphaSnapshot*)l_alloc(r, sizeof(*snapshot));
+        if (!snapshot)
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+        snapshot->materialId = material->record.id;
+        snapshot->enabled = true;
+        snapshot->next = scene->alphaSnapshots;
+        scene->alphaSnapshots = snapshot;
+    }
+    return BL_OK;
+}
+
+static bool shaderAlpha(const L_Scene* scene, uint64_t materialId)
+{
+    for (const L_AlphaSnapshot* s = scene->alphaSnapshots; s; s = s->next)
+    {
+        if (s->materialId == materialId)
+        {
+            return s->enabled;
+        }
+    }
+    return false;
+}
+
 static void graphicsCleanup(bl_Runtime* r, L_Material* m)
 {
+    for (unsigned i = 0; i < 2; ++i)
+    {
+        L_Material* variant = m->shaderVariants[i];
+        if (variant)
+        {
+            graphicsCleanup(r, variant);
+            l_free(r, variant->uniforms);
+            l_free(r, variant);
+            m->shaderVariants[i] = NULL;
+        }
+    }
     if (m->engine)
     {
         l_unpin(&m->engine->record);
@@ -295,6 +359,7 @@ static bl_Status reflection(bl_Runtime* r, L_Engine* e, L_Material* m,
 
 bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
 {
+    bool hadEngine = m->engine != NULL;
     if (m->record.kind == L_PBR)
     {
         return m->record.disposed ? BL_DISPOSED : BL_OK;
@@ -318,7 +383,7 @@ bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
     {
         return textureReady(r, e, m);
     }
-    if (!r->hasCompiler)
+    if (m->instanceSlots ? !r->hasCompiler2 : !r->hasCompiler)
     {
         return L_FAIL(r, BL_NOT_READY, "No runtime WGSL compiler service");
     }
@@ -328,8 +393,30 @@ bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
     }
     L_Text vertex = {};
     L_Text fragment = {};
-    bool ok = l_appendText(r, &vertex, m->prelude) && l_appendText(r, &vertex, m->vertex) &&
-              l_appendText(r, &fragment, m->prelude) && l_appendText(r, &fragment, m->fragment);
+    L_Text prefix = {};
+    bool ok = true;
+    if (m->instanceSlots && !m->blockCount)
+    {
+        if (m->prelude.length < 2)
+        {
+            return BL_SHADER_ERROR;
+        }
+        ok = l_appendText(r, &prefix, {m->prelude.data, m->prelude.length - 2});
+        for (unsigned i = 0; ok && i < m->instanceSlots; ++i)
+        {
+            char attribute[128];
+            const char* names[5] = {"world0", "world1", "world2", "world3", "instanceColor"};
+            int count = snprintf(attribute, sizeof(attribute), "@location(%u) %s: vec4<f32>,\n",
+                                 (unsigned)m->attributeCount + i, names[i]);
+            ok = count > 0 && (size_t)count < sizeof(attribute) &&
+                 l_appendText(r, &prefix, {attribute, (size_t)count});
+        }
+        ok = ok && l_appendText(r, &prefix, {"}\n", 2});
+    }
+    bl_String prelude = prefix.data ? bl_String{prefix.data, prefix.length} : m->prelude;
+    ok = ok && l_appendText(r, &vertex, prelude) && l_appendText(r, &vertex, m->vertex) &&
+         l_appendText(r, &fragment, prelude) && l_appendText(r, &fragment, m->fragment);
+    l_free(r, prefix.data);
     if (!ok)
     {
         l_free(r, vertex.data);
@@ -351,8 +438,60 @@ bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
         caps->originBottomLeft,
         m->name};
     bl_ShaderCompileResult result = {};
+    bl_ShaderCompileResult2 result2 = {};
+    result2.structSize = sizeof(result2);
+    result2.version = BL_SHADER_COMPILE_VERSION_2;
     bl_Status status;
-    L_CALL(r, status, r->compiler.compile(r->compiler.userData, &request, &result));
+    bl_InstanceAttributeDeclaration instances[5] = {};
+    if (m->instanceSlots)
+    {
+        const char* names[5] = {"world0", "world1", "world2", "world3", "instanceColor"};
+        for (unsigned i = 0; i < m->instanceSlots; ++i)
+        {
+            instances[i] = {{names[i], strlen(names[i])},
+                            (uint32_t)m->attributeCount + i,
+                            i,
+                            i * 16,
+                            (uint32_t)m->instanceSlots * 16};
+        }
+        bl_ShaderCompileRequest2 extended = {sizeof(extended), BL_SHADER_COMPILE_VERSION_2, request,
+                                             instances, m->instanceSlots};
+        L_CALL(r, status, r->compiler2.compile(r->compiler2.userData, &extended, &result2));
+        result = result2.base;
+        if (status == BL_OK &&
+            (result2.structSize != sizeof(result2) ||
+             result2.version != BL_SHADER_COMPILE_VERSION_2 ||
+             result2.instanceAttributeCount > m->instanceSlots ||
+             !l_typedSpan(result2.instanceAttributes, result2.instanceAttributeCount,
+                          alignof(bl_ReflectedInstanceAttribute))))
+        {
+            status = BL_SHADER_ERROR;
+        }
+        uint32_t used = 0;
+        for (size_t i = 0; status == BL_OK && i < result2.instanceAttributeCount; ++i)
+        {
+            const bl_ReflectedInstanceAttribute* value = result2.instanceAttributes + i;
+            if (value->matrixColumn >= m->instanceSlots)
+            {
+                status = BL_SHADER_ERROR;
+                break;
+            }
+            const bl_InstanceAttributeDeclaration* expected = instances + value->matrixColumn;
+            if (!l_string(value->name) || !l_equal(value->name, expected->name) ||
+                value->location != expected->location ||
+                value->byteOffset != expected->byteOffset ||
+                value->byteStride != expected->byteStride || value->components != 4 ||
+                (used & (UINT32_C(1) << value->matrixColumn)))
+            {
+                status = BL_SHADER_ERROR;
+            }
+            used |= UINT32_C(1) << value->matrixColumn;
+        }
+    }
+    else
+    {
+        L_CALL(r, status, r->compiler.compile(r->compiler.userData, &request, &result));
+    }
     m->graphicsCleanup = graphicsCleanup;
     if (status == BL_OK)
     {
@@ -409,7 +548,14 @@ bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
         memcpy(diagnostics, result.diagnostics.data, n);
     }
     l_enterHost(r);
-    r->compiler.release(r->compiler.userData, &result);
+    if (m->instanceSlots)
+    {
+        r->compiler2.release(r->compiler2.userData, &result2);
+    }
+    else
+    {
+        r->compiler.release(r->compiler.userData, &result);
+    }
     l_leaveHost(r);
     l_free(r, vertex.data);
     l_free(r, fragment.data);
@@ -419,7 +565,107 @@ bl_Status l_prepareMaterial(bl_Runtime* r, L_Engine* e, L_Material* m)
         return L_FAIL(r, status, diagnostics[0] ? diagnostics : "Shader preparation failed");
     }
     m->engine = e;
-    l_pin(&e->record);
+    m->preparedAlphaToCoverage = m->alphaToCoverage;
+    if (!hadEngine)
+    {
+        l_pin(&e->record);
+    }
+    return BL_OK;
+}
+
+bl_Status l_prepareMeshMaterial(bl_Runtime* r, L_Engine* e, L_Material* owner, L_Mesh* mesh,
+                                L_Material** out)
+{
+    l_syncGeometryGpu(&mesh->geometry);
+    if (owner->engine && owner->engine != e)
+    {
+        return BL_WRONG_ENGINE;
+    }
+    bool colors = mesh->instanceColors && owner->thinColorMode != 1;
+    if (owner->lineThinRequired && !mesh->hasInstances)
+    {
+        return l_error(r, BL_INVALID_ARGUMENT, __func__, "Line material requires thin instances",
+                       261);
+    }
+    if (mesh->hasInstances && owner->thinColorMode == 2 && !colors)
+    {
+        return BL_NOT_READY;
+    }
+    if (mesh->hasInstances)
+    {
+        L_TRY(l_prepareThinBuffer(r, mesh, colors));
+        if (mesh->instanceCount && mesh->instanceCulling &&
+            !(owner->record.kind == L_STANDARD ? owner->standardProperties.alpha < 1
+              : owner->record.kind == L_PBR    ? owner->pbrInfo.alphaBlend
+                                               : owner->blending))
+        {
+            L_TRY(l_prepareThinCulling(r, mesh, colors));
+        }
+    }
+    if (owner->record.kind == L_STANDARD)
+    {
+        bool disabled = owner->snapshotValid ? owner->standardSnapshot.disableLighting
+                                             : owner->standardProperties.disableLighting;
+        return l_prepareStandard(r, e, owner, disabled, out,
+                                 mesh->hasInstances ? colors ? 5 : 4 : 0);
+    }
+    if (owner->record.kind != L_MATERIAL || !mesh->hasInstances)
+    {
+        L_TRY(l_prepareMaterial(r, e, owner));
+        *out = owner;
+        return BL_OK;
+    }
+    unsigned slot = colors ? 1 : 0;
+    L_Material* variant = owner->shaderVariants[slot];
+    if (!variant)
+    {
+        variant = (L_Material*)l_alloc(r, sizeof(*variant));
+        if (!variant)
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+        *variant = *owner;
+        variant->engine = NULL;
+        variant->programIndex = BL_INVALID_BGFX_HANDLE;
+        variant->nativeUniforms = NULL;
+        variant->nativeUniformCount = 0;
+        variant->maps = NULL;
+        variant->mapCount = 0;
+        variant->textureMaps = NULL;
+        variant->textureMapCount = 0;
+        variant->graphicsCleanup = NULL;
+        variant->shaderVariants[0] = NULL;
+        variant->shaderVariants[1] = NULL;
+        variant->instanceSlots = colors ? 5 : 4;
+        variant->uniforms = (L_Uniform*)l_alloc(r, owner->uniformCount * sizeof(L_Uniform));
+        if (owner->uniformCount && !variant->uniforms)
+        {
+            l_free(r, variant);
+            return BL_OUT_OF_MEMORY;
+        }
+        memcpy(variant->uniforms, owner->uniforms, owner->uniformCount * sizeof(L_Uniform));
+        bl_Status status = l_prepareMaterial(r, e, variant);
+        if (status != BL_OK)
+        {
+            graphicsCleanup(r, variant);
+            l_free(r, variant->uniforms);
+            l_free(r, variant);
+            return status;
+        }
+        owner->shaderVariants[slot] = variant;
+        owner->graphicsCleanup = graphicsCleanup;
+        if (!owner->engine)
+        {
+            owner->engine = e;
+            l_pin(&e->record);
+        }
+    }
+    else
+    {
+        L_TRY(l_prepareMaterial(r, e, variant));
+    }
+    memcpy(variant->uniforms, owner->uniforms, owner->uniformCount * sizeof(L_Uniform));
+    *out = variant;
     return BL_OK;
 }
 
@@ -431,14 +677,14 @@ static void matrixValue(float* out, const bl_Mat4* m)
     }
 }
 
-static void systemValues(L_Uniform* u, L_Engine* e, L_Mesh* mesh, const bl_Mat4* view,
+static void systemValues(L_Uniform* u, L_Engine* e, const bl_Mat4* world, const bl_Mat4* view,
                          const bl_Mat4* projection, bl_Vec3 position)
 {
     bl_Mat4 temp;
     bl_Mat4 other;
     if (l_name(u->name, "world"))
     {
-        matrixValue(u->values, &mesh->node.world);
+        matrixValue(u->values, world);
     }
     else if (l_name(u->name, "view"))
     {
@@ -455,12 +701,12 @@ static void systemValues(L_Uniform* u, L_Engine* e, L_Mesh* mesh, const bl_Mat4*
     }
     else if (l_name(u->name, "worldView"))
     {
-        l_multiply(view, &mesh->node.world, &temp, e->highPrecision);
+        l_multiply(view, world, &temp, e->highPrecision);
         matrixValue(u->values, &temp);
     }
     else if (l_name(u->name, "worldViewProjection"))
     {
-        l_multiply(view, &mesh->node.world, &temp, e->highPrecision);
+        l_multiply(view, world, &temp, e->highPrecision);
         l_multiply(projection, &temp, &other, e->highPrecision);
         matrixValue(u->values, &other);
     }
@@ -502,7 +748,18 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material*
         L_TRY(l_standardValues(r, e, scene, standard, mesh, view, projection, position));
         m = standard->pipeline;
     }
+    else
+    {
+        L_TRY(l_prepareMeshMaterial(r, e, m, mesh, &m));
+    }
     L_TRY(l_prepareMaterial(r, e, m));
+    if (mesh->hasInstances && !mesh->instanceCount)
+    {
+        return BL_OK;
+    }
+    L_ThinDraw thin;
+    L_TRY(l_prepareThinDraw(r, scene, mesh, view, projection, viewId, m->instanceSlots == 5,
+                            standard ? standard->transparent : m->blending, &thin));
     if (m->activeAttributes & ~mesh->geometry.attributeMask)
     {
         return L_FAIL(r, BL_INVALID_ARGUMENT, "Active shader attribute missing from mesh");
@@ -511,11 +768,13 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material*
     {
         memset(m->nativeUniforms[i].bytes, 0, m->nativeUniforms[i].byteCount);
     }
+    bl_Mat4 renderWorld;
+    l_renderWorld(scene, &mesh->node, &renderWorld);
     for (size_t i = 0; i < m->uniformCount; ++i)
     {
         if (m->uniforms[i].system)
         {
-            systemValues(m->uniforms + i, e, mesh, view, projection, position);
+            systemValues(m->uniforms + i, e, &renderWorld, view, projection, position);
         }
     }
     for (size_t i = 0; i < m->mapCount; ++i)
@@ -550,6 +809,11 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material*
         BGFX_STATE_DEPTH_TEST_EQUAL,    BGFX_STATE_DEPTH_TEST_LEQUAL, BGFX_STATE_DEPTH_TEST_GREATER,
         BGFX_STATE_DEPTH_TEST_NOTEQUAL, BGFX_STATE_DEPTH_TEST_GEQUAL, BGFX_STATE_DEPTH_TEST_ALWAYS};
     uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_MSAA;
+    if (e->native.target.sampleCount > 1 &&
+        (standard ? standard->alphaToCoverage : shaderAlpha(scene, m->record.id)))
+    {
+        state |= BGFX_STATE_BLEND_ALPHA_TO_COVERAGE;
+    }
     if (e->native.target.depthFormat != BL_DEPTH_NONE)
     {
         state |= compare[m->depthCompare];
@@ -560,7 +824,23 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material*
     }
     if (standard ? standard->culling : m->culling)
     {
-        state |= BGFX_STATE_CULL_CW;
+        bool mirrored = false;
+        if (standard && r->mirroredMeshes)
+        {
+            if (!mesh->mirroredReady ||
+                (scene->trackMirrors && mesh->mirroredVersion != mesh->node.version))
+            {
+                const double* w = mesh->node.world.values;
+                mesh->mirrored = w[0] * (w[5] * w[10] - w[6] * w[9]) -
+                                     w[4] * (w[1] * w[10] - w[2] * w[9]) +
+                                     w[8] * (w[1] * w[6] - w[2] * w[5]) <
+                                 0;
+                mesh->mirroredVersion = mesh->node.version;
+                mesh->mirroredReady = true;
+            }
+            mirrored = mesh->mirrored;
+        }
+        state |= mirrored ? BGFX_STATE_CULL_CCW : BGFX_STATE_CULL_CW;
     }
     if (standard ? standard->transparent : m->blending)
     {
@@ -582,8 +862,19 @@ bl_Status l_drawMaterial(bl_Runtime* r, L_Engine* e, L_Scene* scene, L_Material*
     }
     bgfx::setVertexBuffer(0, mesh->geometry.vertexBuffer, 0, (uint32_t)mesh->geometry.vertices);
     bgfx::setIndexBuffer(mesh->geometry.indexBuffer, 0, (uint32_t)mesh->geometry.indexCount);
+    if (mesh->hasInstances)
+    {
+        bgfx::setInstanceDataBuffer(thin.instances, 0, (uint32_t)mesh->instanceCount);
+    }
     bgfx::setState(state);
-    bgfx::submit(viewId, bgfx::ProgramHandle{m->programIndex});
+    if (bgfx::isValid(thin.indirect))
+    {
+        bgfx::submit(viewId, bgfx::ProgramHandle{m->programIndex}, thin.indirect, 0, 1);
+    }
+    else
+    {
+        bgfx::submit(viewId, bgfx::ProgramHandle{m->programIndex});
+    }
     ++e->stats.drawCallCount;
     return BL_OK;
 }

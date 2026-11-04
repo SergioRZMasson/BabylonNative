@@ -17,6 +17,7 @@ struct L_Node
     bool dirty;
     bool highPrecision;
     bool localMatrixLocked;
+    bool localMatrixOverride;
     bl_Mat4 lockedLocalMatrix;
     L_Node* parent;
     bl_SceneNode* children;
@@ -29,6 +30,10 @@ struct L_Node
     bl_CameraProperties camera;
     bool assetParentLocked;
     bool assetChildrenLocked;
+    bool orthographic;
+    bl_OrthographicBounds ortho;
+    double freeYaw;
+    double freePitch;
 };
 
 struct L_Callback
@@ -41,6 +46,14 @@ struct L_Callback
     struct L_Control* control;
     struct L_Asset* asset;
     size_t assetOwners;
+    bl_Status* failure;
+};
+
+struct L_AlphaSnapshot
+{
+    L_AlphaSnapshot* next;
+    uint64_t materialId;
+    bool enabled;
 };
 
 struct L_Scene
@@ -79,6 +92,12 @@ struct L_Scene
     bool toneMappingEnabled;
     struct L_PbrPacket* pbrPackets;
     size_t pbrCapacity;
+    bl_Vec3 origin;
+    bool trackMirrors;
+    struct L_ThinCullState* thinCulls;
+    void (*freeThinCulls)(bl_Runtime*, L_Scene*, uint64_t);
+    size_t drawSequence;
+    L_AlphaSnapshot* alphaSnapshots;
 };
 
 struct L_Engine
@@ -88,6 +107,9 @@ struct L_Engine
     bl_NativeEngineOptions native;
     bl_RendererBackend backend;
     bool highPrecision;
+    bool floatingOrigin;
+    bool floatClear;
+    uint8_t clearPaletteIndex;
     bool running;
     bool first;
     bool inFrame;
@@ -102,6 +124,8 @@ struct L_Engine
     uint16_t mipViewCursor;
     struct L_MipPipeline* mipPipeline;
     uint64_t frameSerial;
+    struct L_ThinPipelines* thinPipelines;
+    void (*freeThinPipelines)(bl_Runtime*, L_Engine*);
 };
 
 struct L_ViewReservation
@@ -137,6 +161,9 @@ void l_releaseViews(L_Engine* engine, L_ViewReservation* reservation);
 bool l_isNodeKind(unsigned kind);
 bl_Status l_cameraFamily(bl_Camera camera, L_Node** node);
 void l_arcEye(L_Node* node, bl_Vec3* eye);
+void l_renderWorld(const L_Scene* scene, const L_Node* node, bl_Mat4* world);
+double l_hypot3(double x, double y, double z);
+double l_hypot4(double x, double y, double z, double w);
 
 #define L_NODE_GET(handle, variable) \
     L_Node* variable;                \

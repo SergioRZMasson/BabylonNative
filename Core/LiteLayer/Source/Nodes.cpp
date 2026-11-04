@@ -5,6 +5,54 @@ bool l_vec(bl_Vec3 p)
     return isfinite(p.x) && isfinite(p.y) && isfinite(p.z);
 }
 
+bl_Status bl_getSceneNodeKind(bl_SceneNode h, bl_SceneNodeKind* out)
+{
+    L_NODE_GET(h, node);
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    bl_SceneNodeKind kind;
+    switch (node->record.kind)
+    {
+        case L_NODE:
+            kind = BL_NODE_TRANSFORM;
+            break;
+        case L_MESH:
+            kind = BL_NODE_MESH;
+            break;
+        case L_CAMERA:
+            kind = BL_NODE_FREE_CAMERA;
+            break;
+        case L_ARC_CAMERA:
+            kind = BL_NODE_ARC_ROTATE_CAMERA;
+            break;
+        case L_LIGHT:
+            kind = ((L_Light*)node)->kind == L_LIGHT_HEMISPHERIC ? BL_NODE_HEMISPHERIC_LIGHT
+                                                                 : BL_NODE_DIRECTIONAL_LIGHT;
+            break;
+        default:
+            return BL_INVALID_HANDLE;
+    }
+    *out = kind;
+    return BL_OK;
+}
+
+bl_Status bl_sceneNodeAsMesh(bl_SceneNode h, bl_Mesh* out)
+{
+    L_NODE_GET(h, node);
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    if (node->record.kind != L_MESH)
+    {
+        return BL_INVALID_HANDLE;
+    }
+    *out = {h._runtime, h._id};
+    return BL_OK;
+}
+
 bool l_quat(bl_Quat p)
 {
     return isfinite(p.x) && isfinite(p.y) && isfinite(p.z) && isfinite(p.w);
@@ -178,6 +226,7 @@ bl_Status bl_createTransformNode(bl_Runtime* r, bl_String name, const bl_Transfo
     }
     L_Node* n = (L_Node*)record;
     l_initNode(n);
+    n->highPrecision = r->matrixPrecision;
     n->name = copy;
     if (o)
     {
@@ -198,8 +247,14 @@ bl_Status bl_createFreeCamera(bl_Runtime* r, bl_Vec3 position, bl_Vec3 target, b
     }
     L_NEW(r, L_CAMERA, 30, nodeCleanup, L_Node, n);
     l_initNode(n);
+    n->highPrecision = r->matrixPrecision;
     n->position = position;
     n->target = target;
+    double dx = target.x - position.x;
+    double dy = target.y - position.y;
+    double dz = target.z - position.z;
+    n->freeYaw = atan2(dx, dz);
+    n->freePitch = atan2(dy, sqrt(dx * dx + dz * dz));
     *out = {r, n->record.id};
     return BL_OK;
 }
@@ -280,10 +335,12 @@ bl_Status bl_setNodePosition(bl_SceneNode h, bl_Vec3 value)
     {
         return BL_INVALID_ARGUMENT;
     }
-    if (memcmp(&value, &n->position, sizeof(value)))
+    if (memcmp(&value, &n->position, sizeof(value)) ||
+        (n->localMatrixOverride && !n->localMatrixLocked))
     {
         n->position = value;
         n->dirty |= !n->localMatrixLocked;
+        n->localMatrixOverride &= n->localMatrixLocked;
     }
     return BL_OK;
 }
@@ -310,10 +367,12 @@ bl_Status bl_setNodeScaling(bl_SceneNode h, bl_Vec3 value)
     {
         return BL_INVALID_ARGUMENT;
     }
-    if (memcmp(&value, &n->scale, sizeof(value)))
+    if (memcmp(&value, &n->scale, sizeof(value)) ||
+        (n->localMatrixOverride && !n->localMatrixLocked))
     {
         n->scale = value;
         n->dirty |= !n->localMatrixLocked;
+        n->localMatrixOverride &= n->localMatrixLocked;
     }
     return BL_OK;
 }
@@ -368,6 +427,7 @@ bl_Status bl_setNodeRotation(bl_SceneNode h, bl_Vec3 value)
     bl_Quat q = {sx * cy * cz + cx * sy * sz, cx * sy * cz - sx * cy * sz,
                  cx * cy * sz + sx * sy * cz, cx * cy * cz - sx * sy * sz};
     n->dirty |= !n->localMatrixLocked;
+    n->localMatrixOverride &= n->localMatrixLocked;
     n->quaternion = q;
     n->euler = value;
     n->eulerValid = true;
@@ -398,6 +458,7 @@ bl_Status bl_setNodeRotationQuaternion(bl_SceneNode h, bl_Quat q)
     }
     n->quaternion = q;
     n->dirty |= !n->localMatrixLocked;
+    n->localMatrixOverride &= n->localMatrixLocked;
     n->eulerValid = false;
     return BL_OK;
 }
@@ -585,7 +646,7 @@ static bl_Status evaluateWorld(bl_Runtime* r, L_Node* n)
     }
     bl_Mat4 m;
     l_identity(&m);
-    if (n->localMatrixLocked)
+    if (n->localMatrixLocked || n->localMatrixOverride)
     {
         if (n->parent)
         {
@@ -764,6 +825,7 @@ bl_Status bl_setCameraTarget(bl_FreeCamera h, bl_Vec3 value)
     if (memcmp(&value, &n->target, sizeof(value)))
     {
         n->target = value;
+        n->localMatrixOverride = false;
         n->dirty = true;
     }
     return BL_OK;

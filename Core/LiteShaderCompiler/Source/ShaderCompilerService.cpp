@@ -41,6 +41,7 @@ namespace
         std::vector<InstanceAttribute> instanceDeclarations;
         std::vector<bl_ReflectedInstanceAttribute> instanceAttributes;
         std::vector<bl_ReflectedTexture2> textureInfo;
+        std::vector<bl_ReflectedStorageBuffer> storageBuffers;
         std::string diagnostics;
     };
 
@@ -65,7 +66,8 @@ namespace
         }
     }
 
-    void Reflect(Storage& storage, const std::vector<InstanceAttribute>& instances = {})
+    void Reflect(Storage& storage, const std::vector<InstanceAttribute>& instances = {},
+        uint32_t vertexStages = BL_STAGE_VERTEX)
     {
         using Binding = std::pair<uint32_t, uint32_t>;
         std::map<Binding, uint32_t> blockIndices;
@@ -178,7 +180,7 @@ namespace
                     static_cast<bl_ShaderSamplerKind2>(texture.samplerKind), texture.operations});
             }
         };
-        reflectStage(storage.program.vertex, BL_STAGE_VERTEX);
+        reflectStage(storage.program.vertex, vertexStages);
         reflectStage(storage.program.fragment, BL_STAGE_FRAGMENT);
         storage.diagnostics = storage.program.vertex.diagnostics + storage.program.fragment.diagnostics;
     }
@@ -281,7 +283,8 @@ namespace
                 request->base.contractVersion != BL_CONTRACT_VERSION ||
                 request->base.vertex.stage != BL_STAGE_VERTEX ||
                 request->base.fragment.stage != BL_STAGE_FRAGMENT ||
-                (request->instanceAttributeCount != 0 && request->instanceAttributeCount != 4) ||
+                (request->instanceAttributeCount != 0 && request->instanceAttributeCount != 4 &&
+                    request->instanceAttributeCount != 5) ||
                 (request->instanceAttributeCount && !request->instanceAttributes))
                 return Diagnostic(result->base, BL_INVALID_ARGUMENT, "Invalid v2 shader request.");
             if (request->base.backend != BL_RENDERER_D3D11 ||
@@ -297,7 +300,8 @@ namespace
                 {
                     const auto& input = request->instanceAttributes[i];
                     const std::string name(View(input.name));
-                    if (input.matrixColumn > 3 || input.byteStride != 64 ||
+                    if (input.matrixColumn >= request->instanceAttributeCount ||
+                        input.byteStride != request->instanceAttributeCount * 16 ||
                         input.byteOffset != input.matrixColumn * 16 ||
                         (columns & (1u << input.matrixColumn)))
                         throw std::invalid_argument("Invalid instance declaration layout.");
@@ -359,8 +363,85 @@ namespace
                 delete static_cast<Storage*>(result->base.allocation);
                 *result = {};
             }
+        }
+
+            bl_Status ComputeDiagnostic(bl_ComputeShaderCompileResult& result, bl_Status status,
+                const char* message)
+            {
+                bl_ShaderCompileResult temporary{};
+                status = Diagnostic(temporary, status, message);
+                result.diagnostics = temporary.diagnostics;
+                result.allocation = temporary.allocation;
+                return status;
+            }
+
+            bl_Status CompileCompute(void*, const bl_ComputeShaderCompileRequest* request,
+                bl_ComputeShaderCompileResult* result)
+            {
+                if (!result)
+                    return BL_INVALID_ARGUMENT;
+                *result = {};
+                result->structSize = sizeof(*result);
+                result->version = BL_COMPUTE_SHADER_VERSION;
+                if (!request || request->structSize != sizeof(*request) ||
+                    request->version != BL_COMPUTE_SHADER_VERSION)
+                    return ComputeDiagnostic(*result, BL_INVALID_ARGUMENT, "Invalid compute shader contract.");
+                if (request->backend != BL_RENDERER_D3D11 || request->bgfxShaderBinaryVersion != 12)
+                    return ComputeDiagnostic(*result, BL_UNSUPPORTED, "Compute compiler requires D3D11 CSH v12.");
+                try
+                {
+                    auto storage = std::make_unique<Storage>();
+                    storage->program.vertex = CompileComputeD3D11(View(request->wgsl), View(request->entryPoint));
+                    Reflect(*storage, {}, BL_STAGE_COMPUTE);
+                    const auto& stage = storage->program.vertex;
+                    for (const auto& buffer : stage.storage)
+                        storage->storageBuffers.push_back({String(buffer.name), buffer.group, buffer.binding,
+                            buffer.minimumBytes, buffer.stage, buffer.readOnly});
+                    result->container = {stage.bytes.data(), stage.bytes.size()};
+                    std::copy(std::begin(stage.workgroupSize), std::end(stage.workgroupSize), result->workgroupSize);
+                    result->storageBuffers = storage->storageBuffers.data();
+                    result->storageBufferCount = storage->storageBuffers.size();
+                    result->uniformBlocks = storage->blocks.data();
+                    result->uniformBlockCount = storage->blocks.size();
+                    result->uniforms = storage->uniforms.data();
+                    result->uniformCount = storage->uniforms.size();
+                    result->diagnostics = String(storage->diagnostics);
+                    result->allocation = storage.release();
+                    return BL_OK;
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    return ComputeDiagnostic(*result, BL_INVALID_ARGUMENT, error.what());
+                }
+                catch (const std::bad_alloc&)
+                {
+                    return ComputeDiagnostic(*result, BL_OUT_OF_MEMORY, "Compute compiler allocation failed.");
+                }
+                catch (const std::exception& error)
+                {
+                    return ComputeDiagnostic(*result, BL_SHADER_ERROR, error.what());
+                }
+                catch (...)
+                {
+                    return ComputeDiagnostic(*result, BL_SHADER_ERROR, "Unexpected compute compiler failure.");
+                }
+            }
+
+            void ReleaseCompute(void*, bl_ComputeShaderCompileResult* result)
+            {
+                if (result)
+                {
+                    delete static_cast<Storage*>(result->allocation);
+                    *result = {};
+                }
+            }
     }
-}
+
+    extern "C" bl_ComputeShaderCompilerService bl_computeShaderCompilerService(void)
+    {
+            return {sizeof(bl_ComputeShaderCompilerService), BL_COMPUTE_SHADER_VERSION, nullptr,
+                CompileCompute, ReleaseCompute};
+    }
 
 extern "C" bl_ShaderCompilerService bl_shaderCompilerService(void)
 {

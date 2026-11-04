@@ -13,6 +13,8 @@ struct L_PbrPacket
     bool colors;
     bool flatNormal;
     bool cpuSkin;
+    bool instanceColors;
+    bool alphaToCoverage;
 };
 
 bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene);
@@ -24,6 +26,6 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
                        bool doubleSided = false, bool baseImage = false, bool baseUv1 = false,
                        bool ormUv1 = false, const L_Material* material = NULL,
                        bool tangents = false, bool colors = false, bool flatNormal = false,
-                       bool cpuSkin = false);
+                       bool cpuSkin = false, bool instanceColors = false);
 
 #endif

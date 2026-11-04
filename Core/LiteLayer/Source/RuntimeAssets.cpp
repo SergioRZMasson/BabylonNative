@@ -1,5 +1,23 @@
 #include "RuntimeInternal.h"
 
+bl_Status bl_setComputeShaderCompiler(bl_Runtime* r, const bl_ComputeShaderCompilerService* service)
+{
+    L_TRY(l_check(r));
+    if (r->frameDepth || r->dispatchDepth || r->computeUsed)
+    {
+        return BL_BUSY;
+    }
+    if (service &&
+        (service->structSize != sizeof(*service) || service->version != BL_COMPUTE_SHADER_VERSION ||
+         !service->compile || !service->release))
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    r->computeCompiler = service ? *service : bl_ComputeShaderCompilerService{};
+    r->hasComputeCompiler = service != NULL;
+    return BL_OK;
+}
+
 bl_Status bl_createRuntime2(const bl_RuntimeOptions2* options, bl_Runtime** out)
 {
     if (l_inHost())

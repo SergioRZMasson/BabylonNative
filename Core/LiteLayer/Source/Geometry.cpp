@@ -1,5 +1,7 @@
 #include "LiteInternal.h"
 
+bool l_sharedGeometryGpu(const L_Geometry* geometry);
+
 static const uint8_t components[6] = {3, 3, 2, 2, 4, 4};
 static const bgfx::Attrib::Enum attribs[6] = {bgfx::Attrib::Position,  bgfx::Attrib::Normal,
                                               bgfx::Attrib::TexCoord0, bgfx::Attrib::TexCoord1,
@@ -15,9 +17,11 @@ static void spans(const bl_MeshGeometry* g, bl_F32Span a[6])
     a[5] = g->colors;
 }
 
-static bl_Status validateGeometry(bl_Runtime* r, const bl_MeshGeometry* g)
+static bl_Status validateGeometry(bl_Runtime* r, const bl_MeshGeometry* g,
+                                  bl_Topology topology = BL_TOPOLOGY_TRIANGLE_LIST)
 {
-    if (!g || g->positions.count % 3 || g->indices.count % 3 ||
+    size_t primitive = topology == BL_TOPOLOGY_LINE_LIST ? 2 : 3;
+    if (!g || g->positions.count % 3 || g->indices.count % primitive ||
         g->positions.count / 3 > UINT32_MAX || g->indices.count > UINT32_MAX ||
         !l_typedSpan(g->indices.data, g->indices.count, alignof(uint32_t)) ||
         g->indices.count > UINT32_MAX / sizeof(uint32_t))
@@ -66,20 +70,7 @@ static bl_Status validateGeometry(bl_Runtime* r, const bl_MeshGeometry* g)
 
 void l_geometryCleanup(bl_Runtime* r, L_Geometry* g)
 {
-    if (bgfx::isValid(g->vertexBuffer))
-    {
-        bgfx::destroy(g->vertexBuffer);
-    }
-    if (bgfx::isValid(g->indexBuffer))
-    {
-        bgfx::destroy(g->indexBuffer);
-    }
-    for (unsigned i = 0; i < 6; ++i)
-    {
-        l_free(r, g->streams[i]);
-    }
-    l_free(r, g->indices);
-    l_free(r, g->gpuVertices);
+    l_releaseGeometryStorage(r, g);
     *g = {};
     g->vertexBuffer.idx = g->indexBuffer.idx = BL_INVALID_BGFX_HANDLE;
 }
@@ -204,7 +195,8 @@ static uint8_t* interleave(bl_Runtime* r, L_Geometry* g, size_t offset, size_t c
     return p;
 }
 
-static bl_Status gpuGeometry(bl_Runtime* r, L_Geometry* g)
+static bl_Status gpuGeometry(bl_Runtime* r, L_Engine* engine, L_Geometry* g,
+                             bool dedicatedIndices = false)
 {
     if (!g->vertexCapacity)
     {
@@ -230,13 +222,31 @@ static bl_Status gpuGeometry(bl_Runtime* r, L_Geometry* g)
     g->vertexBuffer = bgfx::createDynamicVertexBuffer(v, layout);
     if (g->indexCapacity)
     {
-        g->indexBuffer = bgfx::createDynamicIndexBuffer(
-            bgfx::copy(g->indices, (uint32_t)(g->indexCapacity * sizeof(uint32_t))),
-            BGFX_BUFFER_INDEX32);
+        if (dedicatedIndices)
+        {
+            L_TRY(l_validateStorageUploadViews(engine, 1));
+            g->indexBuffer = bgfx::createDynamicIndexBuffer(
+                (uint32_t)g->indexCapacity, BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ_WRITE);
+        }
+        else
+        {
+            g->indexBuffer = bgfx::createDynamicIndexBuffer(
+                bgfx::copy(g->indices, (uint32_t)(g->indexCapacity * sizeof(uint32_t))),
+                BGFX_BUFFER_INDEX32);
+        }
+        g->dedicatedIndices = dedicatedIndices;
     }
     if (!bgfx::isValid(g->vertexBuffer) || (g->indexCapacity && !bgfx::isValid(g->indexBuffer)))
     {
         return L_FAIL(r, BL_OUT_OF_MEMORY, "GPU geometry allocation failed");
+    }
+    if (dedicatedIndices && g->indexCapacity)
+    {
+        bgfx::BufferRegion destination;
+        destination.init(g->indexBuffer, 0, (uint32_t)(g->indexCapacity * sizeof(uint32_t)));
+        L_StorageUpload upload;
+        L_TRY(l_prepareStorageUpload(&destination, g->indices, &upload));
+        L_TRY(l_submitStorageUploads(engine, &upload, 1));
     }
     return BL_OK;
 }
@@ -255,11 +265,18 @@ void l_meshCleanup(bl_Runtime* r, L_Record* record)
         }
     }
     l_geometryCleanup(r, &m->geometry);
-    if (m->hasInstances && m->instanceBufferIndex != BL_INVALID_BGFX_HANDLE)
+    if (l_releaseThinOwner(r, m))
     {
-        bgfx::destroy(bgfx::DynamicVertexBufferHandle{m->instanceBufferIndex});
+        if (m->hasInstances && m->instanceBufferIndex != BL_INVALID_BGFX_HANDLE)
+        {
+            bgfx::destroy(bgfx::DynamicVertexBufferHandle{m->instanceBufferIndex});
+        }
+        l_free(r, m->instanceMatrices);
+        l_free(r, m->instanceMatrices64);
+        l_free(r, m->instanceColors);
+        l_free(r, m->instanceUpload);
     }
-    l_free(r, m->instanceMatrices);
+    l_free(r, m->linePointCounts);
     m->instanceMatrices = NULL;
     l_cleanNode(r, &m->node);
     l_unpin(&m->engine->record);
@@ -269,16 +286,22 @@ void l_meshCleanup(bl_Runtime* r, L_Record* record)
 bl_Status bl_createMeshFromData(bl_EngineContext h, bl_String name, const bl_MeshGeometry* g,
                                 bl_Mesh* out)
 {
+    return l_createMeshTopology(h, name, g, BL_TOPOLOGY_TRIANGLE_LIST, out);
+}
+
+bl_Status l_createMeshTopology(bl_EngineContext h, bl_String name, const bl_MeshGeometry* g,
+                               bl_Topology topology, bl_Mesh* out)
+{
     L_GET(h, L_ENGINE, L_Engine, e);
     bl_Runtime* r = h._runtime;
     if (!out || !l_string(name))
     {
         return BL_INVALID_ARGUMENT;
     }
-    L_TRY(validateGeometry(r, g));
+    L_TRY(validateGeometry(r, g, topology));
     L_Geometry geometry;
     L_TRY(cpuGeometry(r, g, g->positions.count / 3, g->indices.count, &geometry));
-    bl_Status status = gpuGeometry(r, &geometry);
+    bl_Status status = gpuGeometry(r, e, &geometry);
     if (status != BL_OK)
     {
         l_geometryCleanup(r, &geometry);
@@ -299,11 +322,13 @@ bl_Status bl_createMeshFromData(bl_EngineContext h, bl_String name, const bl_Mes
         return status;
     }
     L_Mesh* m = (L_Mesh*)record;
+    m->node.record.clone = l_cloneMeshRecord;
     l_initNode(&m->node);
     m->node.highPrecision = e->highPrecision;
     m->node.name = copy;
     m->engine = e;
     m->geometry = geometry;
+    m->topology = topology;
     l_pin(&e->record);
     *out = {r, m->node.record.id};
     return BL_OK;
@@ -485,7 +510,8 @@ bl_Status bl_setMeshProperties2(bl_Mesh h, const bl_MeshProperties2* p)
         if (registered)
         {
             L_TRY(l_checkStandardGeometry(r, next, m));
-            L_TRY(l_prepareMaterial(r, m->engine, next));
+            L_Material* pipeline;
+            L_TRY(l_prepareMeshMaterial(r, m->engine, next, m, &pipeline));
         }
     }
     bl_Material current = l_meshMaterial(m);
@@ -554,6 +580,7 @@ static bl_Status meshForEngine(bl_EngineContext h, bl_Mesh mesh, L_Mesh** out)
     {
         return BL_WRONG_ENGINE;
     }
+    l_syncGeometryGpu(&m->geometry);
     *out = m;
     return BL_OK;
 }
@@ -572,7 +599,7 @@ static bool sameLayout(L_Geometry* g, const bl_MeshGeometry* input)
     return true;
 }
 
-static bl_Status uploadGeometry(bl_Runtime* r, L_Geometry* old, L_Geometry* next,
+static bl_Status uploadGeometry(bl_Runtime* r, L_Engine* engine, L_Geometry* old, L_Geometry* next,
                                 const bl_GeometryUpdateRanges* ranges)
 {
     if (!bgfx::isValid(old->vertexBuffer))
@@ -585,6 +612,22 @@ static bl_Status uploadGeometry(bl_Runtime* r, L_Geometry* old, L_Geometry* next
     const bl_GeometryRange* ix = ranges ? ranges->indices : &allI;
     size_t vn = ranges ? ranges->vertexRangeCount : 1;
     size_t in = ranges ? ranges->indexRangeCount : 1;
+    size_t uploadCount = 0;
+    if (old->dedicatedIndices)
+    {
+        for (size_t i = 0; i < in; ++i)
+        {
+            if (ix[i].count)
+            {
+                ++uploadCount;
+            }
+        }
+        if (ranges && next->indexCount < old->indexCount)
+        {
+            ++uploadCount;
+        }
+        L_TRY(l_validateStorageUploadViews(engine, uploadCount));
+    }
     size_t mirrorBytes = old->vertexCapacity * old->stride;
     next->gpuVertices = (uint8_t*)l_alloc(r, mirrorBytes);
     if (mirrorBytes && !next->gpuVertices)
@@ -610,6 +653,30 @@ static bl_Status uploadGeometry(bl_Runtime* r, L_Geometry* old, L_Geometry* next
     {
         return BL_OUT_OF_MEMORY;
     }
+    if (ranges && old->indexCapacity)
+    {
+        size_t bytes = old->indexCapacity * sizeof(uint32_t);
+        next->gpuIndices = (uint32_t*)l_alloc(r, bytes);
+        if (!next->gpuIndices)
+        {
+            l_free(r, pack);
+            return BL_OUT_OF_MEMORY;
+        }
+        memcpy(next->gpuIndices, old->gpuIndices ? old->gpuIndices : old->indices, bytes);
+        for (size_t i = 0; i < in; ++i)
+        {
+            if (ix[i].count)
+            {
+                memcpy(next->gpuIndices + ix[i].offset, next->indices + ix[i].offset,
+                       ix[i].count * sizeof(uint32_t));
+            }
+        }
+        if (next->indexCount < old->indexCount)
+        {
+            memset(next->gpuIndices + next->indexCount, 0,
+                   (old->indexCount - next->indexCount) * sizeof(uint32_t));
+        }
+    }
     size_t offset = 0;
     for (size_t k = 0; k < vn; ++k)
     {
@@ -627,6 +694,64 @@ static bl_Status uploadGeometry(bl_Runtime* r, L_Geometry* old, L_Geometry* next
         }
         offset += v[k].count * next->stride;
     }
+    if (uploadCount)
+    {
+        size_t bytes;
+        if (!l_size(uploadCount, sizeof(L_StorageUpload), &bytes) || !l_allocationFits(bytes))
+        {
+            l_free(r, pack);
+            return BL_INVALID_ARGUMENT;
+        }
+        L_StorageUpload* uploads = (L_StorageUpload*)l_alloc(r, bytes);
+        if (!uploads)
+        {
+            l_free(r, pack);
+            return BL_OUT_OF_MEMORY;
+        }
+        size_t prepared = 0;
+        bl_Status status = BL_OK;
+        for (size_t i = 0; i < in && status == BL_OK; ++i)
+        {
+            if (ix[i].count)
+            {
+                bgfx::BufferRegion destination;
+                destination.init(old->indexBuffer, (uint32_t)(ix[i].offset * sizeof(uint32_t)),
+                                 (uint32_t)(ix[i].count * sizeof(uint32_t)));
+                status = l_prepareStorageUpload(&destination, next->indices + ix[i].offset,
+                                                uploads + prepared);
+                if (status == BL_OK)
+                {
+                    ++prepared;
+                }
+            }
+        }
+        if (status == BL_OK && ranges && next->indexCount < old->indexCount)
+        {
+            bgfx::BufferRegion destination;
+            destination.init(old->indexBuffer, (uint32_t)(next->indexCount * sizeof(uint32_t)),
+                             (uint32_t)((old->indexCount - next->indexCount) * sizeof(uint32_t)));
+            status = l_prepareStorageUpload(&destination, next->indices + next->indexCount,
+                                            uploads + prepared);
+            if (status == BL_OK)
+            {
+                ++prepared;
+            }
+        }
+        if (status == BL_OK)
+        {
+            status = l_submitStorageUploads(engine, uploads, prepared);
+        }
+        else
+        {
+            l_cancelStorageUploads(uploads, prepared);
+        }
+        l_free(r, uploads);
+        if (status != BL_OK)
+        {
+            l_free(r, pack);
+            return status;
+        }
+    }
     offset = 0;
     for (size_t i = 0; i < vn; ++i)
     {
@@ -641,14 +766,14 @@ static bl_Status uploadGeometry(bl_Runtime* r, L_Geometry* old, L_Geometry* next
     }
     for (size_t i = 0; i < in; ++i)
     {
-        if (ix[i].count)
+        if (ix[i].count && !old->dedicatedIndices)
         {
             bgfx::update(old->indexBuffer, (uint32_t)ix[i].offset,
                          bgfx::copy(next->indices + ix[i].offset,
                                     (uint32_t)(ix[i].count * sizeof(uint32_t))));
         }
     }
-    if (ranges && next->indexCount < old->indexCount)
+    if (ranges && next->indexCount < old->indexCount && !old->dedicatedIndices)
     {
         // Shrinking always retires the old triangle tail, even when no explicit range uploads.
         size_t removed = old->indexCount - next->indexCount;
@@ -671,8 +796,14 @@ static bl_Status replaceGeometry(bl_EngineContext h, bl_Mesh mesh, const bl_Mesh
     {
         return BL_UNSUPPORTED;
     }
+    if (mode != 1 && l_sharedGeometryGpu(&m->geometry))
+    {
+        return l_error(h._runtime, BL_UNSUPPORTED, __func__,
+                       "Original in-place geometry updates require unshared GPU geometry",
+                       mode == 2 ? 464 : 470);
+    }
     bl_Runtime* r = h._runtime;
-    L_TRY(validateGeometry(r, g));
+    L_TRY(validateGeometry(r, g, m->topology));
     L_Geometry* old = &m->geometry;
     size_t vc = g->positions.count / 3;
     size_t ic = g->indices.count;
@@ -726,7 +857,8 @@ static bl_Status replaceGeometry(bl_EngineContext h, bl_Mesh mesh, const bl_Mesh
     }
     L_Geometry next;
     L_TRY(cpuGeometry(r, g, vcap, icap, &next));
-    bl_Status s = stable ? uploadGeometry(r, old, &next, ranges) : gpuGeometry(r, &next);
+    bl_Status s = stable ? uploadGeometry(r, m->engine, old, &next, ranges)
+                         : gpuGeometry(r, m->engine, &next, old->dedicatedIndices);
     if (s != BL_OK)
     {
         l_geometryCleanup(r, &next);
@@ -736,7 +868,12 @@ static bl_Status replaceGeometry(bl_EngineContext h, bl_Mesh mesh, const bl_Mesh
     {
         next.vertexBuffer = old->vertexBuffer;
         next.indexBuffer = old->indexBuffer;
-        old->vertexBuffer.idx = old->indexBuffer.idx = BL_INVALID_BGFX_HANDLE;
+        next.dedicatedIndices = old->dedicatedIndices;
+        l_replaceSharedGpuMirrors(r, old, &next);
+        if (!old->gpuOwner)
+        {
+            old->vertexBuffer.idx = old->indexBuffer.idx = BL_INVALID_BGFX_HANDLE;
+        }
     }
     l_geometryCleanup(r, old);
     *old = next;
@@ -773,6 +910,11 @@ static bl_Status attributeUpdate(bl_EngineContext h, bl_Mesh mesh, bl_F32Span va
     if (m->skin)
     {
         return BL_UNSUPPORTED;
+    }
+    if (l_sharedGeometryGpu(&m->geometry))
+    {
+        return l_error(h._runtime, BL_UNSUPPORTED, __func__,
+                       "Original attribute updates require unshared GPU geometry", 467);
     }
     L_Geometry* g = &m->geometry;
     if (!(g->attributeMask & (1u << attr)) ||

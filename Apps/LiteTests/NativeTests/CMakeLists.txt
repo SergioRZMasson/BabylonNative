@@ -15,6 +15,7 @@ set(SOURCES
     "Source/Tests.RenderOrder.cpp"
     "Source/Tests.Runtime.cpp")
 list(APPEND SOURCES "Source/Tests.Inspection.cpp")
+list(APPEND SOURCES "Source/Tests.M1.cpp")
 
 add_library(LiteHeaderC99 OBJECT "Source/ContractC99.c")
 set_property(TARGET LiteHeaderC99 PROPERTY C_STANDARD 99)

@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <type_traits>
 #include <vector>
 
 namespace Babylon::Plugins::LiteJSBinding
@@ -37,6 +38,7 @@ namespace Babylon::Plugins::LiteJSBinding
             Light,
             DirectionalLight,
             Control,
+            FreeControl,
             Limits,
             AssetContainer,
             PbrMaterial,
@@ -101,6 +103,8 @@ namespace Babylon::Plugins::LiteJSBinding
         struct State
         {
             HostOptions options;
+            bool useFloatClearPalette{};
+            uint8_t clearPaletteIndex{};
             bool disposed{};
             std::weak_ptr<State> self;
             std::unordered_set<const Token*> knownTokens;
@@ -123,6 +127,7 @@ namespace Babylon::Plugins::LiteJSBinding
             bool restoringJsException{};
             uint32_t createdTokens{};
             bool inNativeFrame{};
+            bool matrixPrecision{};
             uint32_t uiCallDepth{};
             FrameTimings frameTimings{};
             std::vector<Token> finalized;
@@ -165,6 +170,10 @@ namespace Babylon::Plugins::LiteJSBinding
                         {
                             controlPredicates.erase(token.identity._id);
                         }
+                    }
+                    else if (token.kind == Kind::FreeControl)
+                    {
+                        status = bl_detachFreeControl({token.identity._runtime, token.identity._id});
                     }
                     else if (token.kind == Kind::Limits)
                     {
@@ -548,6 +557,17 @@ namespace Babylon::Plugins::LiteJSBinding
                 return info.Env().Undefined(); }, name));
         }
 
+        template<typename F>
+        requires std::is_void_v<std::invoke_result_t<F&, State&, const Napi::CallbackInfo&>>
+        void Bind(Napi::Object api, const std::shared_ptr<State>& state, const char* name, F function)
+        {
+            Bind(api, state, name, Function{
+                [function = std::move(function)](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                    function(s, i);
+                    return i.Env().Undefined();
+                }});
+        }
+
         std::shared_ptr<State> GetState(Napi::Env env)
         {
             return *env.Global().Get("_liteNative").As<Napi::Object>().Get("_owner").As<Napi::External<std::shared_ptr<State>>>().Data();
@@ -562,6 +582,13 @@ namespace Babylon::Plugins::LiteJSBinding
         {
             const auto value = object.Get(name);
             return value.IsUndefined() ? bl_OptionalNumber{} : bl_OptionalNumber{true, value.As<Napi::Number>().DoubleValue()};
+        }
+
+        bl_OptionalNumber OptionalPlane(Napi::Object object, const char* name)
+        {
+            const auto value = object.Get(name);
+            return value.IsUndefined() || value.IsNull() ? bl_OptionalNumber{}
+                : bl_OptionalNumber{true, value.As<Napi::Number>().DoubleValue()};
         }
 
         bl_OptionalBool OptionalBool(Napi::Object object, const char* name)
@@ -702,10 +729,29 @@ namespace Babylon::Plugins::LiteJSBinding
             return result;
         }
 
+        Napi::Value MatrixArray(Napi::Env env, bool precise, const bl_Mat4& matrix)
+        {
+            if (precise)
+            {
+                return CopyArray<Napi::Float64Array>(env, matrix.values, 16);
+            }
+            float values[16];
+            for (size_t i = 0; i < 16; ++i)
+                values[i] = static_cast<float>(matrix.values[i]);
+            return CopyArray<Napi::Float32Array>(env, values, 16);
+        }
+
         Napi::Value Geometry(State& state, const Napi::CallbackInfo& info, unsigned kind)
         {
             bl_GeometryData data{};
-            if (kind == 2)
+            if (kind == 3)
+            {
+                const auto source = Options(info[0]);
+                const bl_TorusOptions options{Optional(source, "diameter"), Optional(source, "thickness"),
+                    Optional(source, "tessellation")};
+                state.Check(info.Env(), bl_createTorusData(state.options.runtime, &options, &data));
+            }
+            else if (kind == 2)
             {
                 const auto options = GroundOptions(info[0]);
                 state.Check(info.Env(), bl_createFlatGroundData(state.options.runtime, &options, &data));
@@ -727,6 +773,10 @@ namespace Babylon::Plugins::LiteJSBinding
                 result.Set("normals", CopyArray<Napi::Float32Array>(info.Env(), data.normals, data.vertexCount * 3));
                 result.Set("uvs", CopyArray<Napi::Float32Array>(info.Env(), data.uvs, data.vertexCount * 2));
                 result.Set("indices", CopyArray<Napi::Uint32Array>(info.Env(), data.indices, data.indexCount));
+                if (kind == 1)
+                {
+                    result.Set("vertexCount", static_cast<double>(data.vertexCount));
+                }
                 state.Check(info.Env(), bl_freeGeometryData(state.options.runtime, &data));
                 return result;
             }
@@ -2406,23 +2456,95 @@ namespace Babylon::Plugins::LiteJSBinding
                 return handle;
             };
             Bind(api, state, "setThinInstances", [mesh](State& s, const Napi::CallbackInfo& i) {
-                const auto matrices = i[1].As<Napi::Float32Array>();
                 const double count = i[2].As<Napi::Number>().DoubleValue();
                 if (!std::isfinite(count) || std::trunc(count) != count || count < 0 || count > UINT32_MAX)
                     throw Napi::TypeError::New(i.Env(), "Invalid thin-instance count.");
-                s.Check(i.Env(), bl_setThinInstances(mesh(s, i[0]), {matrices.Data(), matrices.ElementLength()}, static_cast<size_t>(count)));
+                if (!i[1].IsTypedArray())
+                    throw Napi::TypeError::New(i.Env(), "Thin matrices require F32/F64 typed arrays.");
+                if (i[1].As<Napi::TypedArray>().TypedArrayType() == napi_float64_array)
+                {
+                    const auto values = i[1].As<Napi::Float64Array>();
+                    s.Check(i.Env(), bl_setThinInstancesF64(mesh(s,i[0]), {values.Data(),values.ElementLength()},static_cast<size_t>(count)));
+                }
+                else if (i[1].As<Napi::TypedArray>().TypedArrayType() == napi_float32_array)
+                {
+                    const auto matrices = i[1].As<Napi::Float32Array>();
+                    s.Check(i.Env(), bl_setThinInstances(mesh(s, i[0]), {matrices.Data(), matrices.ElementLength()}, static_cast<size_t>(count)));
+                }
+                else
+                {
+                    throw Napi::TypeError::New(i.Env(), "Thin matrices require F32/F64 typed arrays.");
+                }
                 return i.Env().Undefined();
             });
             Bind(api, state, "getThinInstances", [mesh](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
-                bl_ThinInstanceView view{};
-                s.Check(i.Env(), bl_getThinInstances(mesh(s, i[0]), &view));
+                bl_ThinInstanceView2 all{};
+                const auto status = bl_getThinInstances2(mesh(s, i[0]), &all);
+                if (status == BL_NOT_READY) return i.Env().Null();
+                s.Check(i.Env(), status);
+                const auto& view = all.base;
                 auto result = Napi::Object::New(i.Env());
-                result.Set("matrices", CopyArray<Napi::Float32Array>(i.Env(), view.matrices.data, view.matrices.count));
+                result.Set("matrices", all.matrices64.data
+                    ? CopyArray<Napi::Float64Array>(i.Env(),all.matrices64.data,all.matrices64.count)
+                    : CopyArray<Napi::Float32Array>(i.Env(), view.matrices.data, view.matrices.count));
+                if (all.colors.data)
+                    result.Set("colors",CopyArray<Napi::Float32Array>(i.Env(),all.colors.data,all.colors.count));
                 result.Set("count", static_cast<double>(view.count));
                 result.Set("capacity", static_cast<double>(view.capacity));
                 result.Set("version", Napi::String::New(i.Env(), std::to_string(view.version)));
                 result.Set("worldBoundsEnabled", view.worldBoundsEnabled);
                 return result;
+            });
+            Bind(api,state,"setThinInstanceColors",[mesh](State& s,const Napi::CallbackInfo& i) {
+                s.Check(i.Env(),bl_setThinInstanceColors(mesh(s,i[0]),F32(i[1])));
+            });
+            Bind(api,state,"writeThinInstanceData",[](State& s,const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto& token=s.Get(i[0]);
+                if(token.kind!=Kind::Mesh && token.kind!=Kind::Node)
+                    throw Napi::TypeError::New(i.Env(),"Expected a mesh identity.");
+                const bl_Mesh handle{token.identity._runtime,token.identity._id};
+                bl_ThinInstanceView2 current{};
+                const auto status=bl_getThinInstances2(handle,&current);
+                if(status==BL_DISPOSED) return Napi::Boolean::New(i.Env(),false);
+                s.Check(i.Env(),status);
+                const auto data=i[1].As<Napi::Object>();
+                const double count=data.Get("count").As<Napi::Number>().DoubleValue();
+                if(!std::isfinite(count)||count<0||std::trunc(count)!=count||count>UINT32_MAX)
+                    throw Napi::TypeError::New(i.Env(),"Invalid thin-instance count.");
+                bl_ThinInstanceUpdate update{};
+                update.count=static_cast<size_t>(count);
+                update.writeMatrices=i[2].As<Napi::Boolean>().Value();
+                update.writeColors=i[3].As<Napi::Boolean>().Value();
+                if(update.writeMatrices)
+                {
+                    const auto matrices=data.Get("matrices").As<Napi::TypedArray>();
+                    if(matrices.TypedArrayType()==napi_float64_array)
+                    {
+                        const auto values=matrices.As<Napi::Float64Array>();
+                        update.matrices64={values.Data(),values.ElementLength()};
+                    }
+                    else
+                    {
+                        update.matrices=F32(matrices);
+                    }
+                }
+                if(update.writeColors) update.colors=F32(data.Get("colors"));
+                s.Check(i.Env(),bl_writeThinInstanceData(handle,&update));
+                return Napi::Boolean::New(i.Env(),true);
+            });
+            Bind(api,state,"setThinInstanceMatrix",[mesh](State& s,const Napi::CallbackInfo& i) {
+                const auto values=Numbers(i[2]);
+                if(values.size()!=16) throw Napi::TypeError::New(i.Env(),"Matrix requires sixteen numbers.");
+                const double index=i[1].As<Napi::Number>().DoubleValue();
+                if(!std::isfinite(index)||index<0||std::trunc(index)!=index||index>UINT32_MAX)
+                    throw Napi::TypeError::New(i.Env(),"Invalid instance matrix index.");
+                bl_Mat4 matrix{};
+                std::copy(values.begin(),values.end(),matrix.values);
+                s.Check(i.Env(),bl_setThinInstanceMatrix(mesh(s,i[0]),static_cast<size_t>(index),&matrix));
+            });
+            Bind(api,state,"enableThinInstanceGpuCulling",[mesh](State& s,const Napi::CallbackInfo& i) {
+                s.Check(i.Env(),bl_enableThinInstanceGpuCulling(mesh(s,i[0]),
+                    i[1].IsUndefined()||i[1].As<Napi::Boolean>().Value()));
             });
             Bind(api, state, "enableThinInstanceWorldBounds", [mesh](State& s, const Napi::CallbackInfo& i) {
                 s.Check(i.Env(), bl_enableThinInstanceWorldBounds(mesh(s, i[0])));
@@ -2794,6 +2916,206 @@ namespace Babylon::Plugins::LiteJSBinding
         }
     }
 
+    namespace
+    {
+        bl_Color4 LineColor(Napi::Value value)
+        {
+            const auto o = value.As<Napi::Object>();
+            return {o.Get("r").As<Napi::Number>().DoubleValue(),
+                o.Get("g").As<Napi::Number>().DoubleValue(),
+                o.Get("b").As<Napi::Number>().DoubleValue(),
+                o.Get("a").As<Napi::Number>().DoubleValue()};
+        }
+
+        struct LineArguments
+        {
+            std::vector<std::vector<bl_Vec3>> points;
+            std::vector<bl_Vec3Span> lines;
+            std::vector<std::vector<bl_Color4>> colorValues;
+            std::vector<bl_Color4Span> colors;
+            bool hasColors{};
+
+            explicit LineArguments(Napi::Object source)
+            {
+                const auto input = source.Get("lines").As<Napi::Array>();
+                points.reserve(input.Length());
+                lines.reserve(input.Length());
+                for (uint32_t n = 0; n < input.Length(); ++n)
+                    points.push_back(ProceduralPoints(input.Get(n)));
+                for (const auto& line : points)
+                    lines.push_back({line.data(), line.size()});
+                const auto colorInput = source.Get("colors");
+                hasColors = !colorInput.IsUndefined() && !colorInput.IsNull();
+                if (hasColors)
+                {
+                    const auto array = colorInput.As<Napi::Array>();
+                    colorValues.resize(array.Length());
+                    for (uint32_t n = 0; n < array.Length(); ++n)
+                    {
+                        const auto line = array.Get(n).As<Napi::Array>();
+                        for (uint32_t j = 0; j < line.Length(); ++j)
+                            colorValues[n].push_back(LineColor(line.Get(j)));
+                    }
+                    for (const auto& line : colorValues)
+                        colors.push_back({line.data(), line.size()});
+                }
+            }
+        };
+
+        void BindM1(Napi::Object api, const std::shared_ptr<State>& state)
+        {
+            Bind(api,state,"cloneTransformNode",[](State& s,const Napi::CallbackInfo& i)->Napi::Value {
+                bl_SceneNode cloned{};
+                s.Check(i.Env(),bl_cloneTransformNode(s.NodeOf(i[0]),&cloned));
+                return s.WrapNode(i.Env(),cloned);
+            });
+            Bind(api,state,"getSceneNodeKind",[](State& s,const Napi::CallbackInfo& i)->Napi::Value {
+                const auto node=s.NodeOf(i[0]);
+                bl_SceneNodeKind kind{};
+                s.Check(i.Env(),bl_getSceneNodeKind(node,&kind));
+                const Kind kinds[]={Kind::Node,Kind::Mesh,Kind::Camera,Kind::ArcCamera,
+                    Kind::Light,Kind::DirectionalLight};
+                const auto desired=kinds[static_cast<unsigned>(kind)];
+                auto& token=s.Get(i[0]);
+                if(token.kind==Kind::Node&&desired!=Kind::Node)
+                {
+                    s.objects.erase({Kind::Node,node._id});
+                    token.kind=desired;
+                    auto reference=Napi::Persistent(i[0].As<Napi::Object>());
+                    reference.Unref();
+                    s.objects.insert_or_assign({desired,node._id},std::move(reference));
+                    if(desired!=Kind::Mesh) s.familyKinds.insert_or_assign(node._id,desired);
+                }
+                return Napi::Number::New(i.Env(),static_cast<unsigned>(kind));
+            });
+            Bind(api,state,"attachFreeControl",[](State& s,const Napi::CallbackInfo& i)->Napi::Value {
+                bl_SceneContext scene{};
+                if(!i[1].IsNull()&&!i[1].IsUndefined())
+                    scene=s.HandleOf<bl_SceneContext>(i[1],Kind::Scene);
+                bl_FreeControl control{};
+                s.Check(i.Env(),bl_attachFreeControl(s.HandleOf<bl_FreeCamera>(i[0],Kind::Camera),
+                    scene,&control));
+                return s.Wrap(i.Env(),control,Kind::FreeControl);
+            });
+            Bind(api,state,"detachFreeControl",[](State& s,const Napi::CallbackInfo& i) {
+                s.Check(i.Env(),bl_detachFreeControl(s.HandleOf<bl_FreeControl>(i[0],Kind::FreeControl)));
+            });
+            Bind(api,state,"processFreeInput",[](State& s,const Napi::CallbackInfo& i)->Napi::Value {
+                const auto source=i[1].As<Napi::Object>();
+                bl_FreeInput input{};
+                input.kind=static_cast<bl_FreeInputKind>(UiUint(source.Get("kind")));
+                const std::map<std::string,bl_FreeKey> keys{
+                    {"KeyW",BL_FREE_KEY_W},{"KeyS",BL_FREE_KEY_S},{"KeyA",BL_FREE_KEY_A},
+                    {"KeyD",BL_FREE_KEY_D},{"ArrowUp",BL_FREE_KEY_ARROW_UP},{"ArrowDown",BL_FREE_KEY_ARROW_DOWN},
+                    {"ArrowLeft",BL_FREE_KEY_ARROW_LEFT},{"ArrowRight",BL_FREE_KEY_ARROW_RIGHT},
+                    {"Space",BL_FREE_KEY_SPACE},{"PageUp",BL_FREE_KEY_PAGE_UP},
+                    {"ShiftLeft",BL_FREE_KEY_SHIFT_LEFT},{"ShiftRight",BL_FREE_KEY_SHIFT_RIGHT},
+                    {"PageDown",BL_FREE_KEY_PAGE_DOWN}};
+                if(source.Has("code"))
+                {
+                    const auto code=source.Get("code").As<Napi::String>().Utf8Value();
+                    const auto found=keys.find(code);
+                    if(found!=keys.end()) input.key=found->second;
+                }
+                if(source.Has("button")) input.button=UiUint(source.Get("button"));
+                if(source.Has("pointerId")) input.pointerId=source.Get("pointerId").As<Napi::Number>().Int64Value();
+                if(source.Has("clientX")) input.clientX=source.Get("clientX").As<Napi::Number>().DoubleValue();
+                if(source.Has("clientY")) input.clientY=source.Get("clientY").As<Napi::Number>().DoubleValue();
+                bl_ArcRotateInputEffects effects{};
+                s.Check(i.Env(),bl_processFreeInput(s.HandleOf<bl_FreeControl>(i[0],Kind::FreeControl),&input,&effects));
+                auto result=Napi::Object::New(i.Env());
+                result.Set("preventDefault",effects.preventDefault);
+                result.Set("capturePointer",effects.capturePointer);
+                result.Set("releasePointer",effects.releasePointer);
+                result.Set("pointerId",static_cast<double>(effects.pointerId));
+                return result;
+            });
+            Bind(api, state, "createGridMaterial", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto source = Options(i[0]);
+                const auto nameValue = source.Get("name");
+                std::string name = nameValue.IsUndefined() || nameValue.IsNull() ? "" : nameValue.As<Napi::String>().Utf8Value();
+                bl_GridMaterialOptions options{};
+                options.name = nameValue.IsUndefined() || nameValue.IsNull() ? bl_String{} : String(name);
+                options.hasMainColor = !source.Get("mainColor").IsUndefined() && !source.Get("mainColor").IsNull();
+                if (options.hasMainColor) options.mainColor = ColorValue(source.Get("mainColor"));
+                options.hasLineColor = !source.Get("lineColor").IsUndefined() && !source.Get("lineColor").IsNull();
+                if (options.hasLineColor) options.lineColor = ColorValue(source.Get("lineColor"));
+                options.hasGridOffset = !source.Get("gridOffset").IsUndefined() && !source.Get("gridOffset").IsNull();
+                if (options.hasGridOffset) options.gridOffset = ColorValue(source.Get("gridOffset"));
+                options.gridRatio = Optional(source, "gridRatio");
+                options.majorUnitFrequency = Optional(source, "majorUnitFrequency");
+                options.minorUnitVisibility = Optional(source, "minorUnitVisibility");
+                options.opacity = Optional(source, "opacity");
+                options.visibility = Optional(source, "visibility");
+                options.antialias = OptionalBool(source, "antialias");
+                options.preMultiplyAlpha = OptionalBool(source, "preMultiplyAlpha");
+                options.useMaxLine = OptionalBool(source, "useMaxLine");
+                options.backFaceCulling = OptionalBool(source, "backFaceCulling");
+                if (source.Has("opacityTexture") && !source.Get("opacityTexture").IsNull() &&
+                    !source.Get("opacityTexture").IsUndefined())
+                    options.opacityTexture = s.HandleOf<bl_Texture2D>(source.Get("opacityTexture"), Kind::Texture);
+                bl_ShaderMaterial material{};
+                s.Check(i.Env(), bl_createGridMaterial(s.options.runtime, &options, &material));
+                return s.Wrap(i.Env(), material, Kind::Material);
+            });
+            Bind(api, state, "createLineMaterial", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto source = Options(i[0]);
+                const auto nameValue = source.Get("name");
+                std::string name = nameValue.IsUndefined() || nameValue.IsNull() ? "" : nameValue.As<Napi::String>().Utf8Value();
+                bl_LineMaterialOptions options{};
+                options.name = nameValue.IsUndefined() || nameValue.IsNull() ? bl_String{} : String(name);
+                options.hasColor = !source.Get("color").IsUndefined() && !source.Get("color").IsNull();
+                if (options.hasColor) options.color = LineColor(source.Get("color"));
+                options.useVertexColor = OptionalBool(source, "useVertexColor");
+                options.useVertexAlpha = OptionalBool(source, "useVertexAlpha");
+                options.useThinInstances = OptionalBool(source, "useThinInstances");
+                options.useThinInstanceColors = OptionalBool(source, "useThinInstanceColors");
+                options.depthWrite = OptionalBool(source, "depthWrite");
+                if (source.Has("depthCompare"))
+                {
+                    const std::map<std::string, bl_DepthCompare> comparisons{
+                        {"never",BL_COMPARE_NEVER},{"less",BL_COMPARE_LESS},{"equal",BL_COMPARE_EQUAL},
+                        {"less-equal",BL_COMPARE_LESS_EQUAL},{"greater",BL_COMPARE_GREATER},
+                        {"not-equal",BL_COMPARE_NOT_EQUAL},{"greater-equal",BL_COMPARE_GREATER_EQUAL},
+                        {"always",BL_COMPARE_ALWAYS}};
+                    options.depthCompare = comparisons.at(source.Get("depthCompare").As<Napi::String>().Utf8Value());
+                }
+                bl_ShaderMaterial material{};
+                s.Check(i.Env(), bl_createLineMaterial(s.options.runtime, &options, &material));
+                return s.Wrap(i.Env(), material, Kind::Material);
+            });
+            Bind(api, state, "createLineSystem", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+                const auto source = Options(i[1]);
+                LineArguments values(source);
+                const auto nameValue = source.Get("name");
+                std::string name = nameValue.IsUndefined() || nameValue.IsNull() ? "" : nameValue.As<Napi::String>().Utf8Value();
+                bl_LineSystemOptions options{};
+                options.name = nameValue.IsUndefined() || nameValue.IsNull() ? bl_String{} : String(name);
+                options.lines = {values.lines.data(), values.lines.size()};
+                options.hasColors = values.hasColors;
+                options.colors = {values.colors.data(), values.colors.size()};
+                options.hasColor = !source.Get("color").IsUndefined() && !source.Get("color").IsNull();
+                if (options.hasColor) options.color = LineColor(source.Get("color"));
+                options.useVertexAlpha = OptionalBool(source, "useVertexAlpha");
+                options.useThinInstances = OptionalBool(source, "useThinInstances");
+                options.useThinInstanceColors = OptionalBool(source, "useThinInstanceColors");
+                if (source.Has("material") && !source.Get("material").IsNull() &&
+                    !source.Get("material").IsUndefined())
+                    options.material = s.HandleOf<bl_ShaderMaterial>(source.Get("material"), Kind::Material);
+                bl_Mesh mesh{};
+                s.Check(i.Env(), bl_createLineSystem(s.HandleOf<bl_EngineContext>(i[0],Kind::Engine), &options,&mesh));
+                return s.Wrap(i.Env(),mesh,Kind::Mesh);
+            });
+            Bind(api, state, "updateLineSystem", [](State& s, const Napi::CallbackInfo& i) {
+                LineArguments values(Options(i[2]));
+                const bl_LineSystemUpdateOptions options{{values.lines.data(),values.lines.size()},
+                    values.hasColors,{values.colors.data(),values.colors.size()}};
+                s.Check(i.Env(),bl_updateLineSystem(s.HandleOf<bl_EngineContext>(i[0],Kind::Engine),
+                    s.HandleOf<bl_Mesh>(i[1],Kind::Mesh),&options));
+            });
+        }
+    }
+
     void Initialize(Napi::Env env, const HostOptions& options)
     {
         auto state = std::make_shared<State>();
@@ -2806,6 +3128,7 @@ namespace Babylon::Plugins::LiteJSBinding
         BindExtras(api, state);
         BindFamilies(api, state);
         BindAssets(api, state);
+        BindM1(api, state);
         Bind(api, state, "disposeEngine", [](State& s, const Napi::CallbackInfo& i) {
             const auto engine = s.HandleOf<bl_EngineContext>(i[0], Kind::Engine);
             s.Check(i.Env(), bl_disposeEngine(engine));
@@ -2844,11 +3167,6 @@ namespace Babylon::Plugins::LiteJSBinding
             {
                 s.Check(i.Env(), BL_UNSUPPORTED);
             }
-            if (source.Has("useFloatingOrigin") && !source.Get("useFloatingOrigin").IsUndefined() &&
-                source.Get("useFloatingOrigin").As<Napi::Boolean>().Value())
-            {
-                s.Check(i.Env(), BL_UNSUPPORTED);
-            }
             if (i[0].IsObject())
             {
                 const auto canvas = i[0].As<Napi::Object>();
@@ -2859,6 +3177,25 @@ namespace Babylon::Plugins::LiteJSBinding
             }
             bl_EngineContext engine{};
             s.Check(i.Env(), bl_createEngine(s.options.runtime, &native, &options, &engine));
+            if (s.useFloatClearPalette)
+            {
+                const auto status = bl_setNativeClearPaletteIndex(engine, s.clearPaletteIndex);
+                if (status != BL_OK)
+                {
+                    bl_disposeEngine(engine);
+                    s.Check(i.Env(), status);
+                }
+            }
+            if (OptionalBool(source, "useFloatingOrigin") == BL_BOOL_TRUE)
+            {
+                const auto status = bl_enableFloatingOrigin(engine);
+                if (status != BL_OK)
+                {
+                    bl_disposeEngine(engine);
+                    s.Check(i.Env(), status);
+                }
+            }
+            s.matrixPrecision = options.useHighPrecisionMatrix == BL_BOOL_TRUE;
             s.options.nativeEngine.target = native.target;
             s.engines.push_back(engine);
             auto value = s.Wrap(i.Env(), engine, Kind::Engine).As<Napi::Object>();
@@ -2878,7 +3215,19 @@ namespace Babylon::Plugins::LiteJSBinding
         Bind(api, state, "createTransformNode", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
             const std::string name = i[0].IsUndefined() ? "" : i[0].As<Napi::String>().Utf8Value();
             bl_TransformNode node{};
-            s.Check(i.Env(), bl_createTransformNode(s.options.runtime, String(name), nullptr, &node));
+            bl_TransformNodeOptions options{{}, {0, 0, 0, 1}, {1, 1, 1}};
+            if (i[1].IsObject())
+            {
+                const auto data = i[1].As<Napi::Object>();
+                options.position = Vector(data.Get("position"));
+                options.scaling = Vector(data.Get("scaling"));
+                const auto q = data.Get("rotationQuaternion").As<Napi::Object>();
+                options.rotationQuaternion = {q.Get("x").As<Napi::Number>().DoubleValue(),
+                    q.Get("y").As<Napi::Number>().DoubleValue(),
+                    q.Get("z").As<Napi::Number>().DoubleValue(),
+                    q.Get("w").As<Napi::Number>().DoubleValue()};
+            }
+            s.Check(i.Env(), bl_createTransformNode(s.options.runtime, String(name), &options, &node));
             return s.Wrap(i.Env(), node, Kind::Node);
         });
         Bind(api, state, "createBoxData", [](State& s, const auto& i) { return Geometry(s, i, false); });
@@ -2898,6 +3247,94 @@ namespace Babylon::Plugins::LiteJSBinding
         Bind(api, state, "createExtrudeShape", [](State& s, const auto& i) { return ProceduralGeometry(s,i,6,true); });
         Bind(api, state, "createSphereData", [](State& s, const auto& i) { return Geometry(s, i, true); });
         Bind(api, state, "createFlatGroundData", [](State& s, const auto& i) { return Geometry(s, i, 2); });
+        Bind(api, state, "createTorusData", [](State& s, const auto& i) { return Geometry(s, i, 3); });
+        Bind(api, state, "createTorus", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            const auto source = Options(i[1]);
+            const bl_TorusOptions options{Optional(source, "diameter"), Optional(source, "thickness"),
+                Optional(source, "tessellation")};
+            bl_Mesh mesh{};
+            s.Check(i.Env(), bl_createTorus(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), &options, &mesh));
+            return s.Wrap(i.Env(), mesh, Kind::Mesh);
+        });
+        Bind(api, state, "createGroundFromHeightMap", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            const auto source = Options(i[2]);
+            const bl_HeightMapGroundOptions options{GroundOptions(i[2]),
+                Optional(source, "minHeight"), Optional(source, "maxHeight")};
+            const auto url = i[1].As<Napi::String>().Utf8Value();
+            bl_Mesh mesh{};
+            s.Check(i.Env(), bl_createGroundFromHeightMap(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine),
+                String(url), &options, &mesh));
+            return s.Wrap(i.Env(), mesh, Kind::Mesh);
+        });
+        Bind(api, state, "getMsaaSamples", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            uint32_t samples{};
+            s.Check(i.Env(), bl_getMsaaSamples(s.HandleOf<bl_EngineContext>(i[0], Kind::Engine), &samples));
+            return Napi::Number::New(i.Env(), samples);
+        });
+        Bind(api, state, "setParent", [](State& s, const Napi::CallbackInfo& i) {
+            s.Check(i.Env(), bl_setParent(s.NodeOf(i[0]), s.NodeOf(i[1])));
+        });
+        Bind(api, state, "setAlphaToCoverage", [](State& s, const Napi::CallbackInfo& i) {
+            s.Check(i.Env(), bl_setAlphaToCoverage(s.MaterialFamily(i[0]), i[1].As<Napi::Boolean>().Value()));
+        });
+        Bind(api, state, "getAlphaToCoverage", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            bool enabled{};
+            s.Check(i.Env(), bl_getAlphaToCoverage(s.MaterialFamily(i[0]), &enabled));
+            return Napi::Boolean::New(i.Env(), enabled);
+        });
+        Bind(api, state, "enableMirroredMeshes", [](State& s, const Napi::CallbackInfo& i) {
+            s.Check(i.Env(), bl_enableMirroredMeshes(s.HandleOf<bl_SceneContext>(i[0], Kind::Scene)));
+        });
+        Bind(api, state, "createIdentityMat4", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            bl_Mat4 matrix{};
+            s.Check(i.Env(), bl_createIdentityMat4(&matrix));
+            return MatrixArray(i.Env(), s.matrixPrecision, matrix);
+        });
+        Bind(api, state, "composeMat4", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            bl_Mat4 matrix{};
+            s.Check(i.Env(), bl_composeMat4(
+                i[0].As<Napi::Number>().DoubleValue(), i[1].As<Napi::Number>().DoubleValue(),
+                i[2].As<Napi::Number>().DoubleValue(), i[3].As<Napi::Number>().DoubleValue(),
+                i[4].As<Napi::Number>().DoubleValue(), i[5].As<Napi::Number>().DoubleValue(),
+                i[6].As<Napi::Number>().DoubleValue(), i[7].As<Napi::Number>().DoubleValue(),
+                i[8].As<Napi::Number>().DoubleValue(), i[9].As<Napi::Number>().DoubleValue(),
+                s.matrixPrecision, &matrix));
+            return MatrixArray(i.Env(), s.matrixPrecision, matrix);
+        });
+        Bind(api, state, "createTranslationMat4", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            bl_Mat4 matrix{};
+            s.Check(i.Env(), bl_createTranslationMat4(i[0].As<Napi::Number>().DoubleValue(),
+                i[1].As<Napi::Number>().DoubleValue(), i[2].As<Napi::Number>().DoubleValue(),
+                s.matrixPrecision, &matrix));
+            return MatrixArray(i.Env(), s.matrixPrecision, matrix);
+        });
+        Bind(api, state, "getOrthographicBounds", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
+            bl_OrthographicBounds bounds{};
+            s.Check(i.Env(), bl_getOrthographicBounds(s.CameraFamily(i[0]), &bounds));
+            auto result = Napi::Object::New(i.Env());
+            result.Set("halfHeight", bounds.halfHeight);
+            const std::pair<const char*, bl_OptionalNumber> fields[] = {
+                {"left", bounds.left}, {"right", bounds.right}, {"bottom", bounds.bottom}, {"top", bounds.top}};
+            for (const auto& [name, value] : fields)
+                result.Set(name, value.present ? Napi::Value(Napi::Number::New(i.Env(), value.value)) : i.Env().Null());
+            return result;
+        });
+        for (const bool enable : {false, true})
+        {
+            Bind(api, state, enable ? "enableOrthographicCamera" : "setOrthographicBounds",
+                [enable](State& s, const Napi::CallbackInfo& i) {
+                    const auto source = Options(i[1]);
+                    const auto half = Optional(source, "halfHeight");
+                    const bl_OrthographicBounds bounds{half.present ? half.value : 1,
+                        OptionalPlane(source, "left"), OptionalPlane(source, "right"),
+                        OptionalPlane(source, "bottom"), OptionalPlane(source, "top")};
+                    s.Check(i.Env(), enable ? bl_enableOrthographicCamera(s.CameraFamily(i[0]), &bounds)
+                        : bl_setOrthographicBounds(s.CameraFamily(i[0]), &bounds));
+                });
+        }
+        Bind(api, state, "disableOrthographicCamera", [](State& s, const Napi::CallbackInfo& i) {
+            s.Check(i.Env(), bl_disableOrthographicCamera(s.CameraFamily(i[0])));
+        });
         Bind(api, state, "createGround", [](State& s, const Napi::CallbackInfo& i) -> Napi::Value {
             const auto options = GroundOptions(i[1]);
             bl_Mesh mesh{};
@@ -3288,6 +3725,14 @@ namespace Babylon::Plugins::LiteJSBinding
             return result;
         });
         env.Global().Set("_liteNative", api);
+    }
+
+    void Initialize(Napi::Env env, const HostOptions& options, uint8_t clearPaletteIndex)
+    {
+        Initialize(env, options);
+        const auto state = GetState(env);
+        state->useFloatClearPalette = true;
+        state->clearPaletteIndex = clearPaletteIndex;
     }
 
     void Frame(Napi::Env env, double deltaMs)

@@ -203,6 +203,7 @@ namespace
         bl_NativeEngineOptions native{};
         bl_ShaderCompilerService compiler{};
         bl_ShaderCompilerService2 compiler2{};
+        bl_ComputeShaderCompilerService computeCompiler{};
         bl_EngineContext engine{};
         LiteScenes::Assets assets;
         Capture capture;
@@ -390,6 +391,24 @@ namespace
                 &assetService,
                 &timedCompiler2};
             LiteScenes::Check(bl_createRuntime2(&options, &runtime));
+            computeCompiler = bl_computeShaderCompilerService();
+            auto timedCompute = computeCompiler;
+            timedCompute.userData = this;
+            timedCompute.compile = [](void* user, const bl_ComputeShaderCompileRequest* request,
+                                      bl_ComputeShaderCompileResult* result) {
+                auto& host = *static_cast<Host*>(user);
+                const auto begin = Clock::now();
+                const auto status =
+                    host.computeCompiler.compile(host.computeCompiler.userData, request, result);
+                host.shaderMs += Ms(Clock::now() - begin);
+                ++host.shaderCalls;
+                return status;
+            };
+            timedCompute.release = [](void* user, bl_ComputeShaderCompileResult* result) {
+                auto& host = *static_cast<Host*>(user);
+                host.computeCompiler.release(host.computeCompiler.userData, result);
+            };
+            LiteScenes::Check(bl_setComputeShaderCompiler(runtime, &timedCompute));
             LiteScenes::Check(bl_setGltfImportMode(runtime, BL_GLTF_IMPORT_NATIVE));
             native.ownership = BL_BGFX_BORROWED;
             native.backend = BL_RENDERER_D3D11;
@@ -756,7 +775,7 @@ int main(int argc, char** argv)
                         error = text;
                     }
                 });
-            Babylon::Plugins::LiteJSBinding::Initialize(env, {host.runtime, host.native});
+            Babylon::Plugins::LiteJSBinding::Initialize(env, {host.runtime, host.native}, 0);
             auto performance = Napi::Object::New(env);
             performance.Set("now", Napi::Function::New(env, [](const Napi::CallbackInfo& info) {
                                 return Napi::Number::New(info.Env(),
@@ -765,6 +784,33 @@ int main(int argc, char** argv)
             env.Global().Set("performance", performance);
             env.RunScript(R"JS(
 globalThis.window=globalThis;
+globalThis.location={search:"",href:"app:///scene.ts"};
+globalThis.URLSearchParams=class{
+    constructor(value){this.values=new Map(value.replace(/^\?/,"").split("&").filter(Boolean)
+        .map(pair=>pair.split("=").map(decodeURIComponent)));}
+    get(name){return this.values.get(name)??null;}
+};
+let _sceneTaskId=0;
+const _sceneRaf=new Map();
+const _sceneTimers=new Map();
+let _sceneTime=0;
+globalThis.requestAnimationFrame=callback=>{const id=++_sceneTaskId;_sceneRaf.set(id,callback);return id;};
+globalThis.cancelAnimationFrame=id=>_sceneRaf.delete(id);
+globalThis.setTimeout=(callback,delay=0)=>{const id=++_sceneTaskId;
+    _sceneTimers.set(id,{callback,at:_sceneTime+delay});return id;};
+globalThis.clearTimeout=id=>_sceneTimers.delete(id);
+globalThis._sceneHostTick=()=>{
+    _sceneTime+=1000/60;
+    if(_sceneRaf.size){
+        const callbacks=Array.from(_sceneRaf.values());_sceneRaf.clear();
+        for(const callback of callbacks)callback(_sceneTime);
+    }
+    if(_sceneTimers.size){
+        for(const [id,timer]of Array.from(_sceneTimers)){
+            if(timer.at<=_sceneTime){_sceneTimers.delete(id);timer.callback();}
+        }
+    }
+};
 globalThis._sceneHostEngine=null;
 const _sceneCreateEngine=_liteNative.createEngine;
 _liteNative.createEngine=(...args)=>{const engine=_sceneCreateEngine(...args);
@@ -775,7 +821,10 @@ _liteNative.startEngine=(...args)=>{const result=_sceneStartEngine(...args);
     _sceneHostStarted=true;return result;};
 globalThis._canvas={width:1280,height:720,dataset:{},style:{},
     addEventListener(){},removeEventListener(){},setPointerCapture(){},releasePointerCapture(){},
-    getBoundingClientRect(){return {left:0,top:0,width:1280,height:720};}};
+    getBoundingClientRect(){return {left:0,top:0,width:1280,height:720};},
+    hasAttribute(name){return Object.hasOwn(this,name);},
+    setAttribute(name,value){if(name.startsWith("data-"))this.dataset[name.slice(5)]=String(value);
+        else this[name]=String(value);}};
 globalThis.document={getElementById:()=>_canvas,querySelector:()=>_canvas};
 )JS");
         });
@@ -793,18 +842,23 @@ globalThis.document={getElementById:()=>_canvas,querySelector:()=>_canvas};
         for (unsigned i = 0; !ready && i < 100; ++i)
         {
             dispatch([&](Napi::Env env) {
-                if (!firstFrame && env.Global().Get("_sceneHostStarted").ToBoolean().Value())
-                {
-                    LiteScenesProbe::MarkSourceFrame();
-                    Babylon::Plugins::LiteJSBinding::Frame(env, 1000.0 / 60);
-                    bgfx::frame();
-                    firstFrame = true;
-                }
                 const auto dataset = env.Global()
                                          .Get("_canvas")
                                          .As<Napi::Object>()
                                          .Get("dataset")
                                          .As<Napi::Object>();
+                if (env.Global().Get("_sceneHostStarted").ToBoolean().Value() &&
+                    (!firstFrame || !dataset.Get("ready").ToBoolean().Value()))
+                {
+                    if (!firstFrame)
+                    {
+                        LiteScenesProbe::MarkSourceFrame();
+                    }
+                    Babylon::Plugins::LiteJSBinding::Frame(env, 1000.0 / 60);
+                    bgfx::frame();
+                    firstFrame = true;
+                    env.Global().Get("_sceneHostTick").As<Napi::Function>().Call({});
+                }
                 ready = dataset.Get("ready").ToBoolean().Value();
                 if (dataset.Has("error"))
                 {
@@ -828,7 +882,10 @@ globalThis.document={getElementById:()=>_canvas,querySelector:()=>_canvas};
             host.setupMs = Ms(Clock::now() - host.created);
             LiteScenes::Check(host.Wait());
             host.firstCompletedMs = Ms(Clock::now() - host.created);
-            host.Loop([&]() { Babylon::Plugins::LiteJSBinding::Frame(env, 1000.0 / 60); });
+            host.Loop([&]() {
+                Babylon::Plugins::LiteJSBinding::Frame(env, 1000.0 / 60);
+                env.Global().Get("_sceneHostTick").As<Napi::Function>().Call({});
+            });
             const auto api = env.Global().Get("_liteNative").As<Napi::Object>();
             const auto stats = api.Get("getEngineStats")
                                    .As<Napi::Function>()
@@ -848,8 +905,14 @@ globalThis.document={getElementById:()=>_canvas,querySelector:()=>_canvas};
         });
 #else
         host.Initialize();
-        const bl_EngineOptions options{BL_BOOL_FALSE};
+        const bl_EngineOptions options{host.id == 201 || host.id == 204 ? BL_BOOL_TRUE
+                                                                        : BL_BOOL_FALSE};
         LiteScenes::Check(bl_createEngine(host.runtime, &host.native, &options, &host.engine));
+        LiteScenes::Check(bl_setNativeClearPaletteIndex(host.engine, 0));
+        if (host.id == 201 || host.id == 204)
+        {
+            LiteScenes::Check(bl_enableFloatingOrigin(host.engine));
+        }
         LiteScenes::CreateScene(host.id, host.runtime, host.engine);
         LiteScenes::Check(bl_startEngine(host.engine, nullptr, nullptr));
         host.setupMs = Ms(Clock::now() - host.created);

@@ -1,7 +1,8 @@
-# LiteScenes — M0 compatibility and measurement host
+# LiteScenes — M0/M1 compatibility and measurement host
 
 Opt-in Windows host for scenes **159, 161, 163, 168, 200, 247, 248, 249,
-256, 257, 258, 259, 260 and 266**. `LiteScenesNative` runs handwritten
+256, 257, 258, 259, 260 and 266**, plus the twelve M1 scenes below.
+`LiteScenesNative` runs handwritten
 scene-user-code ports using only `babylon_lite.h`. `LiteScenesJs` bundles the
 unchanged TypeScript scene scripts against `Plugins/LiteJSBinding`; its receipts
 reject engine-JavaScript inputs. Neither target includes private Core headers.
@@ -10,6 +11,72 @@ outside Core. Existing scene2/35/38 hosts are unchanged.
 
 **M0 is not complete.** Golden failures and missing native contracts are not
 silently treated as implemented APIs or performance passes.
+
+## M1 implementation and executed coverage
+
+All six batches have native implementation and JS forwarding: affine-preserving
+parenting/cloning and matrix helpers, torus/host-decoded heightmaps, grid/lines,
+colored/dynamic thin instances and GPU culling, alpha coverage, floating origin,
+orthographic projection and host-transported free controls.
+
+The approved 64/80-byte bgfx slot packing preserves the original GPU culler,
+64-thread dispatch, atomic compaction and indexed-indirect draw. Ordered buffer
+copies upload persistent raw storage without changing bgfx. Runtime compute
+compilation/reflection is an additive shader service. Native Graphics' float
+palette clear approach is enabled by an explicit host slot lease; no authored
+clear color or parity threshold is altered. See `babylon_lite.h` for ownership,
+atomic-error, sharing and native-host configuration contracts.
+
+MAD values below are **full/foreground RGB 0..255**, not normalized:
+
+| M1 scene | Native batches exercised | Native parity MAD | JS parity MAD |
+|---|---|---|---|
+| 16 | colored instances | PASS .00003979/.00011677 | PASS .00003979/.00011677 |
+| 43 | colored instances, native callbacks | PASS .00012080/.00035791 | PASS .00012297/.00036239 |
+| 162 | torus geometry | PASS 0/0 | PASS 0/0 |
+| 165 | shader instance colors | PASS .00000723/.00003982 | PASS .00000723/.00003982 |
+| 201 | high-precision floating origin | PASS .00027633/.00039786 | PASS .00028176/.00040567 |
+| 204 | instances and floating origin | PASS .00034975/.00042827 | PASS .00035409/.00043358 |
+| 213 | grid material | PASS .00013636/.00295270 | PASS .00015408/.00324797 |
+| 268 | live orthographic projection | PASS .00012731/.00057836 | PASS .00012731/.00057836 |
+| 270 | mirrored parenting/transforms | PASS .00009946/.00078914 | PASS .00009838/.00078053 |
+| 274 | alpha-to-coverage and sample metadata | PASS 0/0 | PASS 0/0 |
+| 278 | colored line topology | PASS 0/0 | PASS 0/0 |
+| 279 | line updates and colored instances | PASS 0/0 | PASS 0/0 |
+
+The final Release/V8 build passes 79/79 root CTests and 10/10 fresh native
+Minecraft suites. Existing scene200 FP and 249/257 anisotropy wrappers remain;
+their passing CTest status is not a new strict pixel pass. The M1 forwarding
+test covers live bounds, F64 storage, clone identity, dynamic raw writes/counts,
+error rollback and native free controls. CPU/GPU tests additionally check
+original byte goldens, clone allocator failure/churn, actual compute output,
+reset/dirty updates, index storage and floating-origin culling.
+
+Full body/scene deltas, the exact additive ABI inventory, benchmark commands,
+raw balanced pairs and separate startup observations are retained under
+`E:\Github\Babylon-Lite-Native-AI\artifacts\api-m1-v1\implementation-v1`.
+Performance is accepted only when both mean/P95 paired 95% CI upper bounds
+are <=1.0 after 15 pairs of 120 warmup + 2000 measured frames.
+
+**Executed steady-state result: 6/24 lanes accepted, 15 slower, 3 inconclusive.**
+The three accepted scenes are **162, 278 and 279**, in both languages.
+The complete 360-pair/720-process results and all confidence intervals are in
+`SUMMARY.md`/`summary.json`; startup remains separate. Native43 and Native/JS274
+are inconclusive, not passes. Every other nonaccepted lane is slower by at least
+one required gate. Profiling all 18 nonaccepted lanes places 97.2–99.9% of their
+P95-tail envelope in submit/backpressure; exact backend attribution remains open.
+No threshold, source workload, compiler route or bgfx implementation was changed
+to hide these failures. **M1 is not performance-qualified.**
+
+**Scope still requiring parent review:** the original bake API is Gaussian-
+splatting-only (M10), not an ordinary-mesh bake. Bound CPU-skin clones and
+protected imported-topology reparenting remain explicit unsupported cases.
+Source 1.25/1.32 capacity-draw padding is recorded separately rather than silently
+adapting the corpus. Clone-shared geometry rejects ordinary in-place updates;
+resize detaches, while thin data remains shared.
+
+The older feasibility-stop artifacts and historical M0 sections below remain
+immutable evidence, not the current M1 implementation status.
 
 ## Approved-policy continuation after7412ea7b
 
@@ -95,7 +162,7 @@ recipe. Required options:
 * Python with the existing Pillow and NumPy test dependencies; Node/esbuild
   from LitePlayground's existing dependency installation.
 
-The 28 serial CTest gates use the registry's exact extent, RGB MAD units
+The 52 serial CTest gates use the registry's exact extent, RGB MAD units
 (**0..255**, not normalized), thresholds, and reference-only Euclidean
 foreground mask. They reject extent mismatches, not crop images. Captures,
 diffs, process logs and numeric receipts are retained even on failure. Separate

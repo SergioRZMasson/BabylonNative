@@ -48,6 +48,14 @@ struct L_Material
     bool testing;
     bool culling;
     bool depthWrite;
+    bool alphaToCoverage;
+    bool preparedAlphaToCoverage;
+    bool lineMaterial;
+    bool lineVertexColor;
+    bool lineThinRequired;
+    uint8_t thinColorMode;
+    uint8_t instanceSlots;
+    L_Material* shaderVariants[2];
     bl_BlendMode blend;
     bl_DepthCompare depthCompare;
     bl_Topology topology;
@@ -71,7 +79,7 @@ struct L_Material
     bool sourceLightingDisabled;
     L_MaterialBlock blocks[4];
     size_t blockCount;
-    L_Material* standardVariants[2];
+    L_Material* standardVariants[6];
     bl_PbrMaterialInfo pbrInfo;
     bool pbrBaseUv1;
     bool pbrOrmUv1;
@@ -139,6 +147,7 @@ bl_Status l_generateTextureMips(L_Engine* engine, L_Texture* texture);
 void l_freeTextureMipPipeline(bl_Runtime* runtime, L_Engine* engine);
 void l_materialCleanup(bl_Runtime* r, L_Record* record);
 bl_Status l_materialFamily(bl_Material handle, L_Material** material);
-bl_Status l_standardSources(bl_Runtime* runtime, L_Material* pipeline, bool disableLighting);
+bl_Status l_standardSources(bl_Runtime* runtime, L_Material* pipeline, bool disableLighting,
+                            unsigned instanceSlots = 0);
 
 #endif

@@ -14,6 +14,8 @@ const hash = file => createHash("sha256").update(readFileSync(file)).digest("hex
 const scenes = JSON.parse(readFileSync(path.join(data, "scenes.json"), "utf8"));
 scenes.push({id: "projection", entry: path.join(path.dirname(fileURLToPath(import.meta.url)),
     "projection-tests.js")});
+scenes.push({id: "projectionm1", entry: path.join(path.dirname(fileURLToPath(import.meta.url)),
+    "projection-m1-tests.js")});
 const receipts = [];
 for (const scene of scenes) {
     const entry = scene.entry ?? path.join(data, "source", "lite", `scene${scene.id}.ts`);

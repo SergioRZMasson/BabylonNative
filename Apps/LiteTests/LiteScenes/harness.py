@@ -136,8 +136,11 @@ def baseline_parity(data, scene, backend, output):
     output = Path(output).resolve()
     executable = Path(record["executable"])
     env = clean_environment(record["pose"]["nativeEnvironment"])
-    env.update({"BBLITE_GPU_BACKEND": backend, "BBLITE_MAX_FRAMES": "2",
-                "BBLITE_BENCHMARK_FRAMES": "0", "BBLITE_SCREENSHOT_FRAME": "1",
+    capture_frame = int(record["pose"]["nativeEnvironment"].get("BBLITE_SCREENSHOT_FRAME", "1"))
+    if capture_frame < 0:
+        raise ValueError("Invalid registry capture frame")
+    env.update({"BBLITE_GPU_BACKEND": backend, "BBLITE_MAX_FRAMES": str(max(2, capture_frame + 1)),
+                "BBLITE_BENCHMARK_FRAMES": "0", "BBLITE_SCREENSHOT_FRAME": str(capture_frame),
                 "BBLITE_SCREENSHOT": str(output / "frame.png"),
                 "BBLITE_RENDER_CAPTURE": str(output / "capture.json"),
                 "BBLITE_BUILD_STAMP_OUT": str(output / "build-stamp.txt"),

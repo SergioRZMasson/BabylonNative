@@ -102,6 +102,13 @@ namespace LiteScenes
                            "{if(distance(input.uv,vec2<f32>(0.5,0.5))<0.18){discard;}"
                            "return vec4<f32>(1.0,0.25,0.05,0.55);}";
             }
+            if (id == 162)
+            {
+                fragment = "struct VertexOutput{@builtin(position) position:vec4<f32>,};\n"
+                           "@fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>"
+                           "{if(USE_BLUE){return vec4<f32>(25.0/255.0,0.28,1.00,1.0);}"
+                           "return vec4<f32>(1.00,25.0/255.0,25.0/255.0,1.0);}";
+            }
             const bl_VertexSemantic attributes[] = {BL_ATTRIBUTE_POSITION, BL_ATTRIBUTE_UV};
             const double white[] = {1, 1, 1};
             const double one[] = {1};
@@ -112,6 +119,7 @@ namespace LiteScenes
             bl_ShaderMaterialOptions options{};
             const char* name = id == 159   ? "scene159Shader"
                                : id == 161 ? "scene161Shader"
+                               : id == 162 ? "scene162Shader"
                                            : "scene163Shader";
             options.name = String(name);
             options.vertexSource = String(vertex);
@@ -120,6 +128,12 @@ namespace LiteScenes
             options.attributeCount = id == 163 ? 2 : 1;
             options.uniforms = uniforms;
             options.uniformCount = id == 161 ? 3 : 1;
+            const bl_ShaderDefine blue{String("USE_BLUE"), true, true, 0};
+            if (id == 162)
+            {
+                options.defines = &blue;
+                options.defineCount = 1;
+            }
             if (id == 163)
             {
                 options.needAlphaBlending = BL_BOOL_TRUE;
@@ -136,7 +150,12 @@ namespace LiteScenes
                 Check(bl_setShaderUniform(material, String("intensity"), {intensity, 1}));
             }
             bl_Mesh mesh{};
-            if (id == 163)
+            if (id == 162)
+            {
+                const bl_TorusOptions torus{{true, 2}, {true, .45}, {true, 64}};
+                Check(bl_createTorus(engine, &torus, &mesh));
+            }
+            else if (id == 163)
             {
                 bl_PlaneOptions plane{};
                 plane.width = {true, 3};
@@ -242,16 +261,19 @@ namespace LiteScenes
         bl_SceneContext scene{};
         Check(bl_createSceneContext(engine, &scene));
         Clear(scene, {0.2, 0.2, 0.3, 1});
-        if (id == 159 || id == 161 || id == 163)
+        if (id == 159 || id == 161 || id == 162 || id == 163)
         {
             Clear(scene, {51.0 / 255, 51.0 / 255, 76.0 / 255, 1});
             Camera(runtime, scene, -Pi / 2, id == 163 ? Pi / 2 : Pi / 2.25, id == 163 ? 4 : 4.2, {},
                    0.1, 100, false);
             CustomShader(id, runtime, engine, scene);
         }
-        else if (id == 200)
+        else if (id == 200 || id == 201)
         {
             Hpm(runtime, engine, scene);
+        }
+        else if (CreateM1Scene(id, runtime, engine, scene))
+        {
         }
         else if (id == 168)
         {

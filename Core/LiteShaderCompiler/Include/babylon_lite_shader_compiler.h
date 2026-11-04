@@ -16,6 +16,7 @@ extern "C"
  */
     bl_ShaderCompilerService bl_shaderCompilerService(void);
     bl_ShaderCompilerService2 bl_shaderCompilerService2(void);
+    bl_ComputeShaderCompilerService bl_computeShaderCompilerService(void);
 
 #ifdef __cplusplus
 }

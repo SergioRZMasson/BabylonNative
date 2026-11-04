@@ -27,7 +27,7 @@ async function main() {
     check(precisionNode.worldMatrix[12] === 16777216,
         "Writing source precision metadata changed creation-time matrix storage.");
     for (const options of [{msaaSamples: 8}, {requiredLimits: {maxColorAttachmentBytesPerSample: 64}},
-        {maxDevicePixelRatio: 2}, {useFloatingOrigin: true}]) {
+        {maxDevicePixelRatio: 2}]) {
         let failed = false;
         try { await createEngine(canvas, options); } catch { failed = true; }
         check(failed, "Unsupported engine option was silently ignored.");

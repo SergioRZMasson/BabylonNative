@@ -35,9 +35,9 @@ void l_freeNativePipeline(bl_Runtime* runtime, L_NativePipeline* pipeline)
     pipeline->program.idx = BL_INVALID_BGFX_HANDLE;
 }
 
-static bool nativeStages(uint32_t stages)
+static bool nativeStages(uint32_t stages, bool compute = false)
 {
-    return stages && !(stages & ~UINT32_C(3));
+    return compute ? stages == BL_STAGE_COMPUTE : stages && !(stages & ~UINT32_C(3));
 }
 
 static bool sameTextureBinding(const bl_ReflectedTexture* first, const bl_ReflectedTexture* second)
@@ -53,7 +53,8 @@ static bool sameTextureBinding(const bl_ReflectedTexture* first, const bl_Reflec
 
 static bl_Status nativeReflection(bl_Runtime* runtime, const bl_ShaderCompileResult2* result,
                                   const bl_InstanceAttributeDeclaration* instances,
-                                  size_t instanceCount, L_NativePipeline* pipeline)
+                                  size_t instanceCount, L_NativePipeline* pipeline,
+                                  bool compute = false)
 {
     const bl_ShaderCompileResult* base = &result->base;
     if (result->structSize != sizeof(*result) || result->version != 2 || base->attributeCount > 6 ||
@@ -152,7 +153,7 @@ static bl_Status nativeReflection(bl_Runtime* runtime, const bl_ShaderCompileRes
     {
         const bl_ReflectedUniformBlock* block = base->uniformBlocks + i;
         if (!l_string(block->name) || !block->name.length || !block->byteSize ||
-            block->byteSize % 16 || !nativeStages(block->stages))
+            block->byteSize % 16 || !nativeStages(block->stages, compute))
         {
             return BL_SHADER_ERROR;
         }
@@ -181,7 +182,7 @@ static bl_Status nativeReflection(bl_Runtime* runtime, const bl_ShaderCompileRes
             uniform->byteOffset % (uniform->type == BL_UNIFORM_VEC2   ? 8u
                                    : uniform->type >= BL_UNIFORM_VEC3 ? 16u
                                                                       : 4u) ||
-            uniform->nativeByteOffset % 4 || !nativeStages(uniform->stages) ||
+            uniform->nativeByteOffset % 4 || !nativeStages(uniform->stages, compute) ||
             (uniform->stages & ~base->uniformBlocks[uniform->blockIndex].stages) ||
             !l_string(uniform->nativeName) || !uniform->nativeName.length ||
             !uniform->nativeCount || uniform->nativeType != BL_NATIVE_UNIFORM_VEC4 ||
@@ -429,5 +430,167 @@ bl_Status l_bindNativeBlocks(bl_Runtime* runtime, L_NativePipeline* pipeline,
                          pipeline->uniforms[i].count);
     }
     (void)runtime;
+    return BL_OK;
+}
+
+void l_freeComputePipeline(bl_Runtime* r, L_ComputePipeline* pipeline)
+{
+    l_freeNativePipeline(r, &pipeline->native);
+    for (size_t i = 0; i < pipeline->storageCount; ++i)
+    {
+        l_free(r, (void*)pipeline->storage[i].name.data);
+    }
+    l_free(r, pipeline->storage);
+    *pipeline = {};
+    pipeline->native.program.idx = BL_INVALID_BGFX_HANDLE;
+}
+
+static bl_Status computeReflection(bl_Runtime* r, const bl_ComputeShaderCompileResult* result,
+                                   L_ComputePipeline* pipeline)
+{
+    const bgfx::Caps* caps = bgfx::getCaps();
+    if (result->structSize != sizeof(*result) || result->version != BL_COMPUTE_SHADER_VERSION ||
+        !l_typedSpan(result->storageBuffers, result->storageBufferCount,
+                     alignof(bl_ReflectedStorageBuffer)) ||
+        result->storageBufferCount > caps->limits.maxComputeBindings || !result->container.data ||
+        result->container.count < 28 || result->container.count > UINT32_MAX ||
+        memcmp(result->container.data, "CSH\x0c", 4) || !result->workgroupSize[0] ||
+        !result->workgroupSize[1] || !result->workgroupSize[2] || result->workgroupSize[0] > 1024 ||
+        result->workgroupSize[1] > 1024 || result->workgroupSize[2] > 64 ||
+        (uint64_t)result->workgroupSize[0] * result->workgroupSize[1] * result->workgroupSize[2] >
+            1024)
+    {
+        return BL_SHADER_ERROR;
+    }
+    uint32_t srv = 0;
+    uint32_t uav = 0;
+    for (size_t i = 0; i < result->storageBufferCount; ++i)
+    {
+        const bl_ReflectedStorageBuffer* buffer = result->storageBuffers + i;
+        if (!l_identifier(buffer->name) || !buffer->name.length ||
+            buffer->nativeStage >= caps->limits.maxComputeBindings || buffer->nativeStage >= 32 ||
+            buffer->minimumBytes > UINT32_MAX ||
+            ((srv | uav) & (UINT32_C(1) << buffer->nativeStage)))
+        {
+            return BL_SHADER_ERROR;
+        }
+        for (size_t j = 0; j < i; ++j)
+        {
+            const bl_ReflectedStorageBuffer* previous = result->storageBuffers + j;
+            if (l_equal(previous->name, buffer->name) ||
+                (previous->group == buffer->group && previous->binding == buffer->binding))
+            {
+                return BL_SHADER_ERROR;
+            }
+        }
+        if (buffer->readOnly)
+        {
+            srv |= UINT32_C(1) << buffer->nativeStage;
+        }
+        else
+        {
+            uav |= UINT32_C(1) << buffer->nativeStage;
+        }
+    }
+    const uint8_t* bytes = result->container.data;
+    uint32_t reflectedSrv = (uint32_t)bytes[12] | (uint32_t)bytes[13] << 8 |
+                            (uint32_t)bytes[14] << 16 | (uint32_t)bytes[15] << 24;
+    uint32_t reflectedUav = (uint32_t)bytes[16] | (uint32_t)bytes[17] << 8 |
+                            (uint32_t)bytes[18] << 16 | (uint32_t)bytes[19] << 24;
+    if (srv != reflectedSrv || uav != reflectedUav)
+    {
+        return BL_SHADER_ERROR;
+    }
+    bl_ShaderCompileResult2 uniformResult = {};
+    uniformResult.structSize = sizeof(uniformResult);
+    uniformResult.version = BL_SHADER_COMPILE_VERSION_2;
+    uniformResult.base.uniformBlocks = result->uniformBlocks;
+    uniformResult.base.uniformBlockCount = result->uniformBlockCount;
+    uniformResult.base.uniforms = result->uniforms;
+    uniformResult.base.uniformCount = result->uniformCount;
+    L_TRY(nativeReflection(r, &uniformResult, NULL, 0, &pipeline->native, true));
+    size_t size;
+    if (!l_size(result->storageBufferCount, sizeof(bl_ReflectedStorageBuffer), &size))
+    {
+        return BL_SHADER_ERROR;
+    }
+    pipeline->storage = (bl_ReflectedStorageBuffer*)l_alloc(r, size);
+    if (size && !pipeline->storage)
+    {
+        return BL_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < result->storageBufferCount; ++i)
+    {
+        pipeline->storage[i] = result->storageBuffers[i];
+        pipeline->storage[i].name = l_copyString(r, result->storageBuffers[i].name);
+        ++pipeline->storageCount;
+        if (!pipeline->storage[i].name.data)
+        {
+            return BL_OUT_OF_MEMORY;
+        }
+    }
+    memcpy(pipeline->workgroupSize, result->workgroupSize, sizeof(pipeline->workgroupSize));
+    return BL_OK;
+}
+
+bl_Status l_compileComputePipeline(bl_Runtime* r, L_Engine* engine, bl_String source,
+                                   bl_String entry, L_ComputePipeline* out)
+{
+    if (!r->hasComputeCompiler || !(bgfx::getCaps()->supported & BGFX_CAPS_COMPUTE))
+    {
+        return L_FAIL(r, BL_UNSUPPORTED,
+                      "A runtime compute compiler and compute backend are required");
+    }
+    bl_ComputeShaderCompileRequest request = {
+        sizeof(request), BL_COMPUTE_SHADER_VERSION,    engine->backend, 12, source,
+        entry,           {"thin-instance-culling", 21}};
+    bl_ComputeShaderCompileResult result = {};
+    result.structSize = sizeof(result);
+    result.version = BL_COMPUTE_SHADER_VERSION;
+    L_ComputePipeline pipeline = {};
+    pipeline.native.program.idx = BL_INVALID_BGFX_HANDLE;
+    bl_Status status;
+    r->computeUsed = true;
+    L_CALL(r, status, r->computeCompiler.compile(r->computeCompiler.userData, &request, &result));
+    if (status == BL_OK)
+    {
+        status = computeReflection(r, &result, &pipeline);
+    }
+    if (status == BL_OK)
+    {
+        bgfx::ShaderHandle shader =
+            bgfx::createShader(bgfx::copy(result.container.data, (uint32_t)result.container.count));
+        if (bgfx::isValid(shader))
+        {
+            pipeline.native.program = bgfx::createProgram(shader, true);
+        }
+        if (!bgfx::isValid(pipeline.native.program))
+        {
+            status = BL_SHADER_ERROR;
+        }
+    }
+    char diagnostics[1024] = {};
+    if (status != BL_OK && l_string(result.diagnostics) && result.diagnostics.length)
+    {
+        size_t length = result.diagnostics.length < sizeof(diagnostics) - 1
+                            ? result.diagnostics.length
+                            : sizeof(diagnostics) - 1;
+        while (length && length < result.diagnostics.length &&
+               ((uint8_t)result.diagnostics.data[length] & 0xc0) == 0x80)
+        {
+            --length;
+        }
+        memcpy(diagnostics, result.diagnostics.data, length);
+    }
+    l_enterHost(r);
+    r->computeCompiler.release(r->computeCompiler.userData, &result);
+    l_leaveHost(r);
+    if (status != BL_OK)
+    {
+        l_freeComputePipeline(r, &pipeline);
+        return L_FAIL(r, status,
+                      diagnostics[0] ? diagnostics : "Compute shader preparation failed");
+    }
+    *out = pipeline;
     return BL_OK;
 }

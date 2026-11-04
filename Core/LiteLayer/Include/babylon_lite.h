@@ -258,7 +258,8 @@ typedef enum bl_RendererBackend
 typedef enum bl_ShaderStage
 {
     BL_STAGE_VERTEX = 1,
-    BL_STAGE_FRAGMENT = 2
+    BL_STAGE_FRAGMENT = 2,
+    BL_STAGE_COMPUTE = 4
 } bl_ShaderStage;
 
 typedef enum bl_ShaderUniformType
@@ -653,6 +654,15 @@ bl_Status bl_createEngine(bl_Runtime* runtime, const bl_NativeEngineOptions* nat
 bl_Status bl_disposeEngine(bl_EngineContext engine);
 bl_Status bl_getEngineStats(bl_EngineContext engine, bl_EngineStats* stats);
 bl_Status bl_setNativeTarget(bl_EngineContext engine, const bl_NativeTarget* target);
+/*
+ * Optional host lease of one bgfx float-clear palette slot for this engine's lifetime.
+ * The host must exclude this slot from its own palette writes until engine disposal.
+ * Configure before scene registration; BUSY for a different slot afterward or a slot
+ * leased by another Lite engine. Float mode preserves original GPU clear conversion
+ * and HDR values. Without this opt-in, the compatible packed 8-bit clear path remains.
+ * No allocation or ownership transfer; failure leaves the engine unchanged.
+ */
+bl_Status bl_setNativeClearPaletteIndex(bl_EngineContext engine, uint8_t paletteIndex);
 bl_Status bl_waitForGpuIdle(bl_EngineContext engine);
 bl_Status bl_waitForGpuResourceRetirements(bl_EngineContext engine);
 bl_Status bl_startEngine(bl_EngineContext engine, bl_CompletionCallback firstFrame, void* userData);
@@ -950,6 +960,55 @@ bl_Status bl_setCameraProperties(bl_FreeCamera camera, const bl_CameraProperties
 bl_Status bl_disposeNode(bl_SceneNode node); /* Native helper, not removeFromScene. */
 
 /*
+ * Pure matrix helpers allocate no storage: caller owns the double-valued result.
+ * highPrecision selects original F64 storage versus rounding each stored element
+ * to F32. All inputs must be finite; failures leave outputs unchanged.
+ */
+bl_Status bl_createIdentityMat4(bl_Mat4* matrix);
+bl_Status bl_createTranslationMat4(double x, double y, double z, bool highPrecision,
+                                   bl_Mat4* matrix);
+bl_Status bl_composeMat4(double tx, double ty, double tz, double qx, double qy, double qz,
+                         double qw, double sx, double sy, double sz, bool highPrecision,
+                         bl_Mat4* matrix);
+
+/*
+ * Original setParent: updates both child.parent and the old/new child arrays,
+ * preserves the exact affine local matrix (including shear/reflection), and
+ * publishes decomposed TRS. A later TRS write clears this matrix override.
+ * Singular parents retain the link and copy world position into local position,
+ * leaving rotation/scale uncompensated, as original. The first old occurrence is
+ * removed; new membership is deduplicated. Same-parent calls still compensate.
+ * Cycles, protected imported topology and allocation failures do not mutate links.
+ */
+bl_Status bl_setParent(bl_SceneNode child, bl_SceneNode parent);
+/* Deep detached clone of the SceneNode tree; independent transform/child
+ * identities, "_clone" name suffix, shared geometry/material/thin-instance
+ * storage as original. Geometry resize detaches that mesh; ordinary in-place
+ * geometry/attribute updates reject shared GPU geometry, as the original APIs do.
+ * Thin-instance data writes remain shared. Failed clones release partial claims.
+ * The native CPU-skin importer has no shared deformation-owner contract yet:
+ * cloning a bound skin explicitly returns UNSUPPORTED, never a bind-pose proxy.
+ * Camera world providers are not original SceneNodes and have no source clone
+ * constructor; those native node-family aliases return UNSUPPORTED.
+ */
+bl_Status bl_cloneTransformNode(bl_SceneNode source, bl_SceneNode* clone);
+
+typedef enum bl_SceneNodeKind
+{
+    BL_NODE_TRANSFORM = 0,
+    BL_NODE_MESH,
+    BL_NODE_FREE_CAMERA,
+    BL_NODE_ARC_ROTATE_CAMERA,
+    BL_NODE_HEMISPHERIC_LIGHT,
+    BL_NODE_DIRECTIONAL_LIGHT
+} bl_SceneNodeKind;
+
+/* Native typed projection of an original structural SceneNode identity. Does
+ * not acquire ownership; disposed/wrong-kind failures leave outputs untouched. */
+bl_Status bl_getSceneNodeKind(bl_SceneNode node, bl_SceneNodeKind* kind);
+bl_Status bl_sceneNodeAsMesh(bl_SceneNode node, bl_Mesh* mesh);
+
+/*
  * Transform defaults with NULL options: position/rotation=(0,0,0), quaternion
  * (0,0,0,1), scaling=(1,1,1), visible=true. A non-NULL transform option is a
  * complete TRS value, so zero scaling remains representable. FreeCamera defaults:
@@ -1107,6 +1166,45 @@ typedef struct bl_GroundOptions
     bool hasUvScale;
     bl_Vec2 uvScale;
 } bl_GroundOptions;
+
+typedef struct bl_TorusOptions
+{
+    bl_OptionalNumber diameter;
+    bl_OptionalNumber thickness;
+    bl_OptionalNumber tessellation;
+} bl_TorusOptions;
+
+typedef struct bl_HeightMapGroundOptions
+{
+    bl_GroundOptions ground;
+    bl_OptionalNumber minHeight;
+    bl_OptionalNumber maxHeight;
+} bl_HeightMapGroundOptions;
+
+/*
+ * Torus defaults diameter1/thickness.5/tessellation16. Tessellation is a finite
+ * integer >=1; zero/fractional values cannot form safe original indices.
+ * Both seams retain the original wrapping quads: (t+1)^2 vertices and six
+ * indices per vertex, including degenerate seam triangles. Dimensions may be
+ * zero/negative when the generated F32 values remain finite.
+ *
+ * Heightmap data maps mesh/create-ground.ts's asynchronous data factory; the
+ * mesh factory maps the package-root factory. Native calls are synchronous,
+ * JS wraps completion in a Promise. Existing host readFile/decodeImage services
+ * supply top-down straight RGBA8; Core samples luminance and computes geometry.
+ * minHeight0/maxHeight1; ground options/defaults are unchanged. Alpha is ignored.
+ * Every invoked host result has exactly one release, including failed results.
+ * Outputs own independent arrays and use freeGeometryData; meshes copy data.
+ * Failure publishes no output or mesh; no host image or input pointer is retained.
+ */
+bl_Status bl_createTorusData(bl_Runtime* runtime, const bl_TorusOptions* options,
+                             bl_GeometryData* data);
+bl_Status bl_createTorus(bl_EngineContext engine, const bl_TorusOptions* options, bl_Mesh* mesh);
+bl_Status bl_createGroundFromHeightMapData(bl_Runtime* runtime, bl_String url,
+                                           const bl_HeightMapGroundOptions* options,
+                                           bl_GeometryData* data);
+bl_Status bl_createGroundFromHeightMap(bl_EngineContext engine, bl_String url,
+                                       const bl_HeightMapGroundOptions* options, bl_Mesh* mesh);
 
 typedef struct bl_Vec3Span
 {
@@ -1740,6 +1838,33 @@ bl_Status bl_hemisphericLightAsLight(bl_HemisphericLight source, bl_Light* light
 bl_Status bl_arcRotateCameraNode(bl_ArcRotateCamera camera, bl_SceneNode* node);
 bl_Status bl_lightNode(bl_Light light, bl_SceneNode* node);
 
+typedef struct bl_OrthographicBounds
+{
+    double halfHeight;
+    bl_OptionalNumber left;
+    bl_OptionalNumber right;
+    bl_OptionalNumber bottom;
+    bl_OptionalNumber top;
+} bl_OrthographicBounds;
+
+/* NULL enable options default halfHeight1/derived planes; supplied bounds are a
+ * complete snapshot. Absent planes derive from halfHeight and the actual target
+ * aspect each frame. Get/set require enabled orthographic state (NOT_READY).
+ * Changed bounds affect projection only, never camera/child world versions.
+ * Finite nonzero halfHeight and nondegenerate selected extents are required. */
+bl_Status bl_enableOrthographicCamera(bl_Camera camera, const bl_OrthographicBounds* bounds);
+bl_Status bl_getOrthographicBounds(bl_Camera camera, bl_OrthographicBounds* bounds);
+bl_Status bl_setOrthographicBounds(bl_Camera camera, const bl_OrthographicBounds* bounds);
+bl_Status bl_disableOrthographicCamera(bl_Camera camera);
+
+/* Native transport for createEngine({useFloatingOrigin:true}); enable immediately
+ * after high-precision engine creation, before creating scenes. Non-HPM engines
+ * return INVALID_ARGUMENT (original48). Uses camera-relative GPU world packing,
+ * not mutation/recentering of native F64 transforms. Already enabled is a no-op;
+ * otherwise existing scenes/frames return BUSY. Target sample count is host-owned. */
+bl_Status bl_enableFloatingOrigin(bl_EngineContext engine);
+bl_Status bl_getMsaaSamples(bl_EngineContext engine, uint32_t* samples);
+
 typedef struct bl_SceneProperties2
 {
     bl_Color4 clearColor;
@@ -1902,6 +2027,65 @@ bl_Status bl_detachControl(bl_ArcRotateControl control);
 bl_Status bl_setArcRotateControlOptions(bl_ArcRotateControl control,
                                         const bl_ArcRotateControlOptions* options);
 
+typedef struct bl_FreeControl
+{
+    bl_Runtime* _runtime;
+    uint64_t _id;
+} bl_FreeControl;
+
+typedef enum bl_FreeInputKind
+{
+    BL_FREE_POINTER_DOWN = 0,
+    BL_FREE_POINTER_MOVE,
+    BL_FREE_POINTER_UP,
+    BL_FREE_CONTEXT_MENU,
+    BL_FREE_KEY_DOWN,
+    BL_FREE_KEY_UP
+} bl_FreeInputKind;
+
+typedef enum bl_FreeKey
+{
+    BL_FREE_KEY_UNKNOWN = 0,
+    BL_FREE_KEY_W,
+    BL_FREE_KEY_S,
+    BL_FREE_KEY_A,
+    BL_FREE_KEY_D,
+    BL_FREE_KEY_ARROW_UP,
+    BL_FREE_KEY_ARROW_DOWN,
+    BL_FREE_KEY_ARROW_LEFT,
+    BL_FREE_KEY_ARROW_RIGHT,
+    BL_FREE_KEY_SPACE,
+    BL_FREE_KEY_PAGE_UP,
+    BL_FREE_KEY_SHIFT_LEFT,
+    BL_FREE_KEY_SHIFT_RIGHT,
+    BL_FREE_KEY_PAGE_DOWN
+} bl_FreeKey;
+
+typedef struct bl_FreeInput
+{
+    bl_FreeInputKind kind;
+    bl_FreeKey key;
+    uint32_t button;
+    int64_t pointerId;
+    double clientX;
+    double clientY;
+} bl_FreeInput;
+
+/* Original free-camera-controls.ts. Host owns listeners, key-code translation,
+ * tab focus and pointer capture; Core owns the original local-space direction,
+ * yaw/pitch, delta-based speed and inertia. Scene may be null: events accumulate
+ * but no frame hook runs. A supplied scene gets an APPENDED update hook.
+ * Control pins camera, not scene. Scene disposal removes its hook; explicit
+ * detach retires the control and is idempotent. Runtime/thread/type validation
+ * applies. Nested dispatch/detach/list mutation returns BUSY. Inputs/effects are
+ * call-only copied POD; failures do not mutate accumulators or effects.
+ */
+bl_Status bl_attachFreeControl(bl_FreeCamera camera, bl_SceneContext scene,
+                               bl_FreeControl* control);
+bl_Status bl_processFreeInput(bl_FreeControl control, const bl_FreeInput* input,
+                              bl_ArcRotateInputEffects* effects);
+bl_Status bl_detachFreeControl(bl_FreeControl control);
+
 /*
  * setArcRotateControlOptions requires a non-NULL table (zero table means defaults),
  * copies it atomically, and preserves identity, touch/drag/coordinate/inertia state
@@ -2036,6 +2220,103 @@ bl_Status bl_rebuildMaterial(bl_SceneContext scene, bl_Material material,
                              const bl_RebuildMaterialOptions* options);
 bl_Status bl_rebuildSceneRenderables(bl_SceneContext scene);
 bl_Status bl_disposeStandardMaterial(bl_StandardMaterial material);
+
+/* Material-family alpha-to-coverage data; set before registration, or rebuild
+ * the material after changing it. It does not modify shader alpha or blending.
+ * Effective only for a multisampled target. Handles remain runtime-owned. */
+bl_Status bl_setAlphaToCoverage(bl_Material material, bool enabled);
+bl_Status bl_getAlphaToCoverage(bl_Material material, bool* enabled);
+bl_Status bl_enableMirroredMeshes(bl_SceneContext scene);
+
+typedef struct bl_GridMaterialOptions
+{
+    bl_String name;
+    bool hasMainColor;
+    bl_Vec3 mainColor;
+    bool hasLineColor;
+    bl_Vec3 lineColor;
+    bool hasGridOffset;
+    bl_Vec3 gridOffset;
+    bl_OptionalNumber gridRatio;
+    bl_OptionalNumber majorUnitFrequency;
+    bl_OptionalNumber minorUnitVisibility;
+    bl_OptionalNumber opacity;
+    bl_OptionalNumber visibility;
+    bl_OptionalBool antialias;
+    bl_OptionalBool preMultiplyAlpha;
+    bl_OptionalBool useMaxLine;
+    bl_OptionalBool backFaceCulling;
+    bl_Texture2D opacityTexture;
+} bl_GridMaterialOptions;
+
+typedef struct bl_LineMaterialOptions
+{
+    bl_String name;
+    bool hasColor;
+    bl_Color4 color;
+    bl_OptionalBool useVertexColor;
+    bl_OptionalBool useVertexAlpha;
+    bl_OptionalBool useThinInstances;
+    bl_OptionalBool useThinInstanceColors;
+    bl_OptionalBool depthWrite;
+    bl_DepthCompare depthCompare;
+} bl_LineMaterialOptions;
+
+typedef struct bl_Color4Span
+{
+    const bl_Color4* data;
+    size_t count;
+} bl_Color4Span;
+
+typedef struct bl_Color4PathSpan
+{
+    const bl_Color4Span* data;
+    size_t count;
+} bl_Color4PathSpan;
+
+typedef struct bl_LineSystemOptions
+{
+    bl_String name;
+    bl_Vec3PathSpan lines;
+    bool hasColors;
+    bl_Color4PathSpan colors;
+    bool hasColor;
+    bl_Color4 color;
+    bl_OptionalBool useVertexAlpha;
+    bl_OptionalBool useThinInstances;
+    bl_OptionalBool useThinInstanceColors;
+    bl_ShaderMaterial material;
+} bl_LineSystemOptions;
+
+typedef struct bl_LineSystemUpdateOptions
+{
+    bl_Vec3PathSpan lines;
+    bool hasColors;
+    bl_Color4PathSpan colors;
+} bl_LineSystemUpdateOptions;
+
+/* Original procedural ShaderMaterial families; construction is data-only.
+ * Grid options/defaults match material/grid/grid-material.ts, including opacity
+ * texture, gridOffset, visibility and Math.round major frequency. Line defaults
+ * white, vertexColor=false, vertexAlpha=true, thin=false/thinColors=false.
+ * thinColors requires thinInstances; line attributes and topology are real.
+ * All spans/names are copied; handles remain runtime-owned, subject to normal
+ * material/mesh disposal and submitted-work retirement. NULL options use defaults.
+ */
+bl_Status bl_createGridMaterial(bl_Runtime* runtime, const bl_GridMaterialOptions* options,
+                                bl_ShaderMaterial* material);
+bl_Status bl_createLineMaterial(bl_Runtime* runtime, const bl_LineMaterialOptions* options,
+                                bl_ShaderMaterial* material);
+/* Lines are independent polylines, flattened in source order. At least one point
+ * is required; empty individual lines and one-point lines are supported. Colours
+ * must match each line/point count. An optional supplied material must be a line
+ * material with matching vertex-colour usage. Update preserves point counts,
+ * geometry handles and omitted colours; it refreshes CPU bounds and GPU data.
+ * Failures leave observable inputs/state/outputs unchanged. */
+bl_Status bl_createLineSystem(bl_EngineContext engine, const bl_LineSystemOptions* options,
+                              bl_Mesh* mesh);
+bl_Status bl_updateLineSystem(bl_EngineContext engine, bl_Mesh mesh,
+                              const bl_LineSystemUpdateOptions* options);
 
 /*
  * Hemi defaults: direction(0,1,0), intensity1, diffuse/specular(1,1,1), ground0,
@@ -2813,6 +3094,53 @@ bl_Status bl_getMaterialName(bl_Material material, bl_String* name);
 bl_Status bl_disposeAssetContainer(bl_AssetContainer container);
 bl_Status bl_setThinInstances(bl_Mesh mesh, bl_F32Span matrices, size_t count);
 bl_Status bl_getThinInstances(bl_Mesh mesh, bl_ThinInstanceView* instances);
+
+typedef struct bl_ThinInstanceView2
+{
+    bl_ThinInstanceView base;
+    bl_NumberSpan matrices64;
+    bl_F32Span colors;
+    uint64_t colorVersion;
+} bl_ThinInstanceView2;
+
+typedef struct bl_ThinInstanceUpdate
+{
+    bl_F32Span matrices;
+    bl_NumberSpan matrices64;
+    bl_F32Span colors;
+    size_t count;
+    bool writeMatrices;
+    bool writeColors;
+} bl_ThinInstanceUpdate;
+
+/* Original F64 slab and dynamic writes. Slabs/colours are copied; borrowed views
+ * expire on slab replacement/disposal. View2 uses either base.matrices (F32) OR
+ * matrices64; the legacy getter returns UNSUPPORTED for F64 without modifying out.
+ * A matrix write may address any complete slot in the retained slab, including
+ * inactive capacity, and rounds according to its retained F32/F64 representation.
+ * Active count cannot exceed installed capacity; flush/count mark the original
+ * [0,count) dirty range. GPU uploads pack four matrix slots plus optional RGBA
+ * slot (approved native layout), never CPU visibility culling.
+ * Enabling GPU culling requires installed instances (source494); pipeline
+ * preparation additionally requires compute/indirect capability and a compiler.
+ * All rejected spans, indices/counts, stale handles and OOM are atomic.
+ */
+bl_Status bl_setThinInstancesF64(bl_Mesh mesh, bl_NumberSpan matrices, size_t count);
+bl_Status bl_getThinInstances2(bl_Mesh mesh, bl_ThinInstanceView2* instances);
+bl_Status bl_setThinInstanceMatrix(bl_Mesh mesh, size_t index, const bl_Mat4* matrix);
+bl_Status bl_setThinInstanceColors(bl_Mesh mesh, bl_F32Span colors);
+bl_Status bl_setThinInstanceCount(bl_Mesh mesh, size_t count);
+bl_Status bl_flushThinInstances(bl_Mesh mesh);
+/*
+ * Atomic marshalling of a mutable language-side thin-data object. Matrix writes
+ * retain the installed slab's precision, length and capacity; provide exactly
+ * that F32 or F64 slab. Unselected spans are ignored. Selected colors are copied;
+ * a color-size change can invalidate the borrowed color view. All validation and
+ * allocation finish before any matrix/color/count change. Dirty ranges are the
+ * original flush helper's [0,count); unchanged matrix storage/GPU buffers persist.
+ */
+bl_Status bl_writeThinInstanceData(bl_Mesh mesh, const bl_ThinInstanceUpdate* update);
+bl_Status bl_enableThinInstanceGpuCulling(bl_Mesh mesh, bool enabled);
 bl_Status bl_enableThinInstanceWorldBounds(bl_Mesh mesh);
 bl_Status bl_pbrMaterialAsMaterial(bl_PbrMaterial source, bl_Material* material);
 bl_Status bl_materialAsPbrMaterial(bl_Material source, bl_PbrMaterial* material);
@@ -2821,6 +3149,70 @@ bl_Status bl_disposePbrMaterial(bl_PbrMaterial material);
 bl_Status bl_getEnvironmentInfo(bl_EnvironmentTextures environment, bl_EnvironmentInfo* info);
 bl_Status bl_disposeEnvironmentTextures(bl_EnvironmentTextures environment);
 bl_Status bl_getTextureCubeInfo(bl_TextureCube texture, bl_TextureCubeInfo* info);
+
+/* Additive compute service. Existing runtime/shader-service tables and layouts
+ * remain unchanged. Version1 implements runtime WGSL compute with uniform and
+ * raw storage buffers; unsupported resource classes fail with diagnostics.
+ * The service owns every result span/string/container until exactly one release
+ * after EVERY compile invocation, including failure/partial/empty results.
+ * Requests are call-only; callbacks/userdata remain valid until runtime disposal.
+ * No callback may throw or re-enter Core. Containers are real backend-compatible
+ * CSH containers; reflection comes from compiler IR AND the native shader.
+ */
+#define BL_COMPUTE_SHADER_VERSION UINT32_C(1)
+
+typedef struct bl_ComputeShaderCompileRequest
+{
+    uint32_t structSize;
+    uint32_t version;
+    bl_RendererBackend backend;
+    uint32_t bgfxShaderBinaryVersion;
+    bl_String wgsl;
+    bl_String entryPoint;
+    bl_String label;
+} bl_ComputeShaderCompileRequest;
+
+typedef struct bl_ReflectedStorageBuffer
+{
+    bl_String name;
+    uint32_t group;
+    uint32_t binding;
+    uint64_t minimumBytes;
+    uint32_t nativeStage;
+    bool readOnly;
+} bl_ReflectedStorageBuffer;
+
+typedef struct bl_ComputeShaderCompileResult
+{
+    uint32_t structSize;
+    uint32_t version;
+    bl_Bytes container;
+    uint32_t workgroupSize[3];
+    const bl_ReflectedStorageBuffer* storageBuffers;
+    size_t storageBufferCount;
+    const bl_ReflectedUniformBlock* uniformBlocks;
+    size_t uniformBlockCount;
+    const bl_ReflectedUniform* uniforms;
+    size_t uniformCount;
+    bl_String diagnostics;
+    void* allocation;
+} bl_ComputeShaderCompileResult;
+
+typedef struct bl_ComputeShaderCompilerService
+{
+    uint32_t structSize;
+    uint32_t version;
+    void* userData;
+    bl_Status (*compile)(void* userData, const bl_ComputeShaderCompileRequest* request,
+                         bl_ComputeShaderCompileResult* result);
+    void (*release)(void* userData, bl_ComputeShaderCompileResult* result);
+} bl_ComputeShaderCompilerService;
+
+/* Copies the table; borrows userdata. NULL clears an unused service. Replacement
+ * is BUSY after first compute compilation, in frames/dispatch/host callbacks.
+ * Missing service is explicit UNSUPPORTED, never CPU compute emulation. */
+bl_Status bl_setComputeShaderCompiler(bl_Runtime* runtime,
+                                      const bl_ComputeShaderCompilerService* service);
 
 /*
  * Version2 exact sizeof/version prefixes; base shader contract remains1.

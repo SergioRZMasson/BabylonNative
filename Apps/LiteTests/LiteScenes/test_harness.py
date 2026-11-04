@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from harness import benchmark, bootstrap_ratios, compare_rgb, summarize
+from harness import benchmark, bootstrap_ratios, compare_rgb, summarize, baseline_parity
 from inspect_capture import inspect
 from collect_evidence import ctest_summary
 from formal_benchmark import present_metrics, baseline_metrics
@@ -15,6 +15,16 @@ from harness import main as harness_main
 
 
 class ParityTests(unittest.TestCase):
+    def test_baseline_preflight_preserves_animated_registry_capture_frame(self):
+        record = {"executable": "baseline.exe",
+                  "pose": {"nativeEnvironment": {"BBLITE_SCREENSHOT_FRAME": "120"}}}
+        with patch("harness.catalog", return_value=record), patch("harness.verify_inputs"), \
+                patch("harness.write"), patch("harness.run", return_value={"exitCode": 1}) as run:
+            baseline_parity("unused", 43, "sdl_gpu", "unused")
+        environment = run.call_args.args[2]
+        self.assertEqual(environment["BBLITE_SCREENSHOT_FRAME"], "120")
+        self.assertEqual(environment["BBLITE_MAX_FRAMES"], "121")
+
     def test_foreground_uses_reference_euclidean_distance_strictly_greater(self):
         reference = np.array([[[0, 0, 0], [3, 4, 0], [4, 4, 0]]], dtype=np.uint8)
         actual = np.array([[[90, 90, 90], [3, 4, 0], [10, 4, 0]]], dtype=np.uint8)

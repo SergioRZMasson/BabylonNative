@@ -113,6 +113,42 @@ static const char* unlitFragment = R"WGSL(
 }
 )WGSL";
 
+static const char* litColorFragment = R"WGSL(
+@fragment fn main(@location(0) vp: vec3<f32>, @location(1) vn: vec3<f32>,
+    @location(2) vInstanceColor: vec4<f32>) -> @location(0) vec4<f32> {
+    let viewDirectionW = normalize(scene.vEyePosition.xyz - vp);
+    let normalW = normalize(vn);
+    var diffuseBase = vec3<f32>(0.0);
+    var specularBase = vec3<f32>(0.0);
+    let count = min(mesh.lc & 255u, 16u);
+    for (var index = 0u; index < count; index++) {
+        let lightIndex = mesh.li[index / 4u][index % 4u];
+        let result = computeLighting(viewDirectionW, normalW,
+                                     lights.lights[lightIndex], mat.sc.a, vp);
+        diffuseBase += result[0];
+        specularBase += result[1];
+    }
+    let finalDiffuse = clamp(diffuseBase * mat.dc.rgb + mat.ec + mat.ac,
+                             vec3<f32>(0.0), vec3<f32>(1.0));
+    let finalSpecular = specularBase * mat.sc.rgb;
+    var color = vec4<f32>(finalDiffuse + finalSpecular, mat.dc.a);
+    color = vec4<f32>(color.rgb * vInstanceColor.rgb, color.a * vInstanceColor.a);
+    color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
+    return color;
+}
+)WGSL";
+
+static const char* unlitColorFragment = R"WGSL(
+@fragment fn main(@location(0) vp: vec3<f32>, @location(1) vn: vec3<f32>,
+    @location(2) vInstanceColor: vec4<f32>) -> @location(0) vec4<f32> {
+    var color = vec4<f32>(clamp(mat.ec * mat.dc.rgb, vec3<f32>(0.0), vec3<f32>(1.0)),
+                         mat.dc.a);
+    color = vec4<f32>(color.rgb * vInstanceColor.rgb, color.a * vInstanceColor.a);
+    color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
+    return color;
+}
+)WGSL";
+
 static bool append(bl_Runtime* r, L_Text* text, const char* value)
 {
     return l_appendText(r, text, {value, strlen(value)});
@@ -218,11 +254,13 @@ static bool layout(bl_Runtime* r, L_Material* m)
     return true;
 }
 
-bl_Status l_standardSources(bl_Runtime* r, L_Material* m, bool disableLighting)
+bl_Status l_standardSources(bl_Runtime* r, L_Material* m, bool disableLighting,
+                            unsigned instanceSlots)
 {
     m->record.kind = L_STANDARD;
     m->programIndex = BL_INVALID_BGFX_HANDLE;
     m->sourceLightingDisabled = disableLighting;
+    m->instanceSlots = (uint8_t)instanceSlots;
     m->blocks[0] = {{"scene", 5}, 0, 0, 368};
     m->blocks[1] = {{"lights", 6}, 0, 1, 1040};
     m->blocks[2] = {{"mesh", 4}, 1, 0, 144};
@@ -243,10 +281,50 @@ bl_Status l_standardSources(bl_Runtime* r, L_Material* m, bool disableLighting)
     }
     L_Text vertex = {};
     L_Text fragment = {};
-    bool valid = append(r, &vertex, standardDeclarations) && append(r, &vertex, standardVertex) &&
-                 append(r, &fragment, standardDeclarations) &&
-                 (disableLighting || append(r, &fragment, standardLighting)) &&
-                 append(r, &fragment, disableLighting ? unlitFragment : litFragment);
+    bool valid = append(r, &vertex, standardDeclarations);
+    if (!instanceSlots)
+    {
+        valid = valid && append(r, &vertex, standardVertex);
+    }
+    else
+    {
+        valid = valid && append(r, &vertex,
+                                "struct VertexOutput{@builtin(position) clipPos:vec4<f32>,"
+                                "@location(0) vp:vec3<f32>,@location(1) vn:vec3<f32>,");
+        if (instanceSlots == 5)
+        {
+            valid = valid && append(r, &vertex, "@location(2) vInstanceColor:vec4<f32>,");
+        }
+        valid = valid && append(r, &vertex,
+                                "};\n@vertex fn main(@location(0) position:vec3<f32>,"
+                                "@location(1) normal:vec3<f32>,@location(2) world0:vec4<f32>,"
+                                "@location(3) world1:vec4<f32>,@location(4) world2:vec4<f32>,"
+                                "@location(5) world3:vec4<f32>");
+        if (instanceSlots == 5)
+        {
+            valid = valid && append(r, &vertex, ",@location(6) instanceColor:vec4<f32>");
+        }
+        valid =
+            valid && append(r, &vertex,
+                            ")->VertexOutput{var out:VertexOutput;"
+                            "let instanceWorld=mat4x4<f32>(world0,world1,world2,world3);"
+                            "let finalWorld=mesh.world*instanceWorld;"
+                            "let worldPos4=finalWorld*vec4<f32>(position,1.0);out.vp=worldPos4.xyz;"
+                            "let normalWorld=mat3x3<f32>(finalWorld[0].xyz,finalWorld[1].xyz,"
+                            "finalWorld[2].xyz);out.vn=normalize(normalWorld*normal);"
+                            "out.clipPos=scene.viewProjection*worldPos4;");
+        if (instanceSlots == 5)
+        {
+            valid = valid && append(r, &vertex, "out.vInstanceColor=instanceColor;");
+        }
+        valid = valid && append(r, &vertex, "return out;}");
+    }
+    valid = valid && append(r, &fragment, standardDeclarations) &&
+            (disableLighting || append(r, &fragment, standardLighting)) &&
+            append(r, &fragment,
+                   instanceSlots == 5 ? disableLighting ? unlitColorFragment : litColorFragment
+                   : disableLighting  ? unlitFragment
+                                      : litFragment);
     if (!valid)
     {
         l_free(r, vertex.data);

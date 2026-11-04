@@ -42,6 +42,14 @@ struct L_NativePipeline
     size_t textureCount;
 };
 
+struct L_ComputePipeline
+{
+    L_NativePipeline native;
+    bl_ReflectedStorageBuffer* storage;
+    size_t storageCount;
+    uint32_t workgroupSize[3];
+};
+
 bl_Status l_compileNativePipeline(bl_Runtime* runtime, L_Engine* engine, bl_String vertex,
                                   bl_String fragment,
                                   const bl_InstanceAttributeDeclaration* instances,
@@ -49,5 +57,8 @@ bl_Status l_compileNativePipeline(bl_Runtime* runtime, L_Engine* engine, bl_Stri
 void l_freeNativePipeline(bl_Runtime* runtime, L_NativePipeline* pipeline);
 bl_Status l_bindNativeBlocks(bl_Runtime* runtime, L_NativePipeline* pipeline,
                              const bl_Bytes* blocks, size_t count);
+bl_Status l_compileComputePipeline(bl_Runtime* runtime, L_Engine* engine, bl_String source,
+                                   bl_String entry, L_ComputePipeline* pipeline);
+void l_freeComputePipeline(bl_Runtime* runtime, L_ComputePipeline* pipeline);
 
 #endif

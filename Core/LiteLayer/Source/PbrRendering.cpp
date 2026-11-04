@@ -106,11 +106,13 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         bool colors = (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_COLOR)) != 0;
         bool flatNormal = mesh->assetFlatNormal;
         bool cpuSkin = mesh->skin != NULL;
+        bool instanceColors = mesh->hasInstances && mesh->instanceColors;
         bool tangents = !flatNormal && !L_NULL(material->pbrNormalTexture) &&
                         (mesh->geometry.attributeMask & (1u << BL_ATTRIBUTE_TANGENT));
         if (packet->material == material && packet->instances == mesh->hasInstances &&
             packet->tangents == tangents && packet->colors == colors &&
-            packet->flatNormal == flatNormal && packet->cpuSkin == cpuSkin)
+            packet->flatNormal == flatNormal && packet->cpuSkin == cpuSkin &&
+            packet->instanceColors == instanceColors)
         {
             if (packet->environment != scene->environment)
             {
@@ -125,19 +127,22 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         bl_Status status = l_pbrSources(runtime, mesh->hasInstances, &vertex, &fragment,
                                         material->pbrInfo.doubleSided, material->pbrBaseImage,
                                         material->pbrBaseUv1, material->pbrOrmUv1, material,
-                                        tangents, colors, flatNormal, cpuSkin);
-        const bl_InstanceAttributeDeclaration instances[4] = {{{"world0", 6}, 3, 0, 0, 64},
-                                                              {{"world1", 6}, 4, 1, 16, 64},
-                                                              {{"world2", 6}, 5, 2, 32, 64},
-                                                              {{"world3", 6}, 6, 3, 48, 64}};
+                                        tangents, colors, flatNormal, cpuSkin, instanceColors);
+        uint32_t stride = instanceColors ? 80 : 64;
+        const bl_InstanceAttributeDeclaration instances[5] = {
+            {{"world0", 6}, 3, 0, 0, stride},
+            {{"world1", 6}, 4, 1, 16, stride},
+            {{"world2", 6}, 5, 2, 32, stride},
+            {{"world3", 6}, 6, 3, 48, stride},
+            {{"instanceColor", 13}, 10, 4, 64, stride}};
         L_NativePipeline pipeline = {};
         pipeline.program.idx = BL_INVALID_BGFX_HANDLE;
         if (status == BL_OK)
         {
-            status = l_compileNativePipeline(runtime, scene->engine, {vertex.data, vertex.length},
-                                             {fragment.data, fragment.length},
-                                             mesh->hasInstances ? instances : NULL,
-                                             mesh->hasInstances ? 4 : 0, &pipeline);
+            status = l_compileNativePipeline(
+                runtime, scene->engine, {vertex.data, vertex.length},
+                {fragment.data, fragment.length}, mesh->hasInstances ? instances : NULL,
+                mesh->hasInstances ? instanceColors ? 5 : 4 : 0, &pipeline);
         }
         l_free(runtime, vertex.data);
         l_free(runtime, fragment.data);
@@ -159,43 +164,11 @@ bl_Status l_preparePbrScene(bl_Runtime* runtime, L_Scene* scene)
         packet->colors = colors;
         packet->flatNormal = flatNormal;
         packet->cpuSkin = cpuSkin;
+        packet->instanceColors = instanceColors;
+        packet->alphaToCoverage = material->alphaToCoverage;
         l_pin(&material->record);
         l_pin(&packet->environment->record);
     }
-    return BL_OK;
-}
-
-static bl_Status instanceBuffer(bl_Runtime* runtime, L_Mesh* mesh)
-{
-    if (!mesh->hasInstances || !mesh->instanceCount)
-    {
-        return BL_OK;
-    }
-    if (mesh->instanceBufferIndex == BL_INVALID_BGFX_HANDLE)
-    {
-        bgfx::VertexLayout layout;
-        layout.begin()
-            .add(bgfx::Attrib::TexCoord7, 4, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord6, 4, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord5, 4, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord4, 4, bgfx::AttribType::Float)
-            .end();
-        mesh->instanceBufferIndex =
-            bgfx::createDynamicVertexBuffer((uint32_t)mesh->instanceCount, layout,
-                                            BGFX_BUFFER_ALLOW_RESIZE)
-                .idx;
-        if (mesh->instanceBufferIndex == BL_INVALID_BGFX_HANDLE)
-        {
-            return BL_OUT_OF_MEMORY;
-        }
-    }
-    if (mesh->instanceVersion != mesh->instanceGpuVersion)
-    {
-        bgfx::update(bgfx::DynamicVertexBufferHandle{mesh->instanceBufferIndex}, 0,
-                     bgfx::copy(mesh->instanceMatrices, (uint32_t)(mesh->instanceCount * 64)));
-        mesh->instanceGpuVersion = mesh->instanceVersion;
-    }
-    (void)runtime;
     return BL_OK;
 }
 
@@ -219,6 +192,9 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     {
         return BL_NOT_READY;
     }
+    L_ThinDraw thin;
+    L_TRY(l_prepareThinDraw(runtime, scene, mesh, view, projection, viewId, packet->instanceColors,
+                            material->pbrInfo.alphaBlend, &thin));
     float sceneData[92] = {};
     bl_Mat4 viewProjection;
     l_multiply(projection, view, &viewProjection, scene->engine->highPrecision);
@@ -236,9 +212,11 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
     sceneData[77] = (float)scene->contrast;
     sceneData[78] = 0.8f;
     float meshData[36] = {};
+    bl_Mat4 renderWorld;
+    l_renderWorld(scene, &mesh->node, &renderWorld);
     for (unsigned i = 0; i < 16; ++i)
     {
-        meshData[i] = (float)mesh->node.world.values[i];
+        meshData[i] = (float)renderWorld.values[i];
     }
     float materialData[20] = {1, 1, 0.04f, 1, 1, 1, 1, 1};
     const bl_PbrMaterialInfo* info = &material->pbrInfo;
@@ -355,21 +333,31 @@ bl_Status l_drawPbr(bl_Runtime* runtime, L_Scene* scene, L_Mesh* mesh, L_Materia
         bgfx::setTexture(binding->stage, binding->uniform, texture, 0, layerCount, 0, mipCount,
                          flags, 0, maxLod);
     }
-    L_TRY(instanceBuffer(runtime, mesh));
     bgfx::setVertexBuffer(0, mesh->geometry.vertexBuffer, 0, (uint32_t)mesh->geometry.vertices);
     bgfx::setIndexBuffer(mesh->geometry.indexBuffer, 0, (uint32_t)mesh->geometry.indexCount);
     if (mesh->hasInstances)
     {
-        bgfx::setInstanceDataBuffer(bgfx::DynamicVertexBufferHandle{mesh->instanceBufferIndex}, 0,
-                                    (uint32_t)mesh->instanceCount);
+        bgfx::setInstanceDataBuffer(thin.instances, 0, (uint32_t)mesh->instanceCount);
     }
     double determinant =
         (double)meshData[0] * (meshData[5] * meshData[10] - meshData[6] * meshData[9]) -
         (double)meshData[4] * (meshData[1] * meshData[10] - meshData[2] * meshData[9]) +
         (double)meshData[8] * (meshData[1] * meshData[6] - meshData[2] * meshData[5]);
-    bgfx::setState(l_pbrDrawState(material, determinant,
-                                  scene->engine->native.target.depthFormat != BL_DEPTH_NONE));
-    bgfx::submit(viewId, packet->pipeline.program);
+    uint64_t drawState = l_pbrDrawState(material, determinant,
+                                        scene->engine->native.target.depthFormat != BL_DEPTH_NONE);
+    if (packet->alphaToCoverage && scene->engine->native.target.sampleCount > 1)
+    {
+        drawState |= BGFX_STATE_BLEND_ALPHA_TO_COVERAGE;
+    }
+    bgfx::setState(drawState);
+    if (bgfx::isValid(thin.indirect))
+    {
+        bgfx::submit(viewId, packet->pipeline.program, thin.indirect, 0, 1);
+    }
+    else
+    {
+        bgfx::submit(viewId, packet->pipeline.program);
+    }
     ++scene->engine->stats.drawCallCount;
     return BL_OK;
 }

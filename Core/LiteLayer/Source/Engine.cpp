@@ -123,7 +123,7 @@ static bl_Status validateTarget(bl_Runtime* r, const bl_NativeTarget* t, L_Engin
     {
         return L_FAIL(r, BL_INVALID_ARGUMENT, "Invalid native target");
     }
-    if (t->colorFormat == BL_COLOR_RGBA16F)
+    if (t->colorFormat == BL_COLOR_RGBA16F && (!self || !self->floatClear))
     {
         return L_FAIL(r, BL_UNSUPPORTED,
                       "RGBA16F targets require a floating-point clear-palette ownership contract");
@@ -288,6 +288,16 @@ void l_unregisterScene(L_Scene* s)
 void l_sceneCleanup(bl_Runtime* r, L_Record* record)
 {
     L_Scene* s = (L_Scene*)record;
+    while (s->alphaSnapshots)
+    {
+        L_AlphaSnapshot* next = s->alphaSnapshots->next;
+        l_free(r, s->alphaSnapshots);
+        s->alphaSnapshots = next;
+    }
+    if (s->freeThinCulls)
+    {
+        s->freeThinCulls(r, s, 0);
+    }
     l_cleanupPbrScene(r, s);
     l_environmentCleanupScene(r, s);
     l_unregisterScene(s);
@@ -369,6 +379,10 @@ static void engineCleanup(bl_Runtime* r, L_Record* record)
     L_Engine* e = (L_Engine*)record;
     e->running = false;
     completion(r, e, BL_CANCELLED);
+    if (e->freeThinPipelines)
+    {
+        e->freeThinPipelines(r, e);
+    }
     for (size_t i = 0; i < r->count; ++i)
     {
         L_Record* p = r->records[i];
@@ -538,6 +552,7 @@ bl_Status bl_createEngine(bl_Runtime* r, const bl_NativeEngineOptions* native,
     e->globalNext = engines;
     engines = e;
     unlockEngines();
+    r->matrixPrecision = e->highPrecision;
     *out = {r, e->record.id};
     return BL_OK;
 }
@@ -786,8 +801,10 @@ static bl_Status inspectSceneEntity(bl_Runtime* r, L_Scene* s, L_Node* n)
         {
             L_Material* mat = (L_Material*)l_peek(r, identity._id);
             L_TRY(l_checkStandardGeometry(r, mat, m));
-            L_TRY(l_prepareMaterial(r, s->engine, mat));
-            if (mat->activeAttributes & ~m->geometry.attributeMask)
+            L_Material* pipeline;
+            L_TRY(l_prepareMeshMaterial(r, s->engine, mat, m, &pipeline));
+            L_TRY(l_snapshotAlpha(r, s, mat));
+            if (pipeline->activeAttributes & ~m->geometry.attributeMask)
             {
                 return BL_INVALID_ARGUMENT;
             }
@@ -1022,6 +1039,10 @@ bl_Status l_removeSceneNode(bl_Runtime* r, L_Scene* s, L_Node* n)
     {
         return BL_OK;
     }
+    if (n->record.kind == L_MESH && s->freeThinCulls)
+    {
+        s->freeThinCulls(r, s, n->record.id);
+    }
     for (size_t i = 0; i < n->childCount; ++i)
     {
         L_Node* c = (L_Node*)l_peek(r, n->children[i]._id);
@@ -1133,8 +1154,10 @@ bl_Status bl_registerScene(bl_SceneContext h)
         }
         L_Material* mat = (L_Material*)l_peek(h._runtime, identity._id);
         L_TRY(l_checkStandardGeometry(h._runtime, mat, m));
-        L_TRY(l_prepareMaterial(h._runtime, s->engine, mat));
-        if (mat->activeAttributes & ~m->geometry.attributeMask)
+        L_Material* pipeline;
+        L_TRY(l_prepareMeshMaterial(h._runtime, s->engine, mat, m, &pipeline));
+        L_TRY(l_snapshotAlpha(h._runtime, s, mat));
+        if (pipeline->activeAttributes & ~m->geometry.attributeMask)
         {
             return BL_INVALID_ARGUMENT;
         }
@@ -1263,6 +1286,31 @@ bl_Status bl_removeSceneCallback(bl_SceneContext h, bl_CallbackToken token)
     return BL_INVALID_ARGUMENT;
 }
 
+bl_Status bl_setNativeClearPaletteIndex(bl_EngineContext h, uint8_t paletteIndex)
+{
+    L_GET(h, L_ENGINE, L_Engine, engine);
+    if (engine->floatClear && engine->clearPaletteIndex == paletteIndex)
+    {
+        return BL_OK;
+    }
+    if (engine->inFrame || engine->scenes || !lockEngines())
+    {
+        return BL_BUSY;
+    }
+    for (L_Engine* other = engines; other; other = other->globalNext)
+    {
+        if (other != engine && other->floatClear && other->clearPaletteIndex == paletteIndex)
+        {
+            unlockEngines();
+            return BL_BUSY;
+        }
+    }
+    engine->floatClear = true;
+    engine->clearPaletteIndex = paletteIndex;
+    unlockEngines();
+    return BL_OK;
+}
+
 static uint8_t colorByte(double d)
 {
     if (d < 0)
@@ -1273,7 +1321,7 @@ static uint8_t colorByte(double d)
     {
         d = 1;
     }
-    // The packed bgfx clear path must retain the source GPU's UNORM tie-to-even conversion.
+    // Retain the legacy packed mode's nearest-even quantization.
     double scaled = d * 255;
     uint32_t lower = (uint32_t)scaled;
     double fraction = scaled - lower;
@@ -1309,6 +1357,11 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
             l_leaveDispatch(r);
             return p->control->failure;
         }
+        if (p->failure && *p->failure != BL_OK)
+        {
+            l_leaveDispatch(r);
+            return *p->failure;
+        }
     }
     l_leaveDispatch(r);
     bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
@@ -1326,7 +1379,18 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
     {
         flags |= BGFX_CLEAR_COLOR;
     }
-    bgfx::setViewClear(viewId, flags, rgba, 0, 0);
+    if (e->floatClear && first)
+    {
+        // Native Graphics FrameBuffer/DeviceImpl also use float palette clears.
+        // Preserve the original render-pass clear value until GPU conversion.
+        const float color[4] = {(float)c.r, (float)c.g, (float)c.b, (float)c.a};
+        bgfx::setPaletteColor(e->clearPaletteIndex, color);
+        bgfx::setViewClear(viewId, flags, 0.0f, (uint8_t)0, e->clearPaletteIndex);
+    }
+    else
+    {
+        bgfx::setViewClear(viewId, flags, rgba, 0, 0);
+    }
     bgfx::touch(viewId);
     if (L_NULL(s->activeCamera))
     {
@@ -1352,6 +1416,27 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
     projection.values[10] = -camera->camera.nearPlane / range;
     projection.values[11] = 1;
     projection.values[14] = camera->camera.farPlane * camera->camera.nearPlane / range;
+    if (camera->orthographic)
+    {
+        const bl_OrthographicBounds* b = &camera->ortho;
+        double halfWidth = b->halfHeight * e->native.target.width / e->native.target.height;
+        double left = b->left.present ? b->left.value : -halfWidth;
+        double right = b->right.present ? b->right.value : halfWidth;
+        double bottom = b->bottom.present ? b->bottom.value : -b->halfHeight;
+        double top = b->top.present ? b->top.value : b->halfHeight;
+        if (right == left || top == bottom)
+        {
+            return BL_INVALID_ARGUMENT;
+        }
+        projection = {};
+        projection.values[0] = 2 / (right - left);
+        projection.values[5] = 2 / (top - bottom);
+        projection.values[10] = -1 / range;
+        projection.values[12] = (left + right) / (left - right);
+        projection.values[13] = (top + bottom) / (bottom - top);
+        projection.values[14] = camera->camera.farPlane / range;
+        projection.values[15] = 1;
+    }
     if (!e->highPrecision)
     {
         for (unsigned i = 0; i < 16; ++i)
@@ -1361,6 +1446,14 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
     }
     size_t count = 0;
     L_TRY(l_collectDraws(r, s, &view, &count));
+    s->origin = {};
+    if (e->floatingOrigin)
+    {
+        s->origin = {camera->world.values[12], camera->world.values[13], camera->world.values[14]};
+        view.values[12] = 0;
+        view.values[13] = 0;
+        view.values[14] = 0;
+    }
     L_Draw* draws = (L_Draw*)s->drawScratch;
     bl_Status status = BL_OK;
     if (count)
@@ -1368,8 +1461,13 @@ static bl_Status renderScene(bl_Runtime* r, L_Engine* e, L_Scene* s, double delt
         l_sortDraws(s, count);
         bl_Vec3 position = {camera->world.values[12], camera->world.values[13],
                             camera->world.values[14]};
+        if (e->floatingOrigin)
+        {
+            position = {};
+        }
         for (size_t i = 0; i < count; ++i)
         {
+            s->drawSequence = draws[i].sequence;
             if (draws[i].material->record.kind == L_PBR)
             {
                 status = l_drawPbr(r, s, draws[i].mesh, draws[i].material, &view, &projection,

@@ -1,5 +1,26 @@
 #include "DirectionalLightInternal.h"
 
+static bl_Status cloneDirectional(bl_Runtime* r, L_Record* source, bl_String name, L_Record** out)
+{
+    bl_DirectionalLightProperties properties;
+    L_TRY(bl_getDirectionalLightProperties({r, source->id}, &properties));
+    const bl_DirectionalLightOptions options = {properties.direction, {true, properties.intensity}};
+    bl_DirectionalLight handle;
+    L_TRY(bl_createDirectionalLight(r, &options, &handle));
+    bl_Status status = bl_setDirectionalLightProperties(handle, &properties);
+    if (status == BL_OK)
+    {
+        status = bl_setNodeName({r, handle._id}, name);
+    }
+    if (status != BL_OK)
+    {
+        bl_disposeNode({r, handle._id});
+        return status;
+    }
+    *out = l_peek(r, handle._id);
+    return BL_OK;
+}
+
 static void directionalCleanup(bl_Runtime* r, L_Record* record)
 {
     l_cleanNode(r, (L_Node*)record);
@@ -28,6 +49,8 @@ bl_Status bl_createDirectionalLight(bl_Runtime* r, const bl_DirectionalLightOpti
     }
     L_NEW(r, L_LIGHT, 30, directionalCleanup, L_DirectionalLight, light);
     l_initNode(&light->light.node);
+    light->light.node.record.clone = cloneDirectional;
+    light->light.node.highPrecision = r->matrixPrecision;
     light->light.kind = L_LIGHT_DIRECTIONAL;
     light->properties = {options->direction,
                          options->intensity.present ? options->intensity.value : 1,

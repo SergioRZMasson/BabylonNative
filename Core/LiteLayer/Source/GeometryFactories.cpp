@@ -21,6 +21,36 @@ static bl_Status factoryMesh(bl_EngineContext engine, bl_String name, bl_Geometr
     return status;
 }
 
+bl_Status bl_createTorus(bl_EngineContext h, const bl_TorusOptions* options, bl_Mesh* out)
+{
+    L_GET(h, L_ENGINE, L_Engine, engine);
+    (void)engine;
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    bl_GeometryData data;
+    L_TRY(bl_createTorusData(h._runtime, options, &data));
+    return factoryMesh(h, {"torus", 5}, &data, out);
+}
+
+bl_Status bl_createGroundFromHeightMap(bl_EngineContext h, bl_String url,
+                                       const bl_HeightMapGroundOptions* options, bl_Mesh* out)
+{
+    L_GET(h, L_ENGINE, L_Engine, engine);
+    (void)engine;
+    if (!out)
+    {
+        return BL_INVALID_ARGUMENT;
+    }
+    size_t vertices;
+    size_t indices;
+    L_TRY(l_groundCounts(h._runtime, options ? &options->ground : NULL, true, &vertices, &indices));
+    bl_GeometryData data;
+    L_TRY(bl_createGroundFromHeightMapData(h._runtime, url, options, &data));
+    return factoryMesh(h, {"ground", 6}, &data, out);
+}
+
 bl_Status bl_createCylinder(bl_EngineContext h, const bl_CylinderOptions* options, bl_Mesh* out)
 {
     L_GET(h, L_ENGINE, L_Engine, engine);

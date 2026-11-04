@@ -67,6 +67,19 @@ namespace Babylon::LiteShaderCompiler
         std::vector<UniformBlock> blocks;
         std::vector<TextureBinding> textures;
         std::string diagnostics;
+        struct StorageBinding
+        {
+            std::string name;
+            uint32_t group{};
+            uint32_t binding{};
+            uint64_t minimumBytes{};
+            uint32_t stage{};
+            bool readOnly{};
+        };
+        std::vector<StorageBinding> storage;
+        uint32_t rawSrvMask{};
+        uint32_t rawUavMask{};
+        uint32_t workgroupSize[3]{};
     };
 
     struct Program
@@ -81,4 +94,6 @@ namespace Babylon::LiteShaderCompiler
     Program CompileD3D11WithInstances(std::string_view vertexSource, std::string_view vertexEntry,
         std::string_view fragmentSource, std::string_view fragmentEntry,
         const std::vector<InstanceAttribute>& instances);
+
+    Stage CompileComputeD3D11(std::string_view source, std::string_view entry);
 }

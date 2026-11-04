@@ -30,7 +30,8 @@ enum L_Kind
     L_ASSET,
     L_ENVIRONMENT,
     L_CUBE,
-    L_ANIMATION
+    L_ANIMATION,
+    L_FREE_CONTROL
 };
 
 struct L_Record
@@ -44,6 +45,7 @@ struct L_Record
     bl_Status (*preDispose)(bl_Runtime*, L_Record*);
     bl_Status cleanupStatus;
     size_t pins;
+    bl_Status (*clone)(bl_Runtime*, L_Record*, bl_String, L_Record**);
 };
 
 struct L_Slot
@@ -63,6 +65,9 @@ struct bl_Runtime
     bl_IOService io;
     bl_AssetService assets;
     bl_ShaderCompilerService2 compiler2;
+    bl_ComputeShaderCompilerService computeCompiler;
+    bool hasComputeCompiler;
+    bool computeUsed;
     bool hasCompiler;
     bool hasAudio;
     bool hasIO;
@@ -70,13 +75,15 @@ struct bl_Runtime
     bool hasCompiler2;
     bl_GltfImportMode gltfImportMode;
     bool destroying;
+    bool mirroredMeshes;
+    bool matrixPrecision;
     uint32_t thread;
     unsigned hostDepth;
     unsigned frameDepth;
     unsigned dispatchDepth;
     L_Record** records;
     L_Slot* slots;
-    size_t freeHeads[L_ANIMATION + 1];
+    size_t freeHeads[L_FREE_CONTROL + 1];
     size_t count;
     size_t capacity;
     uint64_t matrixVersion;

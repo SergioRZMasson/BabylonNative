@@ -145,6 +145,7 @@ bl_Status bl_createArcRotateCamera(bl_Runtime* r, double alpha, double beta, dou
     }
     L_NEW(r, L_ARC_CAMERA, 30, cameraCleanup, L_ArcCamera, c);
     l_initNode(&c->node);
+    c->node.highPrecision = r->matrixPrecision;
     c->properties = {alpha, beta, radius, target, .8, .1, 1000, .9, .9, 1000, 50, 3, 0, 0, 0, 0, 0};
     l_arcCommit(c, &c->properties);
     *out = {r, c->node.record.id};

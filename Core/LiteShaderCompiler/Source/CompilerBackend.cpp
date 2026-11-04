@@ -41,6 +41,12 @@ namespace Babylon::LiteShaderCompiler
         using Resource = tint::inspector::ResourceBinding;
         using Binding = std::pair<uint32_t, uint32_t>;
 
+        void InitializeTint()
+        {
+            static std::once_flag initialized;
+            std::call_once(initialized, [] { tint::Initialize(); });
+        }
+
         uint32_t Align16(uint32_t size)
         {
             return (size + 15u) & ~15u;
@@ -457,19 +463,19 @@ namespace Babylon::LiteShaderCompiler
             Append(bytes, uint16_t{0});
         }
 
-        void Package(Stage& stage, ID3DBlob& bytecode, bool vertex)
+        void Package(Stage& stage, ID3DBlob& bytecode, bool vertex, bool compute = false)
         {
             auto& bytes = stage.bytes;
-            bytes.insert(bytes.end(), {static_cast<uint8_t>(vertex ? 'V' : 'F'), 'S', 'H', 12});
-            Append(bytes, uint32_t{0x424c4954});
-            Append(bytes, uint32_t{0x424c4954});
-            Append(bytes, uint32_t{0});
-            Append(bytes, uint32_t{0});
+            bytes.insert(bytes.end(), {static_cast<uint8_t>(compute ? 'C' : vertex ? 'V' : 'F'), 'S', 'H', 12});
+            Append(bytes, compute ? uint32_t{0} : uint32_t{0x424c4954});
+            Append(bytes, compute ? uint32_t{0} : uint32_t{0x424c4954});
+            Append(bytes, stage.rawSrvMask);
+            Append(bytes, stage.rawUavMask);
             Append(bytes, static_cast<uint16_t>(stage.blocks.size() + stage.textures.size()));
             uint32_t uniformSize = 0;
             for (const auto& block : stage.blocks)
             {
-                AppendUniform(bytes, block.uniformName, static_cast<uint8_t>(bgfx::UniformType::Vec4 | (vertex ? 0 : 0x10)),
+                AppendUniform(bytes, block.uniformName, static_cast<uint8_t>(bgfx::UniformType::Vec4 | (vertex || compute ? 0 : 0x10)),
                     static_cast<uint8_t>(block.registerCount), static_cast<uint16_t>(block.byteOffset),
                     static_cast<uint16_t>(block.registerCount));
                 uniformSize = block.byteOffset + block.registerCount * 16;
@@ -849,8 +855,7 @@ namespace Babylon::LiteShaderCompiler
         std::string_view fragmentSource, std::string_view fragmentEntry,
         const std::vector<InstanceAttribute>& instances)
     {
-        static std::once_flag initialized;
-        std::call_once(initialized, [] { tint::Initialize(); });
+        InitializeTint();
         std::vector<tint::inspector::StageVariable> vertexInputs, vertexOutputs, fragmentInputs, fragmentOutputs;
         std::map<Binding, uint32_t> textureStages;
         Program result;
@@ -908,5 +913,105 @@ namespace Babylon::LiteShaderCompiler
         std::string_view fragmentSource, std::string_view fragmentEntry)
     {
         return CompileD3D11WithInstances(vertexSource, vertexEntry, fragmentSource, fragmentEntry, {});
+    }
+
+    Stage CompileComputeD3D11(std::string_view source, std::string_view entryName)
+    {
+        InitializeTint();
+        const std::string entry(entryName);
+        tint::Source::File file("compute.wgsl", std::string(source));
+        tint::wgsl::reader::Options readerOptions;
+        readerOptions.allowed_features = tint::wgsl::AllowedFeatures::Everything();
+        auto program = tint::wgsl::reader::Parse(&file, readerOptions);
+        if (!program.IsValid())
+            throw std::runtime_error(program.Diagnostics().Str());
+        tint::inspector::Inspector inspector(program);
+        const auto point = inspector.GetEntryPoint(entry);
+        if (inspector.has_error())
+            throw std::runtime_error(inspector.error());
+        if (point.stage != tint::inspector::PipelineStage::kCompute)
+            throw std::invalid_argument("WGSL entry point is not a compute stage.");
+        const auto sourceResources = inspector.GetResourceBindings(entry);
+        for (const auto& resource : sourceResources)
+        {
+            if (resource.resource_type != Resource::ResourceType::kUniformBuffer &&
+                resource.resource_type != Resource::ResourceType::kStorageBuffer &&
+                resource.resource_type != Resource::ResourceType::kReadOnlyStorageBuffer)
+                throw std::runtime_error("This compute service supports uniform and raw storage buffers only.");
+        }
+        auto ir = tint::wgsl::reader::ProgramToLoweredIR(program);
+        if (ir != tint::Success)
+            throw std::runtime_error(ir.Failure().reason);
+        tint::spirv::writer::Options options;
+        options.entry_point_name = entry;
+        auto generated = tint::spirv::writer::Generate(ir.Get(), options);
+        if (generated != tint::Success)
+            throw std::runtime_error(generated.Failure().reason);
+        Stage result;
+        auto words = MergeUniformBlocks(std::move(generated.Get().spirv), sourceResources, result.blocks);
+        for (auto& block : result.blocks)
+            block.members = ReflectMembers(program, {block.group, block.binding});
+        spirv_cross::CompilerHLSL compiler(words);
+        compiler.set_entry_point(entry, spv::ExecutionModelGLCompute);
+        compiler.set_hlsl_options({50, true});
+        const auto resources = compiler.get_shader_resources();
+        for (const auto& buffer : resources.storage_buffers)
+        {
+            const auto binding = BindingOf(compiler, buffer.id);
+            const auto& original = FindResource(sourceResources, binding);
+            const uint32_t stage = static_cast<uint32_t>(result.storage.size());
+            if (stage >= 32)
+                throw std::runtime_error("Compute storage buffers exceed the raw binding mask.");
+            const bool readOnly = original.resource_type == Resource::ResourceType::kReadOnlyStorageBuffer;
+            result.storage.push_back({original.variable_name, binding.first, binding.second,
+                original.size, stage, readOnly});
+            compiler.set_decoration(buffer.id, spv::DecorationDescriptorSet, 0);
+            compiler.set_decoration(buffer.id, spv::DecorationBinding, stage);
+        }
+        const std::string hlsl = compiler.compile();
+        const auto nativeEntry = compiler.get_cleansed_entry_point_name(entry, spv::ExecutionModelGLCompute);
+        Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
+        Microsoft::WRL::ComPtr<ID3DBlob> diagnostics;
+        const HRESULT status = D3DCompile(hlsl.data(), hlsl.size(), file.path.c_str(), nullptr, nullptr,
+            nativeEntry.c_str(), "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &bytecode, &diagnostics);
+        if (FAILED(status))
+            throw std::runtime_error(diagnostics
+                ? std::string(static_cast<const char*>(diagnostics->GetBufferPointer()), diagnostics->GetBufferSize())
+                : "FXC compute compilation failed without diagnostics.");
+        Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+        if (FAILED(D3DReflect(bytecode->GetBufferPointer(), bytecode->GetBufferSize(), IID_PPV_ARGS(&reflection))))
+            throw std::runtime_error("Compute native reflection failed.");
+        D3D11_SHADER_DESC description{};
+        if (FAILED(reflection->GetDesc(&description)))
+            throw std::runtime_error("Compute native resource reflection failed.");
+        std::set<uint32_t> active;
+        for (uint32_t index = 0; index < description.BoundResources; ++index)
+        {
+            D3D11_SHADER_INPUT_BIND_DESC binding{};
+            if (FAILED(reflection->GetResourceBindingDesc(index, &binding)))
+                throw std::runtime_error("Compute native resource descriptor failed.");
+            if (binding.Type == D3D_SIT_CBUFFER)
+                continue;
+            const auto buffer = std::find_if(result.storage.begin(), result.storage.end(),
+                [&](const auto& value) { return value.stage == binding.BindPoint; });
+            if (buffer == result.storage.end() || binding.BindCount != 1 ||
+                (buffer->readOnly ? binding.Type != D3D_SIT_BYTEADDRESS :
+                    binding.Type != D3D_SIT_UAV_RWBYTEADDRESS))
+                throw std::runtime_error("Compute native storage does not match raw reflection.");
+            active.insert(binding.BindPoint);
+            (buffer->readOnly ? result.rawSrvMask : result.rawUavMask) |= 1u << binding.BindPoint;
+        }
+        result.storage.erase(std::remove_if(result.storage.begin(), result.storage.end(),
+            [&](const auto& value) { return !active.contains(value.stage); }), result.storage.end());
+        reflection->GetThreadGroupSize(result.workgroupSize, result.workgroupSize + 1,
+            result.workgroupSize + 2);
+        if (!result.workgroupSize[0] || !result.workgroupSize[1] || !result.workgroupSize[2])
+            throw std::runtime_error("Compute workgroup size was not reflected.");
+        result.diagnostics = program.Diagnostics().Str();
+        if (diagnostics)
+            result.diagnostics.append(static_cast<const char*>(diagnostics->GetBufferPointer()),
+                diagnostics->GetBufferSize());
+        Package(result, *bytecode.Get(), true, true);
+        return result;
     }
 }

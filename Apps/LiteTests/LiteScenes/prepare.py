@@ -5,7 +5,9 @@ import hashlib
 import json
 from pathlib import Path
 
-SCENES = (159, 161, 163, 168, 200, 247, 248, 249, 256, 257, 258, 259, 260, 266)
+M0_SCENES = (159, 161, 163, 168, 200, 247, 248, 249, 256, 257, 258, 259, 260, 266)
+M1_SCENES = (16, 43, 162, 165, 201, 204, 213, 268, 270, 274, 278, 279)
+SCENES = M0_SCENES + M1_SCENES
 PIN = "286525f8041dd9adc72b2c9962e8bff4d9aeb764"
 
 

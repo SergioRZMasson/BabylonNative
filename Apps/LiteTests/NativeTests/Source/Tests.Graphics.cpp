@@ -1,6 +1,7 @@
 #include "TestRuntime.h"
 #include "LiteInternal.h"
 #include "DirectionalLightInternal.h"
+#include "ThinCullingInternal.h"
 #include <babylon_lite_shader_compiler.h>
 #include <bgfx/bgfx.h>
 
@@ -257,6 +258,9 @@ namespace
         }
     };
 }
+
+#include "Tests.M1Graphics.inc"
+#include "Tests.M1CloneGraphics.inc"
 
 TEST_F(LiteNativeGraphics, ClearColorUsesGpuUnormNearestEven)
 {

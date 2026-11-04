@@ -221,7 +221,7 @@ static bool appendNormalSource(bl_Runtime* runtime, L_Text* vertex, L_Text* frag
 bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Text* fragment,
                        bool doubleSided, bool baseImage, bool baseUv1, bool ormUv1,
                        const L_Material* material, bool tangents, bool colors, bool flatNormal,
-                       bool cpuSkin)
+                       bool cpuSkin, bool instanceColors)
 {
     tangents = tangents && !flatNormal;
     bool specGloss = material && material->pbrSpecularGlossiness;
@@ -342,6 +342,26 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
             return BL_OUT_OF_MEMORY;
         }
     }
+    if (instanceColors)
+    {
+        const char* original = "@builtin(position)clipPos:vec4f,";
+        const char* varying = "@builtin(position)clipPos:vec4f,@location(7)vInstanceColor:vec4f,";
+        if (!instances || !replacePbrText(runtime, vertex, original, varying) ||
+            !replacePbrText(runtime, fragment, original, varying) ||
+            !replacePbrText(runtime, vertex, "@location(6)world3:vec4f)->VertexOutput",
+                            "@location(6)world3:vec4f,@location(10)instanceColor:vec4f)"
+                            "->VertexOutput") ||
+            !replacePbrText(runtime, vertex, "out.uv=uv;",
+                            "out.uv=uv;out.vInstanceColor=instanceColor;") ||
+            !replacePbrText(runtime, fragment, "var baseColor=baseColorSample.rgb;",
+                            "var baseColor=baseColorSample.rgb;"
+                            "baseColor*=input.vInstanceColor.rgb;") ||
+            !replacePbrText(runtime, fragment, "var alpha=baseColorSample.a;",
+                            "var alpha=baseColorSample.a;alpha*=input.vInstanceColor.a;"))
+        {
+            return BL_SHADER_ERROR;
+        }
+    }
     if (colors)
     {
         const char* varying = "@location(2)uv:vec2f,@location(6)vColor:vec4f";
@@ -449,7 +469,7 @@ bl_Status l_pbrSources(bl_Runtime* runtime, bool instances, L_Text* vertex, L_Te
         {
             return BL_OUT_OF_MEMORY;
         }
-        if (colors && !material->testing && !material->blending &&
+        if ((colors || instanceColors) && !material->testing && !material->blending &&
             !replacePbrText(runtime, fragment, "return vec4f(color,alpha*material.materialAlpha);",
                             "return vec4f(color,1.0);"))
         {

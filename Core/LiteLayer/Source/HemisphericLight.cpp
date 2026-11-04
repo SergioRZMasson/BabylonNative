@@ -1,5 +1,27 @@
 #include "HemisphericLightInternal.h"
 
+static bl_Status cloneHemi(bl_Runtime* r, L_Record* source, bl_String name, L_Record** out)
+{
+    bl_HemisphericLightProperties properties;
+    L_TRY(bl_getHemisphericLightProperties({r, source->id}, &properties));
+    const bl_HemisphericLightOptions options = {
+        true, properties.direction, {true, properties.intensity}};
+    bl_HemisphericLight handle;
+    L_TRY(bl_createHemisphericLight(r, &options, &handle));
+    bl_Status status = bl_setHemisphericLightProperties(handle, &properties);
+    if (status == BL_OK)
+    {
+        status = bl_setNodeName({r, handle._id}, name);
+    }
+    if (status != BL_OK)
+    {
+        bl_disposeNode({r, handle._id});
+        return status;
+    }
+    *out = l_peek(r, handle._id);
+    return BL_OK;
+}
+
 static void lightCleanup(bl_Runtime* r, L_Record* record)
 {
     l_cleanNode(r, (L_Node*)record);
@@ -46,6 +68,8 @@ bl_Status bl_createHemisphericLight(bl_Runtime* r, const bl_HemisphericLightOpti
     }
     L_NEW(r, L_LIGHT, 30, lightCleanup, L_HemisphericLight, light);
     l_initNode(&light->light.node);
+    light->light.node.record.clone = cloneHemi;
+    light->light.node.highPrecision = r->matrixPrecision;
     light->light.kind = L_LIGHT_HEMISPHERIC;
     light->properties = {direction, intensity, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}};
     *out = {r, light->light.node.record.id};

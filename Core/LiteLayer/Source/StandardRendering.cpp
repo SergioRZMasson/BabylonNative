@@ -1,9 +1,10 @@
 #include "LiteInternal.h"
 #include "LightInternal.h"
+#include "PbrInternal.h"
 
 static void standardGraphicsCleanup(bl_Runtime* r, L_Material* owner)
 {
-    for (unsigned i = 0; i < 2; ++i)
+    for (unsigned i = 0; i < 6; ++i)
     {
         L_Material* pipeline = owner->standardVariants[i];
         if (pipeline)
@@ -18,13 +19,15 @@ static void standardGraphicsCleanup(bl_Runtime* r, L_Material* owner)
 }
 
 bl_Status l_prepareStandard(bl_Runtime* r, L_Engine* engine, L_Material* owner,
-                            bool disableLighting, L_Material** out)
+                            bool disableLighting, L_Material** out, unsigned instanceSlots)
 {
     if (owner->engine && owner->engine != engine)
     {
         return BL_WRONG_ENGINE;
     }
-    unsigned index = disableLighting ? 1 : 0;
+    unsigned index = (disableLighting ? 1 : 0) + (instanceSlots == 5   ? 4
+                                                  : instanceSlots == 4 ? 2
+                                                                       : 0);
     L_Material* pipeline = owner->standardVariants[index];
     if (!pipeline)
     {
@@ -33,7 +36,7 @@ bl_Status l_prepareStandard(bl_Runtime* r, L_Engine* engine, L_Material* owner,
         {
             return BL_OUT_OF_MEMORY;
         }
-        bl_Status status = l_standardSources(r, pipeline, disableLighting);
+        bl_Status status = l_standardSources(r, pipeline, disableLighting, instanceSlots);
         if (status == BL_OK)
         {
             status = l_prepareMaterial(r, engine, pipeline);
@@ -108,7 +111,9 @@ bl_Status l_prepareStandardPackets(bl_Runtime* r, L_Scene* scene, bool force, ui
             continue;
         }
         L_StandardPacket* packet = scene->standardPackets + i;
-        if (!force && packet->meshId == n->record.id && packet->materialId == identity._id)
+        unsigned slots = mesh->hasInstances ? mesh->instanceColors ? 5 : 4 : 0;
+        if (!force && packet->meshId == n->record.id && packet->materialId == identity._id &&
+            packet->pipeline && packet->pipeline->instanceSlots == slots)
         {
             continue;
         }
@@ -117,7 +122,8 @@ bl_Status l_prepareStandardPackets(bl_Runtime* r, L_Scene* scene, bool force, ui
                             ? material->standardProperties.disableLighting
                             : material->standardSnapshot.disableLighting;
         L_Material* pipeline;
-        L_TRY(l_prepareStandard(r, scene->engine, material, lighting, &pipeline));
+        L_TRY(l_prepareStandard(r, scene->engine, material, lighting, &pipeline,
+                                mesh->hasInstances ? mesh->instanceColors ? 5 : 4 : 0));
     }
     for (size_t i = 0; i < scene->memberCount; ++i)
     {
@@ -134,7 +140,10 @@ bl_Status l_prepareStandardPackets(bl_Runtime* r, L_Scene* scene, bool force, ui
             continue;
         }
         L_StandardPacket* packet = scene->standardPackets + i;
-        if (!force && packet->meshId == n->record.id && packet->materialId == identity._id)
+        L_Mesh* currentMesh = (L_Mesh*)n;
+        unsigned slots = currentMesh->hasInstances ? currentMesh->instanceColors ? 5 : 4 : 0;
+        if (!force && packet->meshId == n->record.id && packet->materialId == identity._id &&
+            packet->pipeline && packet->pipeline->instanceSlots == slots)
         {
             continue;
         }
@@ -150,7 +159,11 @@ bl_Status l_prepareStandardPackets(bl_Runtime* r, L_Scene* scene, bool force, ui
         packet->properties = material->standardProperties;
         packet->transparent = material->standardProperties.alpha < 1;
         packet->culling = features->backFaceCulling;
-        packet->pipeline = material->standardVariants[features->disableLighting ? 1 : 0];
+        packet->alphaToCoverage = material->alphaToCoverage;
+        L_Mesh* mesh = (L_Mesh*)n;
+        unsigned variant = (features->disableLighting ? 1 : 0) +
+                           (mesh->hasInstances ? mesh->instanceColors ? 4 : 2 : 0);
+        packet->pipeline = material->standardVariants[variant];
     }
     return BL_OK;
 }
@@ -241,7 +254,9 @@ bl_Status l_standardValues(bl_Runtime* r, L_Engine* engine, L_Scene* scene,
     sceneData[85] = 1;
     sceneData[86] = 1;
     float meshData[36] = {};
-    matrixFloats(meshData, &mesh->node.world);
+    bl_Mat4 world;
+    l_renderWorld(scene, &mesh->node, &world);
+    matrixFloats(meshData, &world);
     uint32_t count = (uint32_t)scene->packedLightCount;
     memcpy(meshData + 16, &count, sizeof(count));
     for (uint32_t i = 0; i < count; ++i)
@@ -315,7 +330,29 @@ bl_Status bl_rebuildMaterial(bl_SceneContext h, bl_Material identity,
     {
         return l_prepareStandardPackets(h._runtime, scene, true, identity._id);
     }
-    return l_prepareMaterial(h._runtime, scene->engine, material);
+    if (material->record.kind == L_PBR)
+    {
+        for (size_t i = 0; i < scene->pbrCapacity; ++i)
+        {
+            if (scene->pbrPackets[i].material == material)
+            {
+                scene->pbrPackets[i].alphaToCoverage = material->alphaToCoverage;
+            }
+        }
+    }
+    L_TRY(l_snapshotAlpha(h._runtime, scene, material));
+    for (size_t i = 0; i < scene->memberCount; ++i)
+    {
+        L_Node* node = scene->members[i];
+        if (node->record.kind == L_MESH && !node->record.disposed &&
+            l_meshMaterial((L_Mesh*)node)._id == identity._id)
+        {
+            L_Material* pipeline;
+            L_TRY(l_prepareMeshMaterial(h._runtime, scene->engine, material, (L_Mesh*)node,
+                                        &pipeline));
+        }
+    }
+    return BL_OK;
 }
 
 bl_Status bl_rebuildSceneRenderables(bl_SceneContext h)
